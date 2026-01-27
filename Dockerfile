@@ -7,8 +7,8 @@ WORKDIR /build
 # Copy package files
 COPY package.json bun.lock ./
 
-# Install dependencies
-RUN bun install --frozen-lockfile --production=false
+# Install dependencies (include devDependencies for build)
+RUN bun install --frozen-lockfile
 
 # Copy source code
 COPY . .
@@ -23,7 +23,7 @@ WORKDIR /app
 
 # Install runtime dependencies
 RUN apk add --no-cache \
-    sqlite-vec \
+    curl \
     && rm -rf /var/cache/apk/*
 
 # Copy built artifacts from builder

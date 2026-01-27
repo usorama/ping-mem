@@ -422,10 +422,14 @@ export class SSEPingMemServer {
 
   /**
    * Start the SSE server
+   *
+   * Note: StreamableHTTPServerTransport doesn't need to be started manually.
+   * It handles connections per-request. The start() method is a no-op.
    */
   async start(): Promise<void> {
-    await this.transport.start();
-    console.log("[SSE Server] Started (waiting for first HTTP request)");
+    // Transport doesn't need explicit start for StreamableHTTP
+    // It manages connections per-request
+    console.log("[SSE Server] Ready (waiting for HTTP requests)");
   }
 
   /**
