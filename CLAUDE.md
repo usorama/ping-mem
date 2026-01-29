@@ -1,9 +1,9 @@
 # CLAUDE.md - ping-mem
 
-**Version**: 1.0.0
+**Version**: 1.1.0
 **Status**: Standalone Project
-**Last Updated**: 2026-01-27
-**Project**: Universal Memory Layer for AI Agents
+**Last Updated**: 2026-01-29
+**Project**: Universal Memory Layer for AI Agents + Deterministic Code Ingestion
 
 ---
 
@@ -12,6 +12,73 @@
 **ping-mem** is a **Universal Memory Layer** for AI agents that provides persistent, intelligent, and contextually-aware memory across sessions, tools, and applications. It serves as reusable infrastructure that any AI application can leverage.
 
 **Key Insight**: ping-mem is an application that's self-contained for use of AI Agents from other applications and use cases, serving deterministic, repeatable, reproducable memory with/without history, so Agents are always in the know.
+
+---
+
+## Code Ingestion System (v1.1.0)
+
+**ping-mem now includes a deterministic, time-aware codebase understanding system** that ingests code + git history and provides:
+
+### Core Capabilities
+
+1. **Deterministic Project Scanning**
+   - Merkle tree hashing for project-wide integrity
+   - Content-addressable IDs (SHA-256 based)
+   - Manifest-based change detection (`.ping-mem/manifest.json`)
+   - Project ID derived from git identity
+
+2. **Code Chunking**
+   - Separates code vs comments vs docstrings
+   - TypeScript/JavaScript: `//` and `/* */` comments
+   - Python: `#` comments and `"""` / `'''` docstrings
+   - Deterministic chunk IDs for reproducibility
+
+3. **Git History Ingestion**
+   - Full commit DAG extraction
+   - File change tracking (A/M/D/R/C)
+   - Unified diff parsing with hunk→chunk mapping
+   - Commit messages for explicit "why" provenance
+
+4. **Temporal Code Graph (Neo4j)**
+   - Bi-temporal model for point-in-time queries
+   - Nodes: Project, File, Chunk, Commit
+   - Relationships: HAS_FILE, HAS_CHUNK, MODIFIES, CHANGES
+   - Queries: files at time, file history, commit timeline
+
+5. **Semantic Code Search (Qdrant)**
+   - Deterministic vectorization (hash-based, no ML)
+   - Full provenance metadata per chunk
+   - Search by query with project/file/type filters
+
+6. **Explicit-only "Why" Extraction**
+   - Parses commit messages for reasons
+   - Supports: `Why:`, `Reason:`, `Fixes #`, `Closes #`, ADR refs
+   - **Never guesses or infers** – only explicit sources
+
+### Usage Example
+
+```bash
+# Ingest a project (via MCP tool)
+codebase_ingest({
+  projectDir: "/path/to/project",
+  forceReingest: false
+})
+
+# Search code
+codebase_search({
+  query: "authentication logic",
+  projectId: "...",
+  type: "code",
+  limit: 10
+})
+
+# Query timeline
+codebase_timeline({
+  projectId: "...",
+  filePath: "src/auth.ts",  # optional
+  limit: 50
+})
+```
 
 ---
 
@@ -44,22 +111,25 @@ bun run start
 bun run start:sse
 ```
 
-### Full Stack (with Neo4j and Qdrant)
+### Full Stack (with Neo4j and Qdrant) - Required for Code Ingestion
 
 ```bash
-# Start dependencies with Docker (if you have docker-compose.yml)
+# Start dependencies with Docker
 docker-compose up -d neo4j qdrant
 
-# Set environment variables
+# Set environment variables (REQUIRED for ingestion)
 export NEO4J_URI="bolt://localhost:7687"
 export NEO4J_USERNAME="neo4j"
 export NEO4J_PASSWORD="your-password"
 export QDRANT_URL="http://localhost:6333"
-export OPENAI_API_KEY="your-openai-key"
+export QDRANT_COLLECTION_NAME="ping-mem-vectors"
+export QDRANT_VECTOR_DIMENSIONS="768"
 
-# Run with full features
+# Run with full ingestion capabilities
 bun run dist/mcp/cli.js
 ```
+
+**Note**: Neo4j and Qdrant are **required** for code ingestion features. Core memory operations work without them.
 
 ---
 
@@ -240,16 +310,69 @@ curl -X POST "$BASE/context/checkpoint" \
 │  └─────────────────────────────────────────────────────┘    │
 │                          │                                   │
 │  ┌─────────────────────────────────────────────────────┐    │
+│  │              Ingestion Layer (NEW)                  │    │
+│  │  • ProjectScanner - Merkle tree + manifest          │    │
+│  │  • CodeChunker - Code vs comment separation         │    │
+│  │  • GitHistoryReader - Commit DAG + diffs            │    │
+│  │  • IngestionService - Orchestrates pipeline         │    │
+│  │  • DeterministicVectorizer - Hash-based vectors     │    │
+│  │  • CodeIndexer - Qdrant code search                 │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                          │                                   │
+│  ┌─────────────────────────────────────────────────────┐    │
 │  │              Storage Layer                           │    │
-│  │  • SQLite (bun:sqlite) - Primary storage            │    │
-│  │  • Neo4j - Knowledge graph (optional)               │    │
-│  │  • Qdrant - Vector search (optional)                │    │
+│  │  • SQLite (bun:sqlite) - Core memory storage        │    │
+│  │  • Neo4j - Temporal code graph (required for ingestion) │    │
+│  │  • Qdrant - Semantic search (required for ingestion) │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                               │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ### Component Details
+
+#### 0. Ingestion Layer (`src/ingest/`, `src/search/`)
+**NEW in v1.1.0** - Deterministic code ingestion system
+
+- **ProjectScanner** (`src/ingest/ProjectScanner.ts`)
+  - Merkle tree hashing for project integrity
+  - Content-addressable project/file IDs
+  - Manifest storage (`.ping-mem/manifest.json`)
+  - Change detection for incremental updates
+
+- **CodeChunker** (`src/ingest/CodeChunker.ts`)
+  - Separates code vs comments vs docstrings
+  - Supports TypeScript, JavaScript, Python
+  - Deterministic chunk IDs (SHA-256 based)
+  - Line number tracking for provenance
+
+- **GitHistoryReader** (`src/ingest/GitHistoryReader.ts`)
+  - Full commit DAG extraction
+  - File change tracking (A/M/D/R/C)
+  - Unified diff parsing with hunk ranges
+  - Commit message parsing for "why" provenance
+
+- **IngestionService** (`src/ingest/IngestionService.ts`)
+  - High-level API for agents
+  - Methods: `ingestProject()`, `verifyProject()`, `searchCode()`, `queryTimeline()`
+  - Explicit-only "why" extraction (never inferred)
+
+- **TemporalCodeGraph** (`src/graph/TemporalCodeGraph.ts`)
+  - Neo4j persistence for temporal queries
+  - Nodes: Project, File, Chunk, Commit
+  - Relationships: HAS_FILE, HAS_CHUNK, MODIFIES, CHANGES
+  - Queries: files at time, file history, commit timeline
+
+- **DeterministicVectorizer** (`src/search/DeterministicVectorizer.ts`)
+  - Hash-based feature vectors (no ML)
+  - Bit-for-bit reproducible
+  - N-gram generation (1-3 grams)
+  - L2 normalization
+
+- **CodeIndexer** (`src/search/CodeIndexer.ts`)
+  - Qdrant indexing for code chunks
+  - Full provenance metadata per chunk
+  - Semantic search with filters
 
 #### 1. MemoryManager (`src/memory/`)
 - **Purpose**: Core CRUD operations for memory items
@@ -317,6 +440,7 @@ curl -X POST "$BASE/context/checkpoint" \
 
 All tools are prefixed with `ping_mem_` when loaded in Claude Code:
 
+#### Context Tools (Core)
 | Tool | Purpose |
 |------|---------|
 | `context_session_start` | Start new session with project tracking |
@@ -330,6 +454,14 @@ All tools are prefixed with `ping_mem_` when loaded in Claude Code:
 | `context_query_relationships` | Query entity graph |
 | `context_hybrid_search` | Combined semantic/graph search |
 | `context_get_lineage` | Trace entity lineage |
+
+#### Codebase Tools (NEW in v1.1.0)
+| Tool | Purpose |
+|------|---------|
+| `codebase_ingest` | Ingest project with deterministic hashing |
+| `codebase_verify` | Verify manifest integrity |
+| `codebase_search` | Semantic code search with provenance |
+| `codebase_timeline` | Query temporal history with explicit "why" |
 
 ---
 
@@ -374,14 +506,17 @@ docker run -d \
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PING_MEM_DB_PATH` | No | `:memory:` | SQLite database path |
-| `PING_MEM_VECTOR_SEARCH` | No | `false` | Enable vector search (requires Qdrant) |
-| `NEO4J_URI` | For graph | | Neo4j Bolt URI (e.g., `bolt://localhost:7687`) |
-| `NEO4J_USERNAME` | For graph | `neo4j` | Neo4j username |
-| `NEO4J_PASSWORD` | For graph | | Neo4j password |
-| `QDRANT_URL` | For vectors | | Qdrant REST URL (e.g., `http://localhost:6333`) |
-| `OPENAI_API_KEY` | For embeddings | | OpenAI API key for vector embeddings |
+| `NEO4J_URI` | **For ingestion** | | Neo4j Bolt URI (e.g., `bolt://localhost:7687`) |
+| `NEO4J_USERNAME` | **For ingestion** | `neo4j` | Neo4j username |
+| `NEO4J_PASSWORD` | **For ingestion** | | Neo4j password |
+| `QDRANT_URL` | **For ingestion** | | Qdrant REST URL (e.g., `http://localhost:6333`) |
+| `QDRANT_COLLECTION_NAME` | **For ingestion** | `ping-mem-vectors` | Qdrant collection name |
+| `QDRANT_VECTOR_DIMENSIONS` | **For ingestion** | `768` | Vector dimensions |
+| `OPENAI_API_KEY` | Optional | | OpenAI API key (only for ML-based embeddings) |
 | `PING_MEM_PORT` | No | `3000` | HTTP server port |
 | `PING_MEM_TRANSPORT` | No | `rest` | HTTP transport mode (`rest` or `sse`) |
+
+**Note**: Neo4j and Qdrant are **required for code ingestion** (v1.1.0+), but core memory operations work with SQLite only.
 
 ### Configuration Priority
 
@@ -423,6 +558,8 @@ bun run dist/mcp/cli.js
 ```
 ping-mem/
 ├── src/
+│   ├── config/            # Runtime configuration
+│   │   └── runtime.ts          # Centralized service initialization
 │   ├── mcp/               # MCP server implementation
 │   │   ├── PingMemServer.ts    # Main MCP server
 │   │   └── cli.ts              # CLI entry point
@@ -434,11 +571,25 @@ ping-mem/
 │   │   ├── rest-client.ts      # REST client
 │   │   ├── sse-client.ts       # SSE client
 │   │   └── types.ts            # Client types
+│   ├── ingest/            # Code ingestion system (NEW)
+│   │   ├── ProjectScanner.ts   # Merkle tree + manifest
+│   │   ├── ManifestStore.ts    # Manifest persistence
+│   │   ├── CodeChunker.ts      # Code vs comment separation
+│   │   ├── GitHistoryReader.ts # Git commit + diff parsing
+│   │   ├── IngestionOrchestrator.ts # Pipeline coordinator
+│   │   ├── IngestionService.ts # High-level agent API
+│   │   ├── types.ts            # Type definitions
+│   │   └── index.ts            # Exports
 │   ├── graph/             # Knowledge graph layer
+│   │   ├── Neo4jClient.ts      # Neo4j connection
+│   │   ├── TemporalCodeGraph.ts # Bi-temporal code graph (NEW)
 │   │   ├── EntityExtractor.ts  # NER
 │   │   ├── GraphManager.ts     # Graph operations
 │   │   └── RelationshipManager.ts
 │   ├── search/            # Search engines
+│   │   ├── QdrantClient.ts     # Qdrant connection
+│   │   ├── CodeIndexer.ts      # Code search (NEW)
+│   │   ├── DeterministicVectorizer.ts # Hash-based vectors (NEW)
 │   │   ├── VectorIndex.ts      # Vector search
 │   │   ├── HybridSearchEngine.ts
 │   │   ├── LineageEngine.ts
@@ -448,9 +599,12 @@ ping-mem/
 │   ├── storage/           # SQLite event store
 │   ├── types/             # TypeScript definitions
 │   └── validation/        # Input validation
+├── examples/              # Usage examples (NEW)
+│   └── resume-tracking/   # Resume tracking demo
 ├── dist/                  # Compiled JavaScript
 ├── package.json
 ├── tsconfig.json
+├── IMPLEMENTATION_SUMMARY.md # v1.1.0 implementation details
 └── README.md
 ```
 
@@ -513,9 +667,10 @@ ping-mem is designed as **universal infrastructure**. Potential consumers:
 - Future: WebSocket, gRPC
 
 ### 3. Storage Flexibility
-- **Default**: SQLite (zero dependencies)
-- **Optional**: Neo4j (knowledge graph)
-- **Optional**: Qdrant (vector search)
+- **Core Memory**: SQLite (zero dependencies, always available)
+- **Ingestion System** (v1.1.0): Neo4j + Qdrant **required at startup**
+  - Neo4j: Temporal code graph (mandatory for ingestion)
+  - Qdrant: Semantic code search (mandatory for ingestion)
 - **Future**: PostgreSQL, Redis
 
 ### 4. Event Sourcing
@@ -544,12 +699,44 @@ ping-mem is designed as **universal infrastructure**. Potential consumers:
 ## Documentation
 
 - **README.md**: Quick start and basic usage
+- **IMPLEMENTATION_SUMMARY.md**: v1.1.0 ingestion system implementation details
 - **src/client/README.md**: Client SDK documentation
 - **rad-engineer docs**: `/Users/umasankr/Projects/rad-engineer-v3/docs/ping-mem/`
   - BRIEF.md: Executive summary
   - ARCHITECTURE.md: Full technical architecture
   - PRD.md: Product requirements
   - SPECIFICATION.md: Detailed specifications
+
+---
+
+## Roadmap & Pending Work
+
+### Completed (v1.1.0)
+- ✅ Deterministic project scanning with Merkle tree hashing
+- ✅ Code chunking (code vs comments vs docstrings)
+- ✅ Git history ingestion (commit DAG + diffs)
+- ✅ Neo4j temporal code graph with bi-temporal queries
+- ✅ Deterministic vectorization (hash-based, no ML)
+- ✅ Qdrant code indexing with full provenance
+- ✅ MCP/REST APIs for ingest, search, timeline
+- ✅ Explicit-only "why" extraction from commit messages
+
+### In Progress
+- 🔄 **Project folder generalization** - Extend ingestion model to non-code projects (resumes, job tracking, etc.)
+  - Work files: `src/ingest/UnifiedIngestionOrchestrator.ts`, `src/ingest/UnifiedIngestionService.ts`
+  - Status: WIP, untracked files in working directory
+
+### Pending (Future Work)
+- ⏳ **Symbol extraction** - AST-based parsing for functions, classes, variables
+  - Will enable finer-grained queries at symbol level
+  - Planned for v1.2.0
+
+- ⏳ **Differential queries** - "What changed between commit A and B?"
+  - Temporal diff between arbitrary points in time
+
+- ⏳ **LLM-powered summarization** (optional layer)
+  - Human-friendly explanations
+  - Always backed by explicit provenance
 
 ---
 
@@ -619,6 +806,7 @@ curl https://api.openai.com/v1/embeddings \
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.1.0 | 2026-01-29 | **Deterministic Temporal Code Ingestion** - ProjectScanner, CodeChunker, GitHistoryReader, TemporalCodeGraph, DeterministicVectorizer, CodeIndexer, IngestionService, MCP codebase tools |
 | 1.0.0 | 2026-01-27 | Initial standalone release |
 
 ---
