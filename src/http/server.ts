@@ -12,6 +12,7 @@ import { SSEPingMemServer, createDefaultSSEConfig } from "./sse-server.js";
 import { RESTPingMemServer, createDefaultRESTConfig } from "./rest-server.js";
 import type { HTTPTransportType } from "./types.js";
 import { createRuntimeServices, loadRuntimeConfig } from "../config/runtime.js";
+import { IngestionService } from "../ingest/IngestionService.js";
 
 // ============================================================================
 // Server Factory
@@ -26,6 +27,12 @@ import { createRuntimeServices, loadRuntimeConfig } from "../config/runtime.js";
 export async function startHTTPServer(): Promise<void> {
   const runtimeConfig = loadRuntimeConfig();
   const services = await createRuntimeServices();
+
+  // Create IngestionService for codebase_* tools
+  const ingestionService = new IngestionService({
+    neo4jClient: services.neo4jClient,
+    qdrantClient: services.qdrantClient,
+  });
 
   const transport = (process.env.PING_MEM_TRANSPORT as HTTPTransportType) ?? "streamable-http";
   const port = parseInt(process.env.PING_MEM_PORT ?? "3000");
@@ -57,6 +64,7 @@ export async function startHTTPServer(): Promise<void> {
       graphManager: services.graphManager,
       lineageEngine: services.lineageEngine,
       evolutionEngine: services.evolutionEngine,
+      ingestionService,
     });
   } else {
     // SSE / Streamable HTTP mode
@@ -77,6 +85,7 @@ export async function startHTTPServer(): Promise<void> {
       graphManager: services.graphManager,
       lineageEngine: services.lineageEngine,
       evolutionEngine: services.evolutionEngine,
+      ingestionService,
     });
   }
 

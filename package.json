@@ -5,7 +5,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "ping-mem": "./dist/cli.js"
+    "ping-mem": "./dist/cli.js",
+    "ping-mem-mcp": "./dist/mcp/cli.js",
+    "ping-mem-http": "./dist/http/index.js"
   },
   "exports": {
     ".": {
@@ -27,6 +29,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "postinstall": "bun run build || true",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "typecheck": "tsc --noEmit",
@@ -34,7 +37,14 @@
     "start": "bun run dist/http/index.js",
     "start:sse": "PING_MEM_TRANSPORT=sse bun run dist/http/index.js",
     "start:rest": "PING_MEM_TRANSPORT=rest bun run dist/http/index.js",
+    "start:mcp": "bun run dist/mcp/cli.js",
+    "setup": "bash scripts/setup.sh",
+    "setup:docker": "docker compose up -d",
+    "setup:docker-only": "bash scripts/setup.sh --docker-only",
+    "health": "curl -sf http://localhost:6333/health && curl -sf http://localhost:7474 && curl -sf http://localhost:3000/health && echo 'All services healthy'",
     "diagnostics:tsc-sarif": "bun run src/diagnostics/tsc-sarif.ts",
+    "diagnostics:eslint-sarif": "bun run src/diagnostics/eslint-sarif.ts",
+    "diagnostics:prettier-sarif": "bun run src/diagnostics/prettier-sarif.ts",
     "diagnostics:collect": "bun run src/cli.ts collect"
   },
   "keywords": [

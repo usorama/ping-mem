@@ -5,6 +5,7 @@ import type {
   FindingInput,
   NormalizedFinding,
 } from "./types.js";
+import type { SymbolAttributor } from "./SymbolAttributor.js";
 
 export function normalizeSeverity(level?: string): DiagnosticSeverity {
   switch ((level ?? "").toLowerCase()) {
@@ -32,7 +33,8 @@ export function normalizeFilePath(filePath: string): string {
 
 export function normalizeFinding(
   input: FindingInput,
-  analysisId: string
+  analysisId: string,
+  symbolAttributor?: SymbolAttributor | undefined
 ): NormalizedFinding {
   const normalized: NormalizedFinding = {
     findingId: "",
@@ -51,15 +53,29 @@ export function normalizeFinding(
   if (input.chunkId !== undefined) normalized.chunkId = input.chunkId;
   if (input.fingerprint !== undefined) normalized.fingerprint = input.fingerprint;
 
+  // Attribute to symbol if available
+  if (symbolAttributor && normalized.startLine !== undefined) {
+    const attribution = symbolAttributor.findSymbolForLocation(
+      normalized.filePath,
+      normalized.startLine
+    );
+    if (attribution) {
+      normalized.symbolId = attribution.symbolId;
+      normalized.symbolName = attribution.symbolName;
+      normalized.symbolKind = attribution.symbolKind;
+    }
+  }
+
   normalized.findingId = computeFindingId(normalized);
   return normalized;
 }
 
 export function normalizeFindings(
   inputs: FindingInput[],
-  analysisId: string
+  analysisId: string,
+  symbolAttributor?: SymbolAttributor | undefined
 ): NormalizedFinding[] {
-  const normalized = inputs.map((input) => normalizeFinding(input, analysisId));
+  const normalized = inputs.map((input) => normalizeFinding(input, analysisId, symbolAttributor));
   return normalized.sort((a, b) => sortFindingKey(a).localeCompare(sortFindingKey(b)));
 }
 

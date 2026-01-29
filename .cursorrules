@@ -1,0 +1,98 @@
+# ping-mem Integration Rules for Cursor IDE
+
+## MANDATORY: Use ping-mem for ALL Codebase Operations
+
+This project uses **ping-mem** as its Universal Memory Layer. You MUST use ping-mem
+tools instead of traditional file search tools (grep, ripgrep, find).
+
+## Required Workflow
+
+### On Session Start
+1. Call `codebase_verify` to check if manifest is current
+2. If changes detected or first time, call `codebase_ingest` with `projectDir`
+
+### For Code Questions
+- **USE**: `codebase_search` with natural language query
+- **DO NOT USE**: grep, ripgrep, find, or manual file reading for discovery
+
+### For History Questions
+- **USE**: `codebase_timeline` with projectId and optional filePath
+- **DO NOT USE**: git log, git blame for understanding "why"
+
+### For Saving Decisions
+- **USE**: `context_save` with `extractEntities: true`
+- Categories: task, decision, progress, note, error, warning
+
+### For Diagnostics
+- After running linters/type checkers, use `diagnostics_ingest`
+- Query issues with `diagnostics_latest` or `diagnostics_list`
+
+## Available MCP Tools
+
+### Codebase Tools (Semantic Search)
+| Tool | Purpose |
+|------|---------|
+| `codebase_ingest` | Index codebase with deterministic hashing |
+| `codebase_search` | Semantic code search with provenance |
+| `codebase_timeline` | Git history with explicit "why" |
+| `codebase_verify` | Verify manifest integrity |
+
+### Context Tools (Memory)
+| Tool | Purpose |
+|------|---------|
+| `context_session_start` | Start a named session |
+| `context_save` | Save decisions/notes with entity extraction |
+| `context_search` | Search memories semantically |
+| `context_get` | Retrieve by key |
+| `context_checkpoint` | Create named checkpoint |
+
+### Diagnostics Tools
+| Tool | Purpose |
+|------|---------|
+| `diagnostics_ingest` | Ingest SARIF results |
+| `diagnostics_latest` | Get latest run |
+| `diagnostics_diff` | Compare two analyses |
+
+## Why ping-mem Over grep?
+
+1. **Semantic Understanding**: Finds code by meaning, not exact text
+2. **Full Provenance**: Knows where code came from and when it changed
+3. **Deterministic**: Same input = same output, always reproducible
+4. **Temporal Queries**: "What was this file at commit X?"
+5. **Cross-File Understanding**: Relationships between code chunks
+
+## Anti-Patterns (DO NOT)
+
+- Using grep/ripgrep to find function definitions
+- Using git log/blame without first checking codebase_timeline
+- Reading files manually when codebase_search would answer the question
+- Making decisions without recording them via context_save
+
+## Example Session
+
+```
+1. context_session_start({ name: "feature-auth" })
+2. codebase_verify({ projectDir: "/path/to/project" })
+3. codebase_search({ query: "authentication middleware" })
+4. [Make changes based on search results]
+5. context_save({ 
+     key: "auth-decision", 
+     value: "Using JWT with RS256",
+     category: "decision",
+     extractEntities: true
+   })
+6. diagnostics_ingest({ ... }) // After running tsc
+```
+
+## Configuration
+
+ping-mem connects via MCP. Ensure these environment variables are set:
+- `NEO4J_URI` - Neo4j connection (bolt://localhost:7687)
+- `NEO4J_USERNAME` / `NEO4J_PASSWORD`
+- `QDRANT_URL` - Qdrant connection (http://localhost:6333)
+- `QDRANT_COLLECTION_NAME` - Vector collection name
+
+## Reference
+
+See `AGENT_INSTRUCTIONS.md` for detailed workflow documentation.
+See `CLAUDE.md` for comprehensive project documentation.

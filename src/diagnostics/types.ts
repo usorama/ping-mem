@@ -41,6 +41,9 @@ export interface NormalizedFinding {
   endColumn?: number | undefined;
   chunkId?: string | undefined;
   fingerprint?: string | undefined;
+  symbolId?: string | undefined;
+  symbolName?: string | undefined;
+  symbolKind?: string | undefined;
   properties: Record<string, unknown>;
 }
 

@@ -14,6 +14,7 @@ import { ProjectScanner, ProjectScanOptions } from "./ProjectScanner.js";
 import { ManifestStore } from "./ManifestStore.js";
 import { CodeChunker, TextChunk } from "./CodeChunker.js";
 import { GitHistoryReader, GitHistoryResult } from "./GitHistoryReader.js";
+import { SymbolExtractor, ExtractedSymbol } from "./SymbolExtractor.js";
 import type { ProjectManifest, FileHashEntry } from "./types.js";
 import * as crypto from "crypto";
 import * as fs from "fs";
@@ -23,6 +24,7 @@ export interface CodeFileResult {
   filePath: string; // Relative to project root
   sha256: string; // File content hash
   chunks: ChunkWithId[];
+  symbols: ExtractedSymbol[];
 }
 
 export interface ChunkWithId {
@@ -53,12 +55,14 @@ export class IngestionOrchestrator {
   private readonly manifestStore: ManifestStore;
   private readonly chunker: CodeChunker;
   private readonly gitReader: GitHistoryReader;
+  private readonly symbolExtractor: SymbolExtractor;
 
   constructor() {
     this.scanner = new ProjectScanner();
     this.manifestStore = new ManifestStore();
     this.chunker = new CodeChunker();
     this.gitReader = new GitHistoryReader();
+    this.symbolExtractor = new SymbolExtractor();
   }
 
   /**
@@ -130,10 +134,14 @@ export class IngestionOrchestrator {
         this.buildChunkWithMetadata(entry.path, entry.sha256, content, chunk)
       );
 
+      // Extract symbols from the file
+      const symbols = this.symbolExtractor.extractFromFile(entry.path, content);
+
       results.push({
         filePath: entry.path,
         sha256: entry.sha256,
         chunks: chunksWithIds,
+        symbols,
       });
     }
 

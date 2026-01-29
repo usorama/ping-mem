@@ -25,6 +25,9 @@ import {
   normalizeFindings,
   computeFindingsDigest,
   computeAnalysisId,
+  SummaryGenerator,
+  OpenAIProvider,
+  SummaryCache,
 } from "../diagnostics/index.js";
 import type { FindingInput } from "../diagnostics/types.js";
 import type {
@@ -67,6 +70,7 @@ export class RESTPingMemServer {
   private graphManager: GraphManager | null = null;
   private hybridSearchEngine: HybridSearchEngine | null = null;
   private diagnosticsStore: DiagnosticsStore;
+  private summaryGenerator: SummaryGenerator | null = null;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -84,6 +88,14 @@ export class RESTPingMemServer {
       new DiagnosticsStore({
         dbPath: this.config.diagnosticsDbPath,
       });
+
+    // Initialize LLM summary generator if OpenAI API key available
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (openaiKey) {
+      const summaryCache = new SummaryCache({ db: this.diagnosticsStore.getDatabase() });
+      const provider = new OpenAIProvider(openaiKey);
+      this.summaryGenerator = new SummaryGenerator(provider, summaryCache);
+    }
 
     // Initialize vector index if enabled
     if (this.config.enableVectorSearch && this.config.vectorDimensions !== undefined) {
@@ -459,6 +471,60 @@ export class RESTPingMemServer {
             analysisId,
             total: findings.length,
             bySeverity,
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.post("/api/v1/diagnostics/summarize/:analysisId", async (c) => {
+      try {
+        const analysisId = c.req.param("analysisId");
+        const body = await c.req.json();
+        const useLLM = body.useLLM === true;
+        const forceRefresh = body.forceRefresh === true;
+
+        const findings = this.diagnosticsStore.listFindings(analysisId);
+
+        if (!useLLM) {
+          return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+            data: {
+              analysisId,
+              useLLM: false,
+              total: findings.length,
+              findings: findings.slice(0, 100),
+            },
+          });
+        }
+
+        if (!this.summaryGenerator) {
+          return c.json<RESTErrorResponse>(
+            {
+              error: "Service Unavailable",
+              message: "LLM summarization not available. Set OPENAI_API_KEY environment variable.",
+            },
+            503
+          );
+        }
+
+        const summary = await this.summaryGenerator.summarize(analysisId, findings, forceRefresh);
+
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: {
+            analysisId,
+            useLLM: true,
+            summary: {
+              text: summary.summaryText,
+              model: summary.llmModel,
+              provider: summary.llmProvider,
+              generatedAt: summary.generatedAt,
+              promptTokens: summary.promptTokens,
+              completionTokens: summary.completionTokens,
+              costUsd: summary.costUsd,
+              isFromCache: summary.isFromCache,
+            },
+            findingsCount: findings.length,
           },
         });
       } catch (error) {

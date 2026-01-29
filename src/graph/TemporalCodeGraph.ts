@@ -31,6 +31,7 @@ import type {
   GitFileChange,
   GitDiffHunk,
 } from "../ingest/index.js";
+import type { ExtractedSymbol } from "../ingest/SymbolExtractor.js";
 import * as crypto from "crypto";
 
 export interface TemporalCodeGraphOptions {
@@ -284,6 +285,64 @@ export class TemporalCodeGraph {
           }
         );
       }
+
+      // Persist symbols
+      for (const symbol of fileResult.symbols) {
+        await this.persistSymbol(fileId, symbol, ingestedAt);
+      }
+    } finally {
+      await session.close();
+    }
+  }
+
+  private async persistSymbol(
+    fileId: string,
+    symbol: ExtractedSymbol,
+    ingestedAt: string
+  ): Promise<void> {
+    const session = this.neo4j.getSession();
+    try {
+      // Create or merge Symbol node
+      await session.run(
+        `
+        MATCH (f:File { fileId: $fileId })
+        MERGE (s:Symbol { symbolId: $symbolId })
+        SET s.name = $name,
+            s.kind = $kind,
+            s.startLine = $startLine,
+            s.endLine = $endLine,
+            s.signature = $signature,
+            s.lastIngestedAt = $ingestedAt
+        MERGE (f)-[:DEFINES_SYMBOL { ingestedAt: $ingestedAt }]->(s)
+        `,
+        {
+          fileId,
+          symbolId: symbol.symbolId,
+          name: symbol.name,
+          kind: symbol.kind,
+          startLine: symbol.startLine,
+          endLine: symbol.endLine,
+          signature: symbol.signature ?? null,
+          ingestedAt,
+        }
+      );
+
+      // Link symbol to chunks that contain it
+      await session.run(
+        `
+        MATCH (s:Symbol { symbolId: $symbolId })
+        MATCH (f:File { fileId: $fileId })-[:HAS_CHUNK]->(c:Chunk)
+        WHERE c.lineStart <= $symbolEndLine AND c.lineEnd >= $symbolStartLine
+        MERGE (c)-[:CONTAINS_SYMBOL { ingestedAt: $ingestedAt }]->(s)
+        `,
+        {
+          fileId,
+          symbolId: symbol.symbolId,
+          symbolStartLine: symbol.startLine,
+          symbolEndLine: symbol.endLine,
+          ingestedAt,
+        }
+      );
     } finally {
       await session.close();
     }

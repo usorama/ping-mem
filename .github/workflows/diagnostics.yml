@@ -50,10 +50,12 @@ jobs:
       - name: Build TypeScript
         run: bun run build
 
-      - name: Generate TypeScript SARIF
+      - name: Generate SARIF files
         run: |
           mkdir -p diagnostics
-          bun run diagnostics:tsc-sarif --output diagnostics/tsc.sarif
+          bun run diagnostics:tsc-sarif --output diagnostics/tsc.sarif || true
+          bun run diagnostics:eslint-sarif --output diagnostics/eslint.sarif || true
+          bun run diagnostics:prettier-sarif --output diagnostics/prettier.sarif || true
         continue-on-error: true
 
       - name: Compute config hash
@@ -79,13 +81,17 @@ jobs:
         env:
           PING_MEM_DIAGNOSTICS_DB_PATH: /tmp/ping-mem-diagnostics-ci.db
         run: |
-          if [ -f diagnostics/tsc.sarif ]; then
+          SARIF_FILES=""
+          [ -f diagnostics/tsc.sarif ] && SARIF_FILES="diagnostics/tsc.sarif"
+          [ -f diagnostics/eslint.sarif ] && SARIF_FILES="$SARIF_FILES,diagnostics/eslint.sarif"
+          [ -f diagnostics/prettier.sarif ] && SARIF_FILES="$SARIF_FILES,diagnostics/prettier.sarif"
+          SARIF_FILES=$(echo $SARIF_FILES | sed 's/^,//')
+          
+          if [ -n "$SARIF_FILES" ]; then
             bun run diagnostics:collect \
               --projectDir $PWD \
               --configHash ${{ steps.config.outputs.hash }} \
-              --sarifPath diagnostics/tsc.sarif \
-              --toolName tsc \
-              --toolVersion $(bun --version) \
+              --sarifPaths "$SARIF_FILES" \
               --environmentHash "ci-ubuntu-latest" \
               --recordWorklog
           fi

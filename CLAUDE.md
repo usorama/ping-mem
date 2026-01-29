@@ -19,10 +19,14 @@
 
 **ping-mem now includes a deterministic, time-aware codebase understanding system** that ingests code + git history and provides:
 
-## Diagnostics + Worklog System (v1.2.0)
+## Diagnostics + Worklog System (v1.3.0)
 
-**ping-mem now includes a deterministic diagnostics collection and worklog system** that enables:
+**ping-mem now includes a comprehensive diagnostics system** that enables:
 - Bit-for-bit reproducible diagnostics tracking across CI runs
+- Multi-tool quality tracking (TypeScript, ESLint, Prettier)
+- Symbol-level attribution (function/class-level error tracking)
+- LLM-powered summaries with provenance and caching
+- Performance benchmarks for scalability validation
 - Temporal bug tracking with full provenance
 - Content-addressable analysis IDs for regression detection
 - Automated quality gate recording via CLI and CI/CD
@@ -33,23 +37,49 @@
  - SQLite-backed DiagnosticsStore with deterministic IDs
  - analysisId = sha256(projectId + treeHash + tool + config + findings)
  - findingId = sha256(analysisId + location + rule + message)
+ - symbolId = sha256(filePath + name + kind + startLine)
 
-2. **SARIF 2.1.0 Integration**
- - Full parser for standardized tool output
+2. **Multi-Tool SARIF Integration**
+ - Full SARIF 2.1.0 parser for standardized tool output
  - TypeScript SARIF generator (tsc-sarif)
+ - ESLint SARIF generator (eslint-sarif) - NEW in v1.3.0
+ - Prettier SARIF generator (prettier-sarif) - NEW in v1.3.0
+ - Batch processing via `--sarifPaths` - NEW in v1.3.0
  - Normalized findings (cross-platform paths, whitespace, severity)
 
-3. **CLI Collector**
+3. **Symbol-Level Attribution** - NEW in v1.3.0
+ - AST-based symbol extraction (TypeScript/JavaScript)
+ - Regex-based extraction (Python)
+ - Findings mapped to containing symbols (functions, classes, methods)
+ - Neo4j persistence: `(Chunk)-[:CONTAINS_SYMBOL]->(Symbol)`
+ - Query findings by symbol via `diagnostics_by_symbol`
+
+4. **LLM-Powered Summaries** - NEW in v1.3.0
+ - Optional OpenAI-based summarization
+ - Content-addressable caching (same analysisId -> cached summary)
+ - Cost tracking (tokens, USD)
+ - Graceful fallback to raw findings
+ - MCP tool: `diagnostics_summarize` with `useLLM` flag
+
+5. **Performance Benchmarks** - NEW in v1.3.0
+ - Comprehensive test suite (100, 1k, 10k, 100k findings)
+ - Memory usage benchmarks
+ - CI integration with regression detection
+ - Performance budgets documented
+
+6. **CLI Collector**
  - Automated diagnostics ingestion: `bun run diagnostics:collect`
+ - Batch SARIF processing: `--sarifPaths` - NEW in v1.3.0
  - Computes configHash, environmentHash, tool identity
  - Records DIAGNOSTICS_INGESTED events to EventStore
 
-4. **CI/CD Integration**
- - GitHub Actions workflow included
+7. **CI/CD Integration**
+ - GitHub Actions workflow for all three tools - UPDATED in v1.3.0
+ - Performance benchmark workflow - NEW in v1.3.0
  - REST API endpoints for non-MCP clients
  - Artifact uploads (SARIF files + diagnostics DB)
 
-5. **Worklog Events**
+8. **Worklog Events**
  - Track tool runs, git operations, agent tasks
  - Full provenance for "what happened when"
  - MCP tools: worklog_record, worklog_list
@@ -121,49 +151,68 @@ codebase_timeline({
 })
 ```
 
-### Diagnostics Usage Example
+### Diagnostics Usage Example (v1.3.0)
 
 ```bash
-# Generate TypeScript SARIF
+# Generate SARIF files (all tools)
 bun run diagnostics:tsc-sarif --output diagnostics/tsc.sarif
+bun run diagnostics:eslint-sarif --output diagnostics/eslint.sarif
+bun run diagnostics:prettier-sarif --output diagnostics/prettier.sarif
 
-# Collect diagnostics (via CLI)
+# Collect diagnostics (batch mode - NEW in v1.3.0)
 bun run diagnostics:collect \
-  --projectDir . \
-  --configHash $(sha256sum package.json tsconfig.json) \
-  --sarifPath diagnostics/tsc.sarif \
-  --toolName tsc \
-  --toolVersion $(bun --version)
+ --projectDir . \
+ --configHash $(sha256sum package.json tsconfig.json) \
+ --sarifPaths "diagnostics/tsc.sarif,diagnostics/eslint.sarif,diagnostics/prettier.sarif"
 
 # Or via MCP tool
 diagnostics_ingest({
-  projectId: "ping-mem-abc123",
-  treeHash: "deadbeef",
-  toolName: "tsc",
-  toolVersion: "5.3.3",
-  configHash: "config-hash",
-  sarif: sarifPayload
+ projectId: "ping-mem-abc123",
+ treeHash: "deadbeef",
+ toolName: "tsc",
+ toolVersion: "5.3.3",
+ configHash: "config-hash",
+ sarif: sarifPayload
 })
 
 # Query latest diagnostics
 diagnostics_latest({
-  projectId: "ping-mem-abc123",
-  toolName: "tsc"
+ projectId: "ping-mem-abc123",
+ toolName: "tsc"
 })
 
 # Compare two runs
 diagnostics_diff({
-  analysisIdA: "before-commit",
-  analysisIdB: "after-commit"
+ analysisIdA: "before-commit",
+ analysisIdB: "after-commit"
+})
+
+# Compare across tools (NEW in v1.3.0)
+diagnostics_compare_tools({
+ projectId: "ping-mem-abc123",
+ treeHash: "deadbeef",
+ toolNames: ["tsc", "eslint", "prettier"]
+})
+
+# Group findings by symbol (NEW in v1.3.0)
+diagnostics_by_symbol({
+ analysisId: "analysis-123",
+ groupBy: "symbol"
+})
+
+# Get LLM summary (NEW in v1.3.0)
+diagnostics_summarize({
+ analysisId: "analysis-123",
+ useLLM: true  // Requires OPENAI_API_KEY
 })
 
 # Record worklog event
 worklog_record({
-  kind: "diagnostics",
-  title: "TypeScript type check",
-  status: "success",
-  toolName: "tsc",
-  durationMs: 1234
+ kind: "diagnostics",
+ title: "TypeScript type check",
+ status: "success",
+ toolName: "tsc",
+ durationMs: 1234
 })
 ```
 
@@ -550,16 +599,19 @@ All tools are prefixed with `ping_mem_` when loaded in Claude Code:
 | `codebase_search` | Semantic code search with provenance |
 | `codebase_timeline` | Query temporal history with explicit "why" |
 
-#### Diagnostics Tools (NEW in v1.2.0)
-| Tool | Purpose |
-|------|---------|
-| `diagnostics_ingest` | Ingest SARIF or normalized findings with full provenance |
-| `diagnostics_latest` | Query latest run by project/tool/tree |
-| `diagnostics_list` | List findings for a specific analysis |
-| `diagnostics_diff` | Compare two analyses (introduced/resolved/unchanged) |
-| `diagnostics_summary` | Aggregate finding counts by severity |
+#### Diagnostics Tools (v1.2.0 - v1.3.0)
+| Tool | Purpose | Version |
+|------|---------|---------|
+| `diagnostics_ingest` | Ingest SARIF or normalized findings with full provenance | v1.2.0 |
+| `diagnostics_latest` | Query latest run by project/tool/tree | v1.2.0 |
+| `diagnostics_list` | List findings for a specific analysis | v1.2.0 |
+| `diagnostics_diff` | Compare two analyses (introduced/resolved/unchanged) | v1.2.0 |
+| `diagnostics_summary` | Aggregate finding counts by severity | v1.2.0 |
+| `diagnostics_compare_tools` | Compare diagnostics across multiple tools | v1.3.0 |
+| `diagnostics_by_symbol` | Group findings by symbol or file | v1.3.0 |
+| `diagnostics_summarize` | LLM-powered summary with caching and fallback | v1.3.0 |
 
-#### Worklog Tools (NEW in v1.2.0)
+#### Worklog Tools (v1.2.0)
 | Tool | Purpose |
 |------|---------|
 | `worklog_record` | Record deterministic worklog event (tool/diagnostics/git/task) |
@@ -920,6 +972,7 @@ curl https://api.openai.com/v1/embeddings \
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.3.0 | 2026-01-29 | **Multi-Tool + Symbol Attribution + LLM Summaries + Performance** - ESLint/Prettier SARIF generators, batch SARIF ingestion, SymbolExtractor (AST-based for TS, regex for Python), symbol-level finding attribution, LLM-powered summaries with OpenAI, SummaryCache, diagnostics_compare_tools/by_symbol/summarize MCP tools, comprehensive performance benchmarks (45 tests total), PERFORMANCE.md documentation |
 | 1.2.0 | 2026-01-29 | **Deterministic Diagnostics + Worklog** - DiagnosticsStore (content-addressable analysis IDs), SARIF 2.1.0 parser, tsc-sarif generator, CLI collector, REST endpoints, MCP diagnostics/worklog tools, GitHub Actions CI integration, comprehensive determinism tests (14 pass, 0 fail) |
 | 1.1.0 | 2026-01-29 | **Deterministic Temporal Code Ingestion** - ProjectScanner, CodeChunker, GitHistoryReader, TemporalCodeGraph, DeterministicVectorizer, CodeIndexer, IngestionService, MCP codebase tools |
 | 1.0.0 | 2026-01-27 | Initial standalone release |

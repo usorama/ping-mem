@@ -357,32 +357,127 @@ bun run diagnostics:collect \
 
 ---
 
+## v1.3.0 Enhancements (✅ Complete)
+
+**Implementation Date**: 2026-01-29  
+**Status**: ✅ **COMPLETE**
+
+### 1. Multi-Tool SARIF Generators
+
+**ESLint SARIF** (`src/diagnostics/eslint-sarif.ts`):
+- Converts ESLint JSON output to SARIF 2.1.0
+- Executable CLI: `bun run diagnostics:eslint-sarif`
+- Deterministic sorting by file > line > column > rule
+
+**Prettier SARIF** (`src/diagnostics/prettier-sarif.ts`):
+- Converts Prettier check output to SARIF 2.1.0
+- Executable CLI: `bun run diagnostics:prettier-sarif`
+- File-level findings for formatting issues
+
+**Batch Collection** (`src/cli.ts`):
+- Support for multiple SARIF files: `--sarifPaths "tsc.sarif,eslint.sarif,prettier.sarif"`
+- Per-tool analysis IDs with shared treeHash for correlation
+- Batch worklog recording
+
+### 2. Symbol-Level Attribution
+
+**SymbolExtractor** (`src/ingest/SymbolExtractor.ts`):
+- TypeScript/JavaScript: AST-based extraction via TypeScript Compiler API
+- Python: Regex-based extraction for functions and classes
+- Deterministic `symbolId = sha256(filePath + name + kind + startLine)`
+
+**Symbol Types**:
+- function, class, interface, variable, constant, enum, type_alias, method, property
+
+**Neo4j Schema**:
+- `(File)-[:DEFINES_SYMBOL]->(Symbol)`
+- `(Chunk)-[:CONTAINS_SYMBOL]->(Symbol)`
+
+**Finding Attribution** (`src/diagnostics/SymbolAttributor.ts`):
+- Maps findings to containing symbols via line range matching
+- Extended `NormalizedFinding` with `symbolId`, `symbolName`, `symbolKind`
+- Updated SQLite schema with symbol columns
+
+### 3. LLM-Powered Summaries
+
+**SummaryGenerator** (`src/diagnostics/SummaryGenerator.ts`):
+- LLM provider interface (OpenAI implementation included)
+- Prompt engineering for concise, actionable summaries
+- Cost tracking (tokens, USD)
+
+**SummaryCache** (`src/diagnostics/SummaryCache.ts`):
+- SQLite-backed cache: `diagnostic_summaries` table
+- Content-addressable: same `analysisId` -> cached summary
+- Provenance: stores source `findingIds`
+
+**MCP Tool**: `diagnostics_summarize`
+- `useLLM: false` -> raw findings (deterministic)
+- `useLLM: true` -> cached or generated summary
+- `forceRefresh: true` -> bypass cache
+
+**Fallback**: Returns error with `fallbackAvailable: true` if LLM unavailable
+
+### 4. Performance Benchmarks
+
+**Test Suite** (`src/diagnostics/__tests__/performance.test.ts`):
+- Benchmarks for 100, 1k, 10k findings
+- Operations: parse, normalize, store, diff
+- Synthetic data generation with deterministic seeds
+
+**Memory Tests** (`src/diagnostics/__tests__/memory.test.ts`):
+- Memory footprint for 10k, 100k findings
+- Garbage collection verification
+
+**CI Integration** (`.github/workflows/performance.yml`):
+- Runs on PRs touching diagnostics/ingest/graph
+- Uploads benchmark results as artifacts
+- Posts results to PR comments
+
+**Documentation** (`docs/PERFORMANCE.md`):
+- Performance budgets per operation
+- Scalability limits (tested up to 100k findings)
+- Optimization strategies for large projects
+- CI/CD recommendations
+
+### New MCP Tools
+
+| Tool | Purpose |
+|------|---------|
+| `diagnostics_compare_tools` | Compare diagnostics across tools (tsc/eslint/prettier) |
+| `diagnostics_by_symbol` | Group findings by symbol or file |
+| `diagnostics_summarize` | LLM-powered summary with caching |
+
+### Test Coverage
+
+**New Tests** (31 tests):
+- `eslint-sarif.test.ts` (3 tests)
+- `prettier-sarif.test.ts` (3 tests)
+- `SymbolExtractor.test.ts` (9 tests)
+- `symbol-attribution.test.ts` (3 tests)
+- `summary.test.ts` (3 tests)
+- `performance.test.ts` (7 tests)
+- `memory.test.ts` (3 tests)
+
+**Total Tests**: 45 tests (14 from v1.2.0 + 31 new)
+
+---
+
 ## Future Enhancements (Not in Scope)
 
 ### Potential Additions
 1. **More SARIF Generators**:
-   - ESLint → SARIF converter
-   - Prettier → SARIF converter
    - Custom linter → SARIF converter
+   - Security scanner → SARIF converter
 
-2. **LLM-Powered Summarization** (optional layer):
-   - Human-friendly explanations of diagnostics diffs
-   - Root cause analysis suggestions
-   - Always backed by explicit provenance
+2. **Symbol Evolution**:
+   - Track symbols across commits with `(Symbol)-[:EVOLVES_TO]->(Symbol)`
+   - Detect renamed functions/classes
 
 3. **Differential Queries**:
    - "What changed between commit A and B?"
    - Temporal diff between arbitrary points in time
 
-4. **Symbol-Level Attribution**:
-   - Extend coordinate alignment to symbol definitions
-   - AST-based attribution (which function/class has the error)
-
-5. **Performance Tests**:
-   - Benchmark SARIF parsing for large files (10k+ findings)
-   - Stress test DiagnosticsStore with concurrent writes
-
-6. **IDE Integration**:
+4. **IDE Integration**:
    - Pre-commit hook that runs collector locally
    - VS Code extension for inline diagnostics history
 

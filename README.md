@@ -17,6 +17,7 @@ ping-mem is a Model Context Protocol (MCP) server that provides persistent memor
 - **Hybrid Search** - Combined semantic, keyword, and graph search
 - **Lineage Tracking** - Trace upstream/downstream entity relationships
 - **Evolution Queries** - Track entity changes over time
+- **Diagnostics System (v1.3.0)** - Multi-tool quality tracking with symbol attribution and LLM summaries
 - **HTTP Server** - REST and SSE endpoints for direct integration
 
 ## Quick Start
@@ -100,6 +101,19 @@ const httpServer = createHttpServer({
 | `context_hybrid_search` | Combined semantic/keyword/graph search |
 | `context_get_lineage` | Trace entity lineage |
 | `context_query_evolution` | Query temporal evolution |
+
+### Diagnostics Tools (v1.3.0)
+
+| Tool | Description |
+|------|-------------|
+| `diagnostics_ingest` | Ingest SARIF diagnostics (tsc/eslint/prettier) |
+| `diagnostics_latest` | Query latest run by project/tool |
+| `diagnostics_diff` | Compare two analyses |
+| `diagnostics_compare_tools` | Compare across multiple tools |
+| `diagnostics_by_symbol` | Group findings by symbol/function |
+| `diagnostics_summarize` | LLM-powered summary with caching |
+
+See [examples/multi-tool-diagnostics](examples/multi-tool-diagnostics/) for usage.
 
 ## Configuration
 

@@ -58,6 +58,7 @@ Usage:
 Options:
   --toolName <name>            Tool name (optional if SARIF provides it)
   --toolVersion <version>      Tool version (optional if SARIF provides it)
+  --sarifPaths <paths>         Comma-separated list of SARIF file paths (for batch ingestion)
   --environmentHash <hash>     Environment hash
   --status <passed|failed|partial>
   --durationMs <number>
@@ -69,6 +70,7 @@ Options:
 Examples:
   ping-mem collect --projectDir . --configHash abc123 --sarifPath results.sarif
   ping-mem collect --projectDir . --configHash abc123 --sarifPath results.sarif --toolName eslint --toolVersion 9.0.0
+  ping-mem collect --projectDir . --configHash abc123 --sarifPaths "tsc.sarif,eslint.sarif,prettier.sarif"
 `);
 }
 
@@ -89,67 +91,97 @@ async function collectDiagnostics(args: ArgMap): Promise<void> {
   const projectDir = getArg(args, "projectDir");
   const configHash = getArg(args, "configHash");
   const sarifPath = getArg(args, "sarifPath");
-  if (!projectDir || !configHash || !sarifPath) {
-    throw new Error("projectDir, configHash, and sarifPath are required.");
+  const sarifPaths = getArg(args, "sarifPaths");
+  
+  if (!projectDir || !configHash) {
+    throw new Error("projectDir and configHash are required.");
   }
 
-  const sarifRaw = fs.readFileSync(path.resolve(sarifPath), "utf-8");
-  const sarifPayload = JSON.parse(sarifRaw);
+  if (!sarifPath && !sarifPaths) {
+    throw new Error("Either sarifPath or sarifPaths is required.");
+  }
+
+  // Parse SARIF paths (single or batch)
+  const paths = sarifPaths 
+    ? sarifPaths.split(",").map(p => p.trim())
+    : [sarifPath!];
 
   const scanner = new ProjectScanner();
   const scan = scanner.scanProject(projectDir);
   const projectId = scan.manifest.projectId;
   const treeHash = scan.manifest.treeHash;
 
-  const parsed = parseSarif(sarifPayload);
-  const toolName = getArg(args, "toolName") ?? parsed.toolName ?? "unknown";
-  const toolVersion = getArg(args, "toolVersion") ?? parsed.toolVersion ?? "unknown";
-  const environmentHash = getArg(args, "environmentHash");
-  const statusArg = getArg(args, "status");
-  const durationMs = getArg(args, "durationMs");
-  const recordWorklog = getBool(args, "recordWorklog", true);
-
-  const tempFindings = normalizeFindings(parsed.findings, "temp-analysis");
-  const findingsDigest = computeFindingsDigest(tempFindings);
-  const analysisId = computeAnalysisId({
-    projectId,
-    treeHash,
-    toolName,
-    toolVersion,
-    configHash,
-    findingsDigest,
-  });
-  const normalizedFindings = normalizeFindings(parsed.findings, analysisId);
-
   const diagnosticsDbPath = getArg(args, "diagnosticsDbPath");
   const diagnosticsStore = new DiagnosticsStore(
     diagnosticsDbPath ? { dbPath: diagnosticsDbPath } : {}
   );
-  const runId = diagnosticsStore.createRunId();
-  const diagnosticStatus =
-    (statusArg as "passed" | "failed" | "partial" | undefined) ??
-    (normalizedFindings.length === 0 ? "passed" : "failed");
 
-  diagnosticsStore.saveRun(
-    {
-      runId,
-      analysisId,
+  const results: Array<{
+    analysisId: string;
+    runId: string;
+    toolName: string;
+    findingsCount: number;
+  }> = [];
+
+  // Process each SARIF file
+  for (const sarifFilePath of paths) {
+    const sarifRaw = fs.readFileSync(path.resolve(sarifFilePath), "utf-8");
+    const sarifPayload = JSON.parse(sarifRaw);
+
+    const parsed = parseSarif(sarifPayload);
+    const toolName = getArg(args, "toolName") ?? parsed.toolName ?? "unknown";
+    const toolVersion = getArg(args, "toolVersion") ?? parsed.toolVersion ?? "unknown";
+    const environmentHash = getArg(args, "environmentHash");
+    const statusArg = getArg(args, "status");
+    const durationMs = getArg(args, "durationMs");
+
+    const tempFindings = normalizeFindings(parsed.findings, "temp-analysis");
+    const findingsDigest = computeFindingsDigest(tempFindings);
+    const analysisId = computeAnalysisId({
       projectId,
       treeHash,
-      commitHash: getCommitHash(projectDir) ?? undefined,
-      tool: { name: toolName, version: toolVersion },
+      toolName,
+      toolVersion,
       configHash,
-      environmentHash: environmentHash ?? undefined,
-      status: diagnosticStatus,
-      createdAt: new Date().toISOString(),
-      durationMs: durationMs ? parseInt(durationMs, 10) : undefined,
       findingsDigest,
-      rawSarif: sarifRaw,
-      metadata: {},
-    },
-    normalizedFindings
-  );
+    });
+    const normalizedFindings = normalizeFindings(parsed.findings, analysisId);
 
+    const runId = diagnosticsStore.createRunId();
+    const diagnosticStatus =
+      (statusArg as "passed" | "failed" | "partial" | undefined) ??
+      (normalizedFindings.length === 0 ? "passed" : "failed");
+
+    diagnosticsStore.saveRun(
+      {
+        runId,
+        analysisId,
+        projectId,
+        treeHash,
+        commitHash: getCommitHash(projectDir) ?? undefined,
+        tool: { name: toolName, version: toolVersion },
+        configHash,
+        environmentHash: environmentHash ?? undefined,
+        status: diagnosticStatus,
+        createdAt: new Date().toISOString(),
+        durationMs: durationMs ? parseInt(durationMs, 10) : undefined,
+        findingsDigest,
+        rawSarif: sarifRaw,
+        metadata: {},
+      },
+      normalizedFindings
+    );
+
+    results.push({
+      analysisId,
+      runId,
+      toolName,
+      findingsCount: normalizedFindings.length,
+    });
+  }
+
+  // Record worklog if requested
+  const recordWorklog = getBool(args, "recordWorklog", true);
   if (recordWorklog) {
     const eventsDbPath = getArg(args, "eventsDbPath");
     const eventStore = new EventStore(eventsDbPath ? { dbPath: eventsDbPath } : {});
@@ -159,30 +191,31 @@ async function collectDiagnostics(args: ArgMap): Promise<void> {
       projectDir,
     });
 
-    const worklogStatus = diagnosticStatus === "passed" ? "success" : diagnosticStatus;
-    const payload: WorklogEventData = {
-      sessionId: session.id,
-      kind: "diagnostics",
-      title: `${toolName} diagnostics`,
-      status: worklogStatus,
-      toolName,
-      toolVersion,
-      configHash,
-      environmentHash,
-      projectId,
-      treeHash,
-      commitHash: getCommitHash(projectDir) ?? undefined,
-      runId,
-      summary: `${normalizedFindings.length} findings`,
-    };
+    for (const result of results) {
+      const worklogStatus = result.findingsCount === 0 ? "success" : "failed";
+      const payload: WorklogEventData = {
+        sessionId: session.id,
+        kind: "diagnostics",
+        title: `${result.toolName} diagnostics`,
+        status: worklogStatus,
+        toolName: result.toolName,
+        configHash,
+        environmentHash: getArg(args, "environmentHash"),
+        projectId,
+        treeHash,
+        commitHash: getCommitHash(projectDir) ?? undefined,
+        runId: result.runId,
+        summary: `${result.findingsCount} findings`,
+      };
 
-    await eventStore.createEvent(session.id, "DIAGNOSTICS_INGESTED", payload, {
-      toolName,
-      toolVersion,
-      projectId,
-      treeHash,
-      runId,
-    });
+      await eventStore.createEvent(session.id, "DIAGNOSTICS_INGESTED", payload, {
+        toolName: result.toolName,
+        projectId,
+        treeHash,
+        runId: result.runId,
+      });
+    }
+
     await sessionManager.endSession(session.id, "collector");
     await eventStore.close();
     await sessionManager.close();
@@ -196,9 +229,8 @@ async function collectDiagnostics(args: ArgMap): Promise<void> {
         success: true,
         projectId,
         treeHash,
-        analysisId,
-        runId,
-        findingsCount: normalizedFindings.length,
+        results,
+        totalFindings: results.reduce((sum, r) => sum + r.findingsCount, 0),
       },
       null,
       2

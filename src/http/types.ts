@@ -9,6 +9,7 @@
  */
 
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
+import type { IngestionService } from "../ingest/IngestionService.js";
 
 // ============================================================================
 // HTTP Server Types
@@ -41,6 +42,8 @@ export interface HTTPServerConfig {
   sessionIdGenerator?: (() => string) | undefined;
   /** Diagnostics database path (optional) */
   diagnosticsDbPath?: string | undefined;
+  /** IngestionService for codebase tools (optional) */
+  ingestionService?: IngestionService | undefined;
 }
 
 // Re-export PingMemServerConfig for convenience
@@ -150,4 +153,54 @@ export interface CheckpointRequest {
   includeFiles?: boolean;
   /** Include git status (optional) */
   includeGitStatus?: boolean;
+}
+
+// ============================================================================
+// Codebase API Types
+// ============================================================================
+
+/**
+ * Codebase ingest request body
+ */
+export interface CodebaseIngestRequest {
+  /** Absolute path to project root */
+  projectDir: string;
+  /** Force re-ingestion even if no changes detected */
+  forceReingest?: boolean;
+}
+
+/**
+ * Codebase verify request body
+ */
+export interface CodebaseVerifyRequest {
+  /** Absolute path to project root */
+  projectDir: string;
+}
+
+/**
+ * Codebase search query parameters
+ */
+export interface CodebaseSearchParams {
+  /** Natural language query */
+  query: string;
+  /** Filter by project ID (optional) */
+  projectId?: string;
+  /** Filter by file path (optional) */
+  filePath?: string;
+  /** Filter by chunk type (optional) */
+  type?: "code" | "comment" | "docstring";
+  /** Maximum results (optional, default: 10) */
+  limit?: number;
+}
+
+/**
+ * Codebase timeline query parameters
+ */
+export interface CodebaseTimelineParams {
+  /** Project ID */
+  projectId: string;
+  /** Filter by specific file (optional) */
+  filePath?: string;
+  /** Maximum commits to return (optional, default: 100) */
+  limit?: number;
 }

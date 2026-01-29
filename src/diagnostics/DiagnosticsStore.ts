@@ -54,6 +54,9 @@ interface DiagnosticFindingRow {
   end_col: number | null;
   chunk_id: string | null;
   fingerprint: string | null;
+  symbol_id: string | null;
+  symbol_name: string | null;
+  symbol_kind: string | null;
   properties: string;
 }
 
@@ -129,6 +132,9 @@ export class DiagnosticsStore {
         end_col INTEGER,
         chunk_id TEXT,
         fingerprint TEXT,
+        symbol_id TEXT,
+        symbol_name TEXT,
+        symbol_kind TEXT,
         properties TEXT NOT NULL
       );
 
@@ -144,6 +150,8 @@ export class DiagnosticsStore {
         ON diagnostic_findings(file_path);
       CREATE INDEX IF NOT EXISTS idx_findings_rule
         ON diagnostic_findings(rule_id);
+      CREATE INDEX IF NOT EXISTS idx_findings_symbol
+        ON diagnostic_findings(symbol_id);
     `);
   }
 
@@ -163,10 +171,12 @@ export class DiagnosticsStore {
     this.stmtInsertFinding = this.db.prepare(`
       INSERT INTO diagnostic_findings (
         finding_id, analysis_id, rule_id, severity, message, file_path,
-        start_line, start_col, end_line, end_col, chunk_id, fingerprint, properties
+        start_line, start_col, end_line, end_col, chunk_id, fingerprint,
+        symbol_id, symbol_name, symbol_kind, properties
       ) VALUES (
         $finding_id, $analysis_id, $rule_id, $severity, $message, $file_path,
-        $start_line, $start_col, $end_line, $end_col, $chunk_id, $fingerprint, $properties
+        $start_line, $start_col, $end_line, $end_col, $chunk_id, $fingerprint,
+        $symbol_id, $symbol_name, $symbol_kind, $properties
       )
     `);
 
@@ -251,6 +261,9 @@ export class DiagnosticsStore {
           $end_col: finding.endColumn ?? null,
           $chunk_id: finding.chunkId ?? null,
           $fingerprint: finding.fingerprint ?? null,
+          $symbol_id: finding.symbolId ?? null,
+          $symbol_name: finding.symbolName ?? null,
+          $symbol_kind: finding.symbolKind ?? null,
           $properties: JSON.stringify(finding.properties ?? {}),
         });
       }
@@ -365,8 +378,15 @@ export class DiagnosticsStore {
     if (row.end_col !== null) finding.endColumn = row.end_col;
     if (row.chunk_id !== null) finding.chunkId = row.chunk_id;
     if (row.fingerprint !== null) finding.fingerprint = row.fingerprint;
+    if (row.symbol_id !== null) finding.symbolId = row.symbol_id;
+    if (row.symbol_name !== null) finding.symbolName = row.symbol_name;
+    if (row.symbol_kind !== null) finding.symbolKind = row.symbol_kind;
 
     return finding;
+  }
+
+  getDatabase(): Database {
+    return this.db;
   }
 
   close(): void {

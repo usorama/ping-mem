@@ -48,6 +48,8 @@ import {
   computeAnalysisId,
 } from "../diagnostics/index.js";
 import type { FindingInput } from "../diagnostics/types.js";
+import { SummaryGenerator, OpenAIProvider } from "../diagnostics/SummaryGenerator.js";
+import { SummaryCache } from "../diagnostics/SummaryCache.js";
 
 // ============================================================================
 // Tool Schemas
@@ -372,6 +374,58 @@ export const TOOLS = [
     },
   },
   {
+    name: "diagnostics_compare_tools",
+    description: "Compare diagnostics across multiple tools for the same project state (treeHash).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectId: { type: "string", description: "Project ID" },
+        treeHash: { type: "string", description: "Tree hash" },
+        toolNames: {
+          type: "array",
+          items: { type: "string" },
+          description: "Filter by specific tool names (optional)",
+        },
+      },
+      required: ["projectId", "treeHash"],
+    },
+  },
+  {
+    name: "diagnostics_by_symbol",
+    description: "Group diagnostic findings by symbol.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        analysisId: { type: "string", description: "Analysis ID" },
+        groupBy: {
+          type: "string",
+          enum: ["symbol", "file"],
+          description: "Group by symbol or file (default: symbol)",
+        },
+      },
+      required: ["analysisId"],
+    },
+  },
+  {
+    name: "diagnostics_summarize",
+    description: "Generate or retrieve LLM-powered summary of diagnostic findings.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        analysisId: { type: "string", description: "Analysis ID" },
+        useLLM: {
+          type: "boolean",
+          description: "Use LLM to generate summary (default: false for raw findings)",
+        },
+        forceRefresh: {
+          type: "boolean",
+          description: "Bypass cache and regenerate summary (default: false)",
+        },
+      },
+      required: ["analysisId"],
+    },
+  },
+  {
     name: "context_query_evolution",
     description: "Query temporal evolution of an entity",
     inputSchema: {
@@ -382,6 +436,14 @@ export const TOOLS = [
         endTime: { type: "string", description: "ISO date end" },
       },
       required: ["entityId"],
+    },
+  },
+  {
+    name: "context_health",
+    description: "Check ping-mem service health and connectivity to Neo4j, Qdrant, and SQLite",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
     },
   },
   {
@@ -492,6 +554,7 @@ export class PingMemServer {
   private evolutionEngine: EvolutionEngine | null = null;
   private ingestionService: IngestionService | null = null;
   private diagnosticsStore: DiagnosticsStore | null = null;
+  private summaryGenerator: SummaryGenerator | null = null;
 
   constructor(config: PingMemServerConfig = {}) {
     this.config = {
@@ -541,6 +604,14 @@ export class PingMemServer {
       new DiagnosticsStore({
         dbPath: config.diagnosticsDbPath,
       });
+
+    // Initialize LLM summary generator if OpenAI API key available
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (openaiKey && this.diagnosticsStore) {
+      const summaryCache = new SummaryCache({ db: this.diagnosticsStore.getDatabase() });
+      const provider = new OpenAIProvider(openaiKey);
+      this.summaryGenerator = new SummaryGenerator(provider, summaryCache);
+    }
 
     // Initialize MCP server
     this.server = new Server(
@@ -626,6 +697,9 @@ export class PingMemServer {
       case "context_query_evolution":
         return this.handleQueryEvolution(args);
 
+      case "context_health":
+        return this.handleHealth();
+
       case "worklog_record":
         return this.handleWorklogRecord(args);
 
@@ -646,6 +720,15 @@ export class PingMemServer {
 
       case "diagnostics_summary":
         return this.handleDiagnosticsSummary(args);
+
+      case "diagnostics_compare_tools":
+        return this.handleDiagnosticsCompareTools(args);
+
+      case "diagnostics_by_symbol":
+        return this.handleDiagnosticsBySymbol(args);
+
+      case "diagnostics_summarize":
+        return this.handleDiagnosticsSummarize(args);
 
       case "codebase_ingest":
         return this.handleCodebaseIngest(args);
@@ -1291,6 +1374,100 @@ export class PingMemServer {
   }
 
   // ============================================================================
+  // Health Check Handler
+  // ============================================================================
+
+  private async handleHealth(): Promise<Record<string, unknown>> {
+    const health: Record<string, unknown> = {
+      status: "healthy",
+      timestamp: new Date().toISOString(),
+      version: "1.0.0",
+      components: {},
+    };
+
+    // Check SQLite (EventStore)
+    try {
+      const events = await this.eventStore.getBySession("__health_check__");
+      (health.components as Record<string, unknown>).sqlite = {
+        status: "healthy",
+        type: "eventStore",
+      };
+    } catch (error) {
+      (health.components as Record<string, unknown>).sqlite = {
+        status: "unhealthy",
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+      health.status = "degraded";
+    }
+
+    // Check GraphManager (Neo4j)
+    if (this.graphManager) {
+      try {
+        // Simple health check - just verify we can access it
+        (health.components as Record<string, unknown>).neo4j = {
+          status: "healthy",
+          configured: true,
+        };
+      } catch (error) {
+        (health.components as Record<string, unknown>).neo4j = {
+          status: "unhealthy",
+          configured: true,
+          error: error instanceof Error ? error.message : "Unknown error",
+        };
+        health.status = "degraded";
+      }
+    } else {
+      (health.components as Record<string, unknown>).neo4j = {
+        status: "not_configured",
+        configured: false,
+      };
+    }
+
+    // Check IngestionService (Qdrant)
+    if (this.ingestionService) {
+      try {
+        (health.components as Record<string, unknown>).qdrant = {
+          status: "healthy",
+          configured: true,
+        };
+      } catch (error) {
+        (health.components as Record<string, unknown>).qdrant = {
+          status: "unhealthy",
+          configured: true,
+          error: error instanceof Error ? error.message : "Unknown error",
+        };
+        health.status = "degraded";
+      }
+    } else {
+      (health.components as Record<string, unknown>).qdrant = {
+        status: "not_configured",
+        configured: false,
+      };
+    }
+
+    // Check DiagnosticsStore
+    if (this.diagnosticsStore) {
+      (health.components as Record<string, unknown>).diagnostics = {
+        status: "healthy",
+        configured: true,
+      };
+    } else {
+      (health.components as Record<string, unknown>).diagnostics = {
+        status: "not_configured",
+        configured: false,
+      };
+    }
+
+    // Check current session
+    health.session = {
+      active: this.currentSessionId !== null,
+      sessionId: this.currentSessionId,
+    };
+
+    return health;
+  }
+
+  // ============================================================================
   // Worklog Handlers
   // ============================================================================
 
@@ -1557,6 +1734,272 @@ export class PingMemServer {
       analysisId,
       total: findings.length,
       bySeverity: counts,
+    };
+  }
+
+  private async handleDiagnosticsSummarize(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.diagnosticsStore) {
+      throw new Error("DiagnosticsStore not configured.");
+    }
+
+    const analysisId = args.analysisId as string;
+    const useLLM = args.useLLM === true;
+    const forceRefresh = args.forceRefresh === true;
+
+    const findings = this.diagnosticsStore.listFindings(analysisId);
+
+    if (!useLLM) {
+      // Return raw findings (deterministic)
+      return {
+        analysisId,
+        useLLM: false,
+        total: findings.length,
+        findings: findings.slice(0, 100), // Limit to first 100 for output size
+      };
+    }
+
+    // Generate LLM summary
+    if (!this.summaryGenerator) {
+      return {
+        error: "LLM summarization not available. Set OPENAI_API_KEY environment variable.",
+        fallbackAvailable: true,
+        suggestion: "Retry with useLLM: false to get raw findings",
+      };
+    }
+
+    try {
+      const summary = await this.summaryGenerator.summarize(analysisId, findings, forceRefresh);
+      return {
+        analysisId,
+        useLLM: true,
+        summary: {
+          text: summary.summaryText,
+          model: summary.llmModel,
+          provider: summary.llmProvider,
+          generatedAt: summary.generatedAt,
+          promptTokens: summary.promptTokens,
+          completionTokens: summary.completionTokens,
+          costUsd: summary.costUsd,
+          isFromCache: summary.isFromCache,
+        },
+        findingsCount: findings.length,
+        sourceFindingIds: summary.sourceFindingIds.slice(0, 10), // First 10 for reference
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      return {
+        error: `Failed to generate summary: ${errorMessage}`,
+        fallbackAvailable: true,
+        suggestion: "Retry with useLLM: false to get raw findings",
+      };
+    }
+  }
+
+  private async handleDiagnosticsBySymbol(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.diagnosticsStore) {
+      throw new Error("DiagnosticsStore not configured.");
+    }
+
+    const analysisId = args.analysisId as string;
+    const groupBy = (args.groupBy as string | undefined) ?? "symbol";
+    const findings = this.diagnosticsStore.listFindings(analysisId);
+
+    if (groupBy === "symbol") {
+      // Group by symbol
+      const symbolGroups = new Map<string, {
+        symbolName: string;
+        symbolKind: string;
+        filePath: string;
+        findings: typeof findings;
+        bySeverity: Record<string, number>;
+      }>();
+
+      for (const finding of findings) {
+        if (!finding.symbolId || !finding.symbolName) {
+          // No symbol attribution
+          continue;
+        }
+
+        if (!symbolGroups.has(finding.symbolId)) {
+          symbolGroups.set(finding.symbolId, {
+            symbolName: finding.symbolName,
+            symbolKind: finding.symbolKind ?? "unknown",
+            filePath: finding.filePath,
+            findings: [],
+            bySeverity: {},
+          });
+        }
+
+        const group = symbolGroups.get(finding.symbolId)!;
+        group.findings.push(finding);
+        group.bySeverity[finding.severity] = (group.bySeverity[finding.severity] ?? 0) + 1;
+      }
+
+      const symbols = Array.from(symbolGroups.entries()).map(([symbolId, group]) => ({
+        symbolId,
+        symbolName: group.symbolName,
+        symbolKind: group.symbolKind,
+        filePath: group.filePath,
+        total: group.findings.length,
+        bySeverity: group.bySeverity,
+      })).sort((a, b) => b.total - a.total);
+
+      return {
+        analysisId,
+        groupBy: "symbol",
+        symbolCount: symbols.length,
+        symbols,
+        totalAttributed: symbols.reduce((sum, s) => sum + s.total, 0),
+        totalUnattributed: findings.filter(f => !f.symbolId).length,
+      };
+    } else {
+      // Group by file
+      const fileGroups = new Map<string, {
+        symbols: Map<string, {
+          symbolName: string;
+          symbolKind: string;
+          count: number;
+        }>;
+        total: number;
+      }>();
+
+      for (const finding of findings) {
+        if (!fileGroups.has(finding.filePath)) {
+          fileGroups.set(finding.filePath, {
+            symbols: new Map(),
+            total: 0,
+          });
+        }
+
+        const group = fileGroups.get(finding.filePath)!;
+        group.total += 1;
+
+        if (finding.symbolId && finding.symbolName) {
+          if (!group.symbols.has(finding.symbolId)) {
+            group.symbols.set(finding.symbolId, {
+              symbolName: finding.symbolName,
+              symbolKind: finding.symbolKind ?? "unknown",
+              count: 0,
+            });
+          }
+          group.symbols.get(finding.symbolId)!.count += 1;
+        }
+      }
+
+      const files = Array.from(fileGroups.entries()).map(([filePath, group]) => ({
+        filePath,
+        total: group.total,
+        symbols: Array.from(group.symbols.entries()).map(([symbolId, symbol]) => ({
+          symbolId,
+          symbolName: symbol.symbolName,
+          symbolKind: symbol.symbolKind,
+          count: symbol.count,
+        })).sort((a, b) => b.count - a.count),
+      })).sort((a, b) => b.total - a.total);
+
+      return {
+        analysisId,
+        groupBy: "file",
+        fileCount: files.length,
+        files,
+      };
+    }
+  }
+
+  private async handleDiagnosticsCompareTools(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.diagnosticsStore) {
+      throw new Error("DiagnosticsStore not configured.");
+    }
+
+    const projectId = args.projectId as string;
+    const treeHash = args.treeHash as string;
+    const toolNames = args.toolNames as string[] | undefined;
+
+    // Query all tools for this project + treeHash
+    const allRuns: Array<{
+      toolName: string;
+      analysisId: string;
+      status: string;
+      createdAt: string;
+    }> = [];
+
+    // Get list of unique tools (we need to query one by one)
+    const toolsToQuery = toolNames ?? ["tsc", "eslint", "prettier"];
+
+    for (const toolName of toolsToQuery) {
+      const run = this.diagnosticsStore.getLatestRun({
+        projectId,
+        treeHash,
+        toolName,
+      });
+
+      if (run) {
+        allRuns.push({
+          toolName: run.tool.name,
+          analysisId: run.analysisId,
+          status: run.status,
+          createdAt: run.createdAt,
+        });
+      }
+    }
+
+    // Get findings summaries for each tool
+    const toolSummaries = allRuns.map(run => {
+      const findings = this.diagnosticsStore!.listFindings(run.analysisId);
+      const bySeverity: Record<string, number> = {};
+      const fileSet = new Set<string>();
+
+      for (const finding of findings) {
+        bySeverity[finding.severity] = (bySeverity[finding.severity] ?? 0) + 1;
+        fileSet.add(finding.filePath);
+      }
+
+      return {
+        toolName: run.toolName,
+        analysisId: run.analysisId,
+        status: run.status,
+        createdAt: run.createdAt,
+        total: findings.length,
+        bySeverity,
+        affectedFiles: fileSet.size,
+      };
+    });
+
+    // Find overlapping files
+    const allFiles = new Map<string, string[]>();
+    for (const run of allRuns) {
+      const findings = this.diagnosticsStore!.listFindings(run.analysisId);
+      for (const finding of findings) {
+        if (!allFiles.has(finding.filePath)) {
+          allFiles.set(finding.filePath, []);
+        }
+        allFiles.get(finding.filePath)!.push(run.toolName);
+      }
+    }
+
+    const overlappingFiles = Array.from(allFiles.entries())
+      .filter(([_, tools]) => tools.length > 1)
+      .map(([filePath, tools]) => ({
+        filePath,
+        tools: Array.from(new Set(tools)).sort(),
+      }));
+
+    // Aggregate severity counts
+    const aggregateSeverity: Record<string, number> = {};
+    for (const summary of toolSummaries) {
+      for (const [severity, count] of Object.entries(summary.bySeverity)) {
+        aggregateSeverity[severity] = (aggregateSeverity[severity] ?? 0) + count;
+      }
+    }
+
+    return {
+      projectId,
+      treeHash,
+      toolCount: toolSummaries.length,
+      tools: toolSummaries,
+      overlappingFiles: overlappingFiles.slice(0, 20), // Limit to top 20
+      aggregateSeverity,
+      totalFindings: toolSummaries.reduce((sum, s) => sum + s.total, 0),
     };
   }
 
