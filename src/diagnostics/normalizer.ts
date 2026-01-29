@@ -26,7 +26,8 @@ export function normalizeMessage(message: string): string {
 }
 
 export function normalizeFilePath(filePath: string): string {
-  return filePath.split(path.sep).join(path.posix.sep);
+  // Normalize both Windows (\) and Unix (/) path separators to forward slashes
+  return filePath.replace(/\\/g, "/");
 }
 
 export function normalizeFinding(

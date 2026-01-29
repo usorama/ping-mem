@@ -129,8 +129,7 @@ export class DiagnosticsStore {
         end_col INTEGER,
         chunk_id TEXT,
         fingerprint TEXT,
-        properties TEXT NOT NULL,
-        FOREIGN KEY (analysis_id) REFERENCES diagnostic_runs(analysis_id)
+        properties TEXT NOT NULL
       );
 
       CREATE INDEX IF NOT EXISTS idx_runs_project_tree
