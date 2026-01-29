@@ -19,6 +19,47 @@
 
 **ping-mem now includes a deterministic, time-aware codebase understanding system** that ingests code + git history and provides:
 
+## Diagnostics + Worklog System (v1.2.0)
+
+**ping-mem now includes a deterministic diagnostics collection and worklog system** that enables:
+- Bit-for-bit reproducible diagnostics tracking across CI runs
+- Temporal bug tracking with full provenance
+- Content-addressable analysis IDs for regression detection
+- Automated quality gate recording via CLI and CI/CD
+
+### Key Features
+
+1. **Deterministic Storage**
+ - SQLite-backed DiagnosticsStore with deterministic IDs
+ - analysisId = sha256(projectId + treeHash + tool + config + findings)
+ - findingId = sha256(analysisId + location + rule + message)
+
+2. **SARIF 2.1.0 Integration**
+ - Full parser for standardized tool output
+ - TypeScript SARIF generator (tsc-sarif)
+ - Normalized findings (cross-platform paths, whitespace, severity)
+
+3. **CLI Collector**
+ - Automated diagnostics ingestion: `bun run diagnostics:collect`
+ - Computes configHash, environmentHash, tool identity
+ - Records DIAGNOSTICS_INGESTED events to EventStore
+
+4. **CI/CD Integration**
+ - GitHub Actions workflow included
+ - REST API endpoints for non-MCP clients
+ - Artifact uploads (SARIF files + diagnostics DB)
+
+5. **Worklog Events**
+ - Track tool runs, git operations, agent tasks
+ - Full provenance for "what happened when"
+ - MCP tools: worklog_record, worklog_list
+
+---
+
+## Code Ingestion System (v1.1.0) - Continued
+
+**Deterministic, time-aware codebase understanding:**
+
 ### Core Capabilities
 
 1. **Deterministic Project Scanning**
@@ -55,7 +96,7 @@
    - Supports: `Why:`, `Reason:`, `Fixes #`, `Closes #`, ADR refs
    - **Never guesses or infers** – only explicit sources
 
-### Usage Example
+### Code Ingestion Usage Example
 
 ```bash
 # Ingest a project (via MCP tool)
@@ -77,6 +118,52 @@ codebase_timeline({
   projectId: "...",
   filePath: "src/auth.ts",  # optional
   limit: 50
+})
+```
+
+### Diagnostics Usage Example
+
+```bash
+# Generate TypeScript SARIF
+bun run diagnostics:tsc-sarif --output diagnostics/tsc.sarif
+
+# Collect diagnostics (via CLI)
+bun run diagnostics:collect \
+  --projectDir . \
+  --configHash $(sha256sum package.json tsconfig.json) \
+  --sarifPath diagnostics/tsc.sarif \
+  --toolName tsc \
+  --toolVersion $(bun --version)
+
+# Or via MCP tool
+diagnostics_ingest({
+  projectId: "ping-mem-abc123",
+  treeHash: "deadbeef",
+  toolName: "tsc",
+  toolVersion: "5.3.3",
+  configHash: "config-hash",
+  sarif: sarifPayload
+})
+
+# Query latest diagnostics
+diagnostics_latest({
+  projectId: "ping-mem-abc123",
+  toolName: "tsc"
+})
+
+# Compare two runs
+diagnostics_diff({
+  analysisIdA: "before-commit",
+  analysisIdB: "after-commit"
+})
+
+# Record worklog event
+worklog_record({
+  kind: "diagnostics",
+  title: "TypeScript type check",
+  status: "success",
+  toolName: "tsc",
+  durationMs: 1234
 })
 ```
 
@@ -455,13 +542,28 @@ All tools are prefixed with `ping_mem_` when loaded in Claude Code:
 | `context_hybrid_search` | Combined semantic/graph search |
 | `context_get_lineage` | Trace entity lineage |
 
-#### Codebase Tools (NEW in v1.1.0)
+#### Codebase Tools (v1.1.0)
 | Tool | Purpose |
 |------|---------|
 | `codebase_ingest` | Ingest project with deterministic hashing |
 | `codebase_verify` | Verify manifest integrity |
 | `codebase_search` | Semantic code search with provenance |
 | `codebase_timeline` | Query temporal history with explicit "why" |
+
+#### Diagnostics Tools (NEW in v1.2.0)
+| Tool | Purpose |
+|------|---------|
+| `diagnostics_ingest` | Ingest SARIF or normalized findings with full provenance |
+| `diagnostics_latest` | Query latest run by project/tool/tree |
+| `diagnostics_list` | List findings for a specific analysis |
+| `diagnostics_diff` | Compare two analyses (introduced/resolved/unchanged) |
+| `diagnostics_summary` | Aggregate finding counts by severity |
+
+#### Worklog Tools (NEW in v1.2.0)
+| Tool | Purpose |
+|------|---------|
+| `worklog_record` | Record deterministic worklog event (tool/diagnostics/git/task) |
+| `worklog_list` | List worklog events for a session |
 
 ---
 
@@ -711,6 +813,18 @@ ping-mem is designed as **universal infrastructure**. Potential consumers:
 
 ## Roadmap & Pending Work
 
+### Completed (v1.2.0)
+- ✅ **Deterministic Diagnostics + Worklog System**
+  - DiagnosticsStore with content-addressable IDs
+  - SARIF 2.1.0 parser and tsc-sarif generator
+  - CLI collector with configHash/environmentHash
+  - REST API endpoints (/api/v1/diagnostics/*)
+  - MCP tools: diagnostics_*, worklog_*
+  - GitHub Actions CI integration
+  - Comprehensive determinism tests (14 pass, 0 fail)
+  - Cross-platform path normalization
+  - Coordinate alignment verified (lineStart/lineEnd already implemented)
+
 ### Completed (v1.1.0)
 - ✅ Deterministic project scanning with Merkle tree hashing
 - ✅ Code chunking (code vs comments vs docstrings)
@@ -806,6 +920,7 @@ curl https://api.openai.com/v1/embeddings \
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.2.0 | 2026-01-29 | **Deterministic Diagnostics + Worklog** - DiagnosticsStore (content-addressable analysis IDs), SARIF 2.1.0 parser, tsc-sarif generator, CLI collector, REST endpoints, MCP diagnostics/worklog tools, GitHub Actions CI integration, comprehensive determinism tests (14 pass, 0 fail) |
 | 1.1.0 | 2026-01-29 | **Deterministic Temporal Code Ingestion** - ProjectScanner, CodeChunker, GitHistoryReader, TemporalCodeGraph, DeterministicVectorizer, CodeIndexer, IngestionService, MCP codebase tools |
 | 1.0.0 | 2026-01-27 | Initial standalone release |
 
