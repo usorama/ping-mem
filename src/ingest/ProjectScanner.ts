@@ -136,10 +136,14 @@ export class ProjectScanner {
       })
         .toString()
         .trim();
+      
+      // Include actual project path to ensure subdirectories get unique IDs
+      const normalizedProjectPath = this.normalizePath(rootPath);
+      
       if (remoteUrl) {
-        return `${this.normalizePath(gitRoot)}::${remoteUrl}`;
+        return `${this.normalizePath(gitRoot)}::${remoteUrl}::${normalizedProjectPath}`;
       }
-      return this.normalizePath(gitRoot);
+      return `${this.normalizePath(gitRoot)}::${normalizedProjectPath}`;
     } catch {
       return null;
     }

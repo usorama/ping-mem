@@ -41,17 +41,9 @@ export class CodeChunker {
           content: content.slice(i, commentStart),
         });
       }
-      if (commentStart > i) {
-        chunks.push({
-          type: "code",
-          start: i,
-          end: commentStart,
-          content: content.slice(i, commentStart),
-        });
-      }
       const { end, isBlock } = this.consumeComment(content, commentStart);
       chunks.push({
-        type: isBlock ? "comment" : "comment",
+        type: "comment",
         start: commentStart,
         end,
         content: content.slice(commentStart, end),
