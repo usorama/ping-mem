@@ -1,7 +1,7 @@
 {
-  "projectId": "b3cc87bafc307d19a68376d340fd41dc7e63b0541f7c8f45b34a1edd185055d4",
+  "projectId": "fd52cf7ddd219b6348e1dea36e86ce6889f358da7b89f7c71da06654d59f0d26",
   "rootPath": "/Users/umasankr/Projects/ping-mem",
-  "treeHash": "0dbf066462a0a544bf8c61f4e06ea1a7ba660e2cf242e41bd681b33bc07d69a6",
+  "treeHash": "d6bf59386e30c157cd666b0b2f68ddb26bce246e47ead6d74dde4515d1a51ca4",
   "files": [
     {
       "path": ".dockerignore",
@@ -25,8 +25,8 @@
     },
     {
       "path": "CLAUDE.md",
-      "sha256": "a6bca5da2bc702eb63d0da088295965f1975c651fde348be5cf5a458e2eda45b",
-      "bytes": 18499
+      "sha256": "e72d1df85c2d6c63fb18aa23886eea47b475c97df06e3ba1b02285b46536b103",
+      "bytes": 26641
     },
     {
       "path": "DOCKER.md",
@@ -52,6 +52,31 @@
       "path": "docker-compose.yml",
       "sha256": "9ad57027318d779dad9bc5631a18ecd56c840b4908077208266ab24f74fcbd3b",
       "bytes": 3389
+    },
+    {
+      "path": "docs/BUG_FIXES_2026-01-29.md",
+      "sha256": "7ebb761b93222c1c03c6bf9f4f00f42385e01417ceef3c6349b5c5b636df6d3b",
+      "bytes": 7939
+    },
+    {
+      "path": "docs/IMPLEMENTATION_SUMMARY.md",
+      "sha256": "3996c83116bca754cb182de5d7d64051715d1eddf31d0de5e9cf540750c28825",
+      "bytes": 9953
+    },
+    {
+      "path": "examples/resume-tracking/applications.json",
+      "sha256": "3c4c33f83c155ca4a0f358580be001cce4abbe4790576a5008c8a7c9ff918f08",
+      "bytes": 1539
+    },
+    {
+      "path": "examples/resume-tracking/decisions.yaml",
+      "sha256": "1b557540f98bd0e107a2724b69a0fa064a039e870a6f360f8dbfec5d52aab703",
+      "bytes": 823
+    },
+    {
+      "path": "examples/resume-tracking/my-resume.md",
+      "sha256": "310974d09f2d5c87894eebd06b63e10b3ece1a1b4d379d738114f66dd6271faf",
+      "bytes": 1151
     },
     {
       "path": "package.json",
@@ -107,6 +132,11 @@
       "path": "src/config/runtime.ts",
       "sha256": "0fb62171a8e887b39463fc4a0406f3764e7563a279ee99c4041f516abd0b8c68",
       "bytes": 4093
+    },
+    {
+      "path": "src/graph/DocumentGraph.ts",
+      "sha256": "9936e3c5d7fb9e019f206a1bddfe3f55f38b7c8521a7af58e82bc4870db3bdfc",
+      "bytes": 6277
     },
     {
       "path": "src/graph/EntityExtractor.ts",
@@ -220,8 +250,13 @@
     },
     {
       "path": "src/ingest/CodeChunker.ts",
-      "sha256": "f6d26c1a6b042a26b23818356a41c1c3ecbfe4b067eb75d0f6254c8e8456841f",
-      "bytes": 5436
+      "sha256": "4310131f2c4a5800f54689442d8924e6aea579f0c9fc5229b19fb740067b42ad",
+      "bytes": 5218
+    },
+    {
+      "path": "src/ingest/DocumentParser.ts",
+      "sha256": "bfe810c774ccabbaa43845a59f4bc2ab6220977deb037dc834cf582f603b6a96",
+      "bytes": 10972
     },
     {
       "path": "src/ingest/GitHistoryReader.ts",
@@ -245,8 +280,18 @@
     },
     {
       "path": "src/ingest/ProjectScanner.ts",
-      "sha256": "f6b2b6b665ee6b329015e26cf4956b88a53a9d1f6b0794569b23a848c976a937",
-      "bytes": 4407
+      "sha256": "fa7d6cd64d5f6be50f610db519c5d68abcc5c51e99b5846f74d12d43e88956fd",
+      "bytes": 4621
+    },
+    {
+      "path": "src/ingest/UnifiedIngestionOrchestrator.ts",
+      "sha256": "59b34c3b0b9cf4ee83f3da7475a5b04aac80076ef42b66fb95d162cbefe0a24a",
+      "bytes": 7362
+    },
+    {
+      "path": "src/ingest/UnifiedIngestionService.ts",
+      "sha256": "d34fe55be400dfc33183c3698a35b36bd024911110b570605bdd3e80bcf299fe",
+      "bytes": 8892
     },
     {
       "path": "src/ingest/index.ts",
@@ -434,9 +479,14 @@
       "bytes": 8105
     },
     {
-      "path": "test-ingestion.ts",
-      "sha256": "9c18ae0ae1c9913f2e4943a0088881ea84483d7bf0318c66e3aee078eb90fb35",
-      "bytes": 5110
+      "path": "test-documents.ts",
+      "sha256": "24810cb353036a88c8437f7c28d47221cf735d4da6197374a54d7dc64fc66040",
+      "bytes": 3865
+    },
+    {
+      "path": "test-incremental.ts",
+      "sha256": "8a55aa6413f541d0f4fbce639a4be427af2c357388e8f08360b9c787148c9ce5",
+      "bytes": 5696
     },
     {
       "path": "tsconfig.json",
@@ -444,6 +494,6 @@
       "bytes": 849
     }
   ],
-  "generatedAt": "2026-01-29T09:02:45.567Z",
+  "generatedAt": "2026-01-29T09:27:15.071Z",
   "schemaVersion": 1
 }

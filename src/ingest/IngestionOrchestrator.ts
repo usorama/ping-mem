@@ -30,6 +30,8 @@ export interface ChunkWithId {
   type: "code" | "comment" | "docstring";
   start: number;
   end: number;
+  lineStart: number;
+  lineEnd: number;
   content: string;
 }
 
@@ -124,9 +126,8 @@ export class IngestionOrchestrator {
       const fullPath = path.join(projectRoot, entry.path);
       const content = fs.readFileSync(fullPath, "utf-8");
       const rawChunks = this.chunker.chunkFile(entry.path, content);
-
       const chunksWithIds = rawChunks.map((chunk) =>
-        this.computeChunkId(entry.path, entry.sha256, chunk)
+        this.buildChunkWithMetadata(entry.path, entry.sha256, content, chunk)
       );
 
       results.push({
@@ -139,9 +140,10 @@ export class IngestionOrchestrator {
     return results;
   }
 
-  private computeChunkId(
+  private buildChunkWithMetadata(
     filePath: string,
     fileSha256: string,
+    fileContent: string,
     chunk: TextChunk
   ): ChunkWithId {
     const hash = crypto.createHash("sha256");
@@ -162,7 +164,23 @@ export class IngestionOrchestrator {
       type: chunk.type,
       start: chunk.start,
       end: chunk.end,
+      lineStart: this.lineNumberForOffset(fileContent, chunk.start),
+      lineEnd: this.lineNumberForOffset(
+        fileContent,
+        Math.max(chunk.end - 1, chunk.start)
+      ),
       content: chunk.content,
     };
+  }
+
+  private lineNumberForOffset(content: string, offset: number): number {
+    const clamped = Math.max(0, Math.min(offset, content.length));
+    let line = 1;
+    for (let i = 0; i < clamped; i++) {
+      if (content[i] === "\n") {
+        line += 1;
+      }
+    }
+    return line;
   }
 }

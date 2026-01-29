@@ -25,6 +25,8 @@ export interface ChunkSearchResult {
   filePath: string;
   type: "code" | "comment" | "docstring";
   content: string;
+  lineStart?: number;
+  lineEnd?: number;
   score: number;
 }
 
@@ -122,6 +124,8 @@ export class CodeIndexer {
         filePath: (payload?.filePath as string) ?? "",
         type: (payload?.type as "code" | "comment" | "docstring") ?? "code",
         content: (payload?.content as string) ?? "",
+        lineStart: payload?.lineStart as number | undefined,
+        lineEnd: payload?.lineEnd as number | undefined,
         score: r.score,
       };
     });
@@ -173,6 +177,8 @@ export class CodeIndexer {
             content: chunk.content,
             start: chunk.start,
             end: chunk.end,
+            lineStart: chunk.lineStart,
+            lineEnd: chunk.lineEnd,
             ingestedAt: result.ingestedAt,
           },
         });

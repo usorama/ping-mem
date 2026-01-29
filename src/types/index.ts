@@ -189,7 +189,13 @@ export type EventType =
   | "MEMORY_DELETED"
   | "MEMORY_RECALLED"
   | "CHECKPOINT_CREATED"
-  | "CONTEXT_LOADED";
+  | "CONTEXT_LOADED"
+  | "TOOL_RUN_RECORDED"
+  | "DIAGNOSTICS_INGESTED"
+  | "GIT_OPERATION_RECORDED"
+  | "AGENT_TASK_STARTED"
+  | "AGENT_TASK_SUMMARY"
+  | "AGENT_TASK_COMPLETED";
 
 /**
  * Event payload for session events
@@ -219,6 +225,25 @@ export interface MemoryEventData {
   operation: "save" | "update" | "delete" | "recall";
   /** Number of memories affected */
   affectedCount?: number;
+}
+
+export interface WorklogEventData {
+  sessionId: SessionId;
+  kind: "tool" | "diagnostics" | "git" | "task";
+  title: string;
+  status?: "success" | "failed" | "partial";
+  toolName?: string;
+  toolVersion?: string;
+  configHash?: string;
+  environmentHash?: string;
+  projectId?: string;
+  treeHash?: string;
+  commitHash?: string;
+  runId?: string;
+  command?: string;
+  durationMs?: number;
+  summary?: string;
+  metadata?: Record<string, unknown>;
 }
 
 // ============================================================================

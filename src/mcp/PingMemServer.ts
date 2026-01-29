@@ -28,16 +28,26 @@ import type { EvolutionEngine } from "../graph/EvolutionEngine.js";
 import type {
   SessionId,
   SessionStatus,
+  EventType,
   MemoryCategory,
   MemoryPriority,
   MemoryPrivacy,
   MemoryQuery,
   Entity,
   Relationship,
+  WorklogEventData,
 } from "../types/index.js";
 import { RelationshipType } from "../types/index.js";
 import { createRuntimeServices, loadRuntimeConfig } from "../config/runtime.js";
 import { IngestionService } from "../ingest/IngestionService.js";
+import {
+  DiagnosticsStore,
+  parseSarif,
+  normalizeFindings,
+  computeFindingsDigest,
+  computeAnalysisId,
+} from "../diagnostics/index.js";
+import type { FindingInput } from "../diagnostics/types.js";
 
 // ============================================================================
 // Tool Schemas
@@ -229,6 +239,139 @@ export const TOOLS = [
     },
   },
   {
+    name: "worklog_record",
+    description: "Record a deterministic worklog event (tool, diagnostics, git, task)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        kind: {
+          type: "string",
+          enum: ["tool", "diagnostics", "git", "task"],
+          description: "Worklog category",
+        },
+        title: { type: "string", description: "Short title for the event" },
+        status: {
+          type: "string",
+          enum: ["success", "failed", "partial"],
+          description: "Outcome status",
+        },
+        phase: {
+          type: "string",
+          enum: ["started", "summary", "completed"],
+          description: "Task phase (only for kind=task)",
+        },
+        toolName: { type: "string", description: "Tool name" },
+        toolVersion: { type: "string", description: "Tool version" },
+        configHash: { type: "string", description: "Deterministic config hash" },
+        environmentHash: { type: "string", description: "Environment hash" },
+        projectId: { type: "string", description: "Project ID" },
+        treeHash: { type: "string", description: "Tree hash" },
+        commitHash: { type: "string", description: "Commit hash" },
+        runId: { type: "string", description: "Diagnostics run ID" },
+        command: { type: "string", description: "Command executed" },
+        durationMs: { type: "number", description: "Duration in milliseconds" },
+        summary: { type: "string", description: "Summary of outcome" },
+        metadata: { type: "object", description: "Additional metadata" },
+        sessionId: { type: "string", description: "Explicit session ID (optional)" },
+      },
+      required: ["kind", "title"],
+    },
+  },
+  {
+    name: "worklog_list",
+    description: "List worklog events for a session",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: { type: "string", description: "Session ID (optional)" },
+        limit: { type: "number", description: "Max events to return" },
+        eventTypes: {
+          type: "array",
+          items: { type: "string" },
+          description: "Filter by event types",
+        },
+      },
+    },
+  },
+  {
+    name: "diagnostics_ingest",
+    description: "Ingest diagnostics results (SARIF 2.1.0 or normalized findings).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectId: { type: "string", description: "Project ID" },
+        treeHash: { type: "string", description: "Tree hash" },
+        commitHash: { type: "string", description: "Optional commit hash" },
+        toolName: { type: "string", description: "Tool name (optional if SARIF provides it)" },
+        toolVersion: { type: "string", description: "Tool version (optional if SARIF provides it)" },
+        configHash: { type: "string", description: "Deterministic config hash" },
+        environmentHash: { type: "string", description: "Environment hash" },
+        status: {
+          type: "string",
+          enum: ["passed", "failed", "partial"],
+          description: "Run status",
+        },
+        durationMs: { type: "number", description: "Duration in milliseconds" },
+        sarif: { type: ["object", "string"], description: "SARIF 2.1.0 payload" },
+        findings: {
+          type: "array",
+          description: "Normalized findings (optional alternative to SARIF)",
+          items: { type: "object" },
+        },
+        metadata: { type: "object", description: "Additional metadata" },
+      },
+      required: ["projectId", "treeHash", "configHash"],
+    },
+  },
+  {
+    name: "diagnostics_latest",
+    description: "Get latest diagnostics run for a project/tool/treeHash.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectId: { type: "string", description: "Project ID" },
+        toolName: { type: "string", description: "Tool name" },
+        toolVersion: { type: "string", description: "Tool version" },
+        treeHash: { type: "string", description: "Tree hash" },
+      },
+      required: ["projectId"],
+    },
+  },
+  {
+    name: "diagnostics_list",
+    description: "List findings for a specific analysisId.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        analysisId: { type: "string", description: "Analysis ID" },
+      },
+      required: ["analysisId"],
+    },
+  },
+  {
+    name: "diagnostics_diff",
+    description: "Diff two analyses by analysisId.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        analysisIdA: { type: "string", description: "Base analysis ID" },
+        analysisIdB: { type: "string", description: "Compare analysis ID" },
+      },
+      required: ["analysisIdA", "analysisIdB"],
+    },
+  },
+  {
+    name: "diagnostics_summary",
+    description: "Summarize findings for a specific analysisId.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        analysisId: { type: "string", description: "Analysis ID" },
+      },
+      required: ["analysisId"],
+    },
+  },
+  {
     name: "context_query_evolution",
     description: "Query temporal evolution of an entity",
     inputSchema: {
@@ -321,6 +464,10 @@ export interface PingMemServerConfig {
   evolutionEngine?: EvolutionEngine;
   /** Optional IngestionService for codebase ingestion */
   ingestionService?: IngestionService;
+  /** Optional DiagnosticsStore for diagnostics ingestion */
+  diagnosticsStore?: DiagnosticsStore;
+  /** Optional diagnostics DB path */
+  diagnosticsDbPath?: string;
 }
 
 // ============================================================================
@@ -344,6 +491,7 @@ export class PingMemServer {
   private lineageEngine: LineageEngine | null = null;
   private evolutionEngine: EvolutionEngine | null = null;
   private ingestionService: IngestionService | null = null;
+  private diagnosticsStore: DiagnosticsStore | null = null;
 
   constructor(config: PingMemServerConfig = {}) {
     this.config = {
@@ -388,6 +536,11 @@ export class PingMemServer {
     if (config.ingestionService) {
       this.ingestionService = config.ingestionService;
     }
+    this.diagnosticsStore =
+      config.diagnosticsStore ??
+      new DiagnosticsStore({
+        dbPath: config.diagnosticsDbPath,
+      });
 
     // Initialize MCP server
     this.server = new Server(
@@ -473,6 +626,27 @@ export class PingMemServer {
       case "context_query_evolution":
         return this.handleQueryEvolution(args);
 
+      case "worklog_record":
+        return this.handleWorklogRecord(args);
+
+      case "worklog_list":
+        return this.handleWorklogList(args);
+
+      case "diagnostics_ingest":
+        return this.handleDiagnosticsIngest(args);
+
+      case "diagnostics_latest":
+        return this.handleDiagnosticsLatest(args);
+
+      case "diagnostics_list":
+        return this.handleDiagnosticsList(args);
+
+      case "diagnostics_diff":
+        return this.handleDiagnosticsDiff(args);
+
+      case "diagnostics_summary":
+        return this.handleDiagnosticsSummary(args);
+
       case "codebase_ingest":
         return this.handleCodebaseIngest(args);
 
@@ -488,6 +662,16 @@ export class PingMemServer {
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
+  }
+
+  /**
+   * Dispatch a tool call from external transports (e.g. SSE).
+   */
+  async dispatchToolCall(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return this.handleToolCall(name, args);
   }
 
   // ============================================================================
@@ -1107,6 +1291,276 @@ export class PingMemServer {
   }
 
   // ============================================================================
+  // Worklog Handlers
+  // ============================================================================
+
+  private async handleWorklogRecord(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const sessionId = (args.sessionId as string | undefined) ?? this.currentSessionId;
+    if (!sessionId) {
+      throw new Error("No active session. Use context_session_start first.");
+    }
+
+    const kind = args.kind as WorklogEventData["kind"];
+    const phase = args.phase as string | undefined;
+
+    let eventType: EventType;
+    switch (kind) {
+      case "tool":
+        eventType = "TOOL_RUN_RECORDED";
+        break;
+      case "diagnostics":
+        eventType = "DIAGNOSTICS_INGESTED";
+        break;
+      case "git":
+        eventType = "GIT_OPERATION_RECORDED";
+        break;
+      case "task":
+        if (phase === "started") {
+          eventType = "AGENT_TASK_STARTED";
+        } else if (phase === "summary") {
+          eventType = "AGENT_TASK_SUMMARY";
+        } else if (phase === "completed") {
+          eventType = "AGENT_TASK_COMPLETED";
+        } else {
+          throw new Error("Task worklog requires phase: started | summary | completed");
+        }
+        break;
+      default:
+        throw new Error("Invalid worklog kind");
+    }
+
+    const payload: WorklogEventData = {
+      sessionId,
+      kind,
+      title: args.title as string,
+    };
+
+    if (args.status !== undefined) payload.status = args.status as WorklogEventData["status"];
+    if (args.toolName !== undefined) payload.toolName = args.toolName as string;
+    if (args.toolVersion !== undefined) payload.toolVersion = args.toolVersion as string;
+    if (args.configHash !== undefined) payload.configHash = args.configHash as string;
+    if (args.environmentHash !== undefined) payload.environmentHash = args.environmentHash as string;
+    if (args.projectId !== undefined) payload.projectId = args.projectId as string;
+    if (args.treeHash !== undefined) payload.treeHash = args.treeHash as string;
+    if (args.commitHash !== undefined) payload.commitHash = args.commitHash as string;
+    if (args.runId !== undefined) payload.runId = args.runId as string;
+    if (args.command !== undefined) payload.command = args.command as string;
+    if (args.durationMs !== undefined) payload.durationMs = args.durationMs as number;
+    if (args.summary !== undefined) payload.summary = args.summary as string;
+    if (args.metadata !== undefined) payload.metadata = args.metadata as Record<string, unknown>;
+
+    const metadata = {
+      kind,
+      projectId: payload.projectId,
+      treeHash: payload.treeHash,
+      commitHash: payload.commitHash,
+      toolName: payload.toolName,
+      toolVersion: payload.toolVersion,
+      runId: payload.runId,
+    };
+
+    const event = await this.eventStore.createEvent(sessionId, eventType, payload, metadata);
+
+    return {
+      success: true,
+      eventId: event.eventId,
+      eventType: event.eventType,
+      timestamp: event.timestamp.toISOString(),
+    };
+  }
+
+  private async handleWorklogList(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const sessionId = (args.sessionId as string | undefined) ?? this.currentSessionId;
+    if (!sessionId) {
+      throw new Error("No active session. Use context_session_start first.");
+    }
+
+    const limit = (args.limit as number | undefined) ?? 100;
+    const allowedTypes = new Set(
+      ((args.eventTypes as string[] | undefined) ?? [
+        "TOOL_RUN_RECORDED",
+        "DIAGNOSTICS_INGESTED",
+        "GIT_OPERATION_RECORDED",
+        "AGENT_TASK_STARTED",
+        "AGENT_TASK_SUMMARY",
+        "AGENT_TASK_COMPLETED",
+      ])
+    );
+
+    const events = await this.eventStore.getBySession(sessionId);
+    const filtered = events.filter((e) => allowedTypes.has(e.eventType));
+    const selected = filtered.slice(-limit);
+
+    return {
+      sessionId,
+      count: selected.length,
+      events: selected.map((e) => ({
+        eventId: e.eventId,
+        eventType: e.eventType,
+        timestamp: e.timestamp.toISOString(),
+        payload: e.payload,
+        metadata: e.metadata,
+        causedBy: e.causedBy,
+      })),
+    };
+  }
+
+  // ============================================================================
+  // Diagnostics Handlers
+  // ============================================================================
+
+  private async handleDiagnosticsIngest(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.diagnosticsStore) {
+      throw new Error("DiagnosticsStore not configured.");
+    }
+
+    const projectId = args.projectId as string;
+    const treeHash = args.treeHash as string;
+    const commitHash = args.commitHash as string | undefined;
+    const configHash = args.configHash as string;
+    const environmentHash = args.environmentHash as string | undefined;
+    const status = (args.status as "passed" | "failed" | "partial" | undefined) ?? "failed";
+    const durationMs = args.durationMs as number | undefined;
+    const metadata = (args.metadata as Record<string, unknown> | undefined) ?? {};
+
+    let findings: FindingInput[] = [];
+    let toolName = args.toolName as string | undefined;
+    let toolVersion = args.toolVersion as string | undefined;
+    let rawSarif: string | undefined;
+
+    if (args.sarif !== undefined) {
+      const sarifPayload = typeof args.sarif === "string" ? JSON.parse(args.sarif) : args.sarif;
+      const parsed = parseSarif(sarifPayload);
+      findings = parsed.findings;
+      toolName = toolName ?? parsed.toolName;
+      toolVersion = toolVersion ?? parsed.toolVersion;
+      rawSarif = typeof args.sarif === "string" ? args.sarif : JSON.stringify(args.sarif);
+    } else if (Array.isArray(args.findings)) {
+      findings = args.findings as FindingInput[];
+    } else {
+      throw new Error("Diagnostics ingest requires sarif or findings.");
+    }
+
+    if (!toolName || !toolVersion) {
+      throw new Error("toolName and toolVersion are required (or must be in SARIF).");
+    }
+
+    const tempFindings = normalizeFindings(findings, "temp-analysis");
+    const findingsDigest = computeFindingsDigest(tempFindings);
+    const analysisId = computeAnalysisId({
+      projectId,
+      treeHash,
+      toolName,
+      toolVersion,
+      configHash,
+      findingsDigest,
+    });
+
+    const normalizedFindings = normalizeFindings(findings, analysisId);
+    const runId = this.diagnosticsStore.createRunId();
+
+    this.diagnosticsStore.saveRun(
+      {
+        runId,
+        analysisId,
+        projectId,
+        treeHash,
+        commitHash,
+        tool: { name: toolName, version: toolVersion },
+        configHash,
+        environmentHash,
+        status,
+        createdAt: new Date().toISOString(),
+        durationMs,
+        findingsDigest,
+        rawSarif,
+        metadata,
+      },
+      normalizedFindings
+    );
+
+    return {
+      success: true,
+      runId,
+      analysisId,
+      findingsCount: normalizedFindings.length,
+      toolName,
+      toolVersion,
+      treeHash,
+    };
+  }
+
+  private async handleDiagnosticsLatest(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.diagnosticsStore) {
+      throw new Error("DiagnosticsStore not configured.");
+    }
+
+    const result = this.diagnosticsStore.getLatestRun({
+      projectId: args.projectId as string,
+      toolName: args.toolName as string | undefined,
+      toolVersion: args.toolVersion as string | undefined,
+      treeHash: args.treeHash as string | undefined,
+    });
+
+    if (!result) {
+      return { found: false };
+    }
+
+    return { found: true, run: result };
+  }
+
+  private async handleDiagnosticsList(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.diagnosticsStore) {
+      throw new Error("DiagnosticsStore not configured.");
+    }
+
+    const analysisId = args.analysisId as string;
+    const findings = this.diagnosticsStore.listFindings(analysisId);
+
+    return {
+      analysisId,
+      count: findings.length,
+      findings,
+    };
+  }
+
+  private async handleDiagnosticsDiff(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.diagnosticsStore) {
+      throw new Error("DiagnosticsStore not configured.");
+    }
+
+    const analysisIdA = args.analysisIdA as string;
+    const analysisIdB = args.analysisIdB as string;
+    const diff = this.diagnosticsStore.diffAnalyses(analysisIdA, analysisIdB);
+
+    return {
+      analysisIdA,
+      analysisIdB,
+      ...diff,
+    };
+  }
+
+  private async handleDiagnosticsSummary(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.diagnosticsStore) {
+      throw new Error("DiagnosticsStore not configured.");
+    }
+
+    const analysisId = args.analysisId as string;
+    const findings = this.diagnosticsStore.listFindings(analysisId);
+    const counts: Record<string, number> = {};
+
+    for (const finding of findings) {
+      counts[finding.severity] = (counts[finding.severity] ?? 0) + 1;
+    }
+
+    return {
+      analysisId,
+      total: findings.length,
+      bySeverity: counts,
+    };
+  }
+
+  // ============================================================================
   // Codebase Ingestion Handlers
   // ============================================================================
 
@@ -1325,6 +1779,10 @@ export class PingMemServer {
 
     // Close event store
     await this.eventStore.close();
+
+    if (this.diagnosticsStore) {
+      this.diagnosticsStore.close();
+    }
 
     // Close session manager
     await this.sessionManager.close();

@@ -132,7 +132,7 @@ export class TemporalCodeGraph {
       const result = await session.run(
         `
         MATCH (p:Project { projectId: $projectId })-[:HAS_FILE]->(f:File { fileId: $fileId })-[:HAS_CHUNK]->(c:Chunk)
-        RETURN c.chunkId AS chunkId, c.type AS type, c.start AS start, c.end AS end, c.content AS content
+        RETURN c.chunkId AS chunkId, c.type AS type, c.start AS start, c.end AS end, c.lineStart AS lineStart, c.lineEnd AS lineEnd, c.content AS content
         ORDER BY c.start
         `,
         { projectId, fileId }
@@ -143,6 +143,8 @@ export class TemporalCodeGraph {
         type: r.get("type") as "code" | "comment" | "docstring",
         start: r.get("start").toNumber() as number,
         end: r.get("end").toNumber() as number,
+        lineStart: r.get("lineStart")?.toNumber?.() ?? 0,
+        lineEnd: r.get("lineEnd")?.toNumber?.() ?? 0,
         content: r.get("content") as string,
       }));
     } finally {
@@ -263,6 +265,8 @@ export class TemporalCodeGraph {
           SET c.type = $type,
               c.start = $start,
               c.end = $end,
+              c.lineStart = $lineStart,
+              c.lineEnd = $lineEnd,
               c.content = $content,
               c.lastIngestedAt = $ingestedAt
           MERGE (f)-[:HAS_CHUNK { ingestedAt: $ingestedAt }]->(c)
@@ -273,6 +277,8 @@ export class TemporalCodeGraph {
             type: chunk.type,
             start: chunk.start,
             end: chunk.end,
+            lineStart: chunk.lineStart,
+            lineEnd: chunk.lineEnd,
             content: chunk.content,
             ingestedAt,
           }
@@ -371,7 +377,7 @@ export class TemporalCodeGraph {
         `
         MATCH (c:Commit { hash: $commitHash })
         MATCH (f:File { fileId: $fileId })-[:HAS_CHUNK]->(chunk:Chunk)
-        WHERE chunk.start <= $newStart AND chunk.end >= $newStart
+        WHERE chunk.lineStart <= $newStart AND chunk.lineEnd >= $newStart
         MERGE (c)-[:CHANGES {
           hunkId: $hunkId,
           oldStart: $oldStart,

@@ -19,6 +19,7 @@ import type {
   MemoryId,
   SessionEventData,
   MemoryEventData,
+  WorklogEventData,
 } from "../types/index.js";
 
 // ============================================================================
@@ -66,7 +67,7 @@ export interface Event {
   /** Type of event */
   eventType: EventType;
   /** Event payload (session or memory data) */
-  payload: SessionEventData | MemoryEventData | Record<string, unknown>;
+  payload: SessionEventData | MemoryEventData | WorklogEventData | Record<string, unknown>;
   /** Event that caused this one (causality) */
   causedBy?: string;
   /** Additional metadata */
@@ -353,7 +354,7 @@ export class EventStore {
   async createEvent(
     sessionId: SessionId,
     eventType: EventType,
-    payload: SessionEventData | MemoryEventData | Record<string, unknown>,
+    payload: SessionEventData | MemoryEventData | WorklogEventData | Record<string, unknown>,
     metadata: Record<string, unknown> = {},
     causedBy?: string
   ): Promise<Event> {
