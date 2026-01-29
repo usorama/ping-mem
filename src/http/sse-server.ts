@@ -55,6 +55,8 @@ export class SSEPingMemServer {
       lineageEngine: config.lineageEngine,
       evolutionEngine: config.evolutionEngine,
       ingestionService: config.ingestionService,
+      diagnosticsStore: config.diagnosticsStore,
+      diagnosticsDbPath: config.diagnosticsDbPath,
     });
 
     // Initialize MCP server

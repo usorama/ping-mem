@@ -33,7 +33,9 @@
     "dev": "tsc --watch",
     "start": "bun run dist/http/index.js",
     "start:sse": "PING_MEM_TRANSPORT=sse bun run dist/http/index.js",
-    "start:rest": "PING_MEM_TRANSPORT=rest bun run dist/http/index.js"
+    "start:rest": "PING_MEM_TRANSPORT=rest bun run dist/http/index.js",
+    "diagnostics:tsc-sarif": "bun run src/diagnostics/tsc-sarif.ts",
+    "diagnostics:collect": "bun run src/cli.ts collect"
   },
   "keywords": [
     "ai",

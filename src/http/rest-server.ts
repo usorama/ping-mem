@@ -19,6 +19,14 @@ import { EventStore } from "../storage/EventStore.js";
 import { VectorIndex, createInMemoryVectorIndex } from "../search/VectorIndex.js";
 import type { GraphManager } from "../graph/GraphManager.js";
 import type { HybridSearchEngine } from "../search/HybridSearchEngine.js";
+import {
+  DiagnosticsStore,
+  parseSarif,
+  normalizeFindings,
+  computeFindingsDigest,
+  computeAnalysisId,
+} from "../diagnostics/index.js";
+import type { FindingInput } from "../diagnostics/types.js";
 import type {
   SessionId,
   MemoryCategory,
@@ -58,6 +66,7 @@ export class RESTPingMemServer {
   private currentSessionId: SessionId | null = null;
   private graphManager: GraphManager | null = null;
   private hybridSearchEngine: HybridSearchEngine | null = null;
+  private diagnosticsStore: DiagnosticsStore;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -70,6 +79,11 @@ export class RESTPingMemServer {
     // Initialize core components
     this.eventStore = new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
     this.sessionManager = new SessionManager({ eventStore: this.eventStore });
+    this.diagnosticsStore =
+      this.config.diagnosticsStore ??
+      new DiagnosticsStore({
+        dbPath: this.config.diagnosticsDbPath,
+      });
 
     // Initialize vector index if enabled
     if (this.config.enableVectorSearch && this.config.vectorDimensions !== undefined) {
@@ -249,6 +263,203 @@ export class RESTPingMemServer {
 
         return c.json<RESTSuccessResponse<{ message: string }>>({
           data: { message: "Memory saved successfully" },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Diagnostics Operations
+    // ============================================================================
+
+    this.app.post("/api/v1/diagnostics/ingest", async (c) => {
+      try {
+        const body = await c.req.json();
+
+        const projectId = body.projectId as string | undefined;
+        const treeHash = body.treeHash as string | undefined;
+        const configHash = body.configHash as string | undefined;
+        if (!projectId || !treeHash || !configHash) {
+          return c.json<RESTErrorResponse>(
+            {
+              error: "Bad Request",
+              message: "projectId, treeHash, and configHash are required",
+            },
+            400
+          );
+        }
+
+        const commitHash = body.commitHash as string | undefined;
+        const environmentHash = body.environmentHash as string | undefined;
+        const status =
+          (body.status as "passed" | "failed" | "partial" | undefined) ?? "failed";
+        const durationMs = body.durationMs as number | undefined;
+        const metadata = (body.metadata as Record<string, unknown> | undefined) ?? {};
+
+        let findings: FindingInput[] = [];
+        let toolName = body.toolName as string | undefined;
+        let toolVersion = body.toolVersion as string | undefined;
+        let rawSarif: string | undefined;
+
+        if (body.sarif !== undefined) {
+          const sarifPayload = typeof body.sarif === "string" ? JSON.parse(body.sarif) : body.sarif;
+          const parsed = parseSarif(sarifPayload);
+          findings = parsed.findings;
+          toolName = toolName ?? parsed.toolName;
+          toolVersion = toolVersion ?? parsed.toolVersion;
+          rawSarif = typeof body.sarif === "string" ? body.sarif : JSON.stringify(body.sarif);
+        } else if (Array.isArray(body.findings)) {
+          findings = body.findings as FindingInput[];
+        } else {
+          return c.json<RESTErrorResponse>(
+            {
+              error: "Bad Request",
+              message: "Diagnostics ingest requires sarif or findings",
+            },
+            400
+          );
+        }
+
+        if (!toolName || !toolVersion) {
+          return c.json<RESTErrorResponse>(
+            {
+              error: "Bad Request",
+              message: "toolName and toolVersion are required (or must be in SARIF)",
+            },
+            400
+          );
+        }
+
+        const tempFindings = normalizeFindings(findings, "temp-analysis");
+        const findingsDigest = computeFindingsDigest(tempFindings);
+        const analysisId = computeAnalysisId({
+          projectId,
+          treeHash,
+          toolName,
+          toolVersion,
+          configHash,
+          findingsDigest,
+        });
+
+        const normalizedFindings = normalizeFindings(findings, analysisId);
+        const runId = this.diagnosticsStore.createRunId();
+
+        this.diagnosticsStore.saveRun(
+          {
+            runId,
+            analysisId,
+            projectId,
+            treeHash,
+            commitHash,
+            tool: { name: toolName, version: toolVersion },
+            configHash,
+            environmentHash,
+            status,
+            createdAt: new Date().toISOString(),
+            durationMs,
+            findingsDigest,
+            rawSarif,
+            metadata,
+          },
+          normalizedFindings
+        );
+
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: {
+            success: true,
+            runId,
+            analysisId,
+            findingsCount: normalizedFindings.length,
+            toolName,
+            toolVersion,
+            treeHash,
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/diagnostics/latest", async (c) => {
+      try {
+        const projectId = c.req.query("projectId");
+        if (!projectId) {
+          return c.json<RESTErrorResponse>(
+            {
+              error: "Bad Request",
+              message: "projectId is required",
+            },
+            400
+          );
+        }
+
+        const run = this.diagnosticsStore.getLatestRun({
+          projectId,
+          toolName: c.req.query("toolName") ?? undefined,
+          toolVersion: c.req.query("toolVersion") ?? undefined,
+          treeHash: c.req.query("treeHash") ?? undefined,
+        });
+
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: run ? { found: true, run } : { found: false },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/diagnostics/findings/:analysisId", async (c) => {
+      try {
+        const analysisId = c.req.param("analysisId");
+        const findings = this.diagnosticsStore.listFindings(analysisId);
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: { analysisId, count: findings.length, findings },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.post("/api/v1/diagnostics/diff", async (c) => {
+      try {
+        const body = await c.req.json();
+        const analysisIdA = body.analysisIdA as string | undefined;
+        const analysisIdB = body.analysisIdB as string | undefined;
+        if (!analysisIdA || !analysisIdB) {
+          return c.json<RESTErrorResponse>(
+            {
+              error: "Bad Request",
+              message: "analysisIdA and analysisIdB are required",
+            },
+            400
+          );
+        }
+
+        const diff = this.diagnosticsStore.diffAnalyses(analysisIdA, analysisIdB);
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: { analysisIdA, analysisIdB, ...diff },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/diagnostics/summary/:analysisId", async (c) => {
+      try {
+        const analysisId = c.req.param("analysisId");
+        const findings = this.diagnosticsStore.listFindings(analysisId);
+        const bySeverity: Record<string, number> = {};
+        for (const finding of findings) {
+          bySeverity[finding.severity] = (bySeverity[finding.severity] ?? 0) + 1;
+        }
+
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: {
+            analysisId,
+            total: findings.length,
+            bySeverity,
+          },
         });
       } catch (error) {
         return this.handleError(c, error);

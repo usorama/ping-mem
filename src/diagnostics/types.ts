@@ -16,15 +16,15 @@ export interface DiagnosticRun {
   analysisId: string;
   projectId: string;
   treeHash: string;
-  commitHash?: string;
+  commitHash?: string | undefined;
   tool: DiagnosticToolIdentity;
   configHash: string;
-  environmentHash?: string;
+  environmentHash?: string | undefined;
   status: DiagnosticStatus;
   createdAt: string;
-  durationMs?: number;
+  durationMs?: number | undefined;
   findingsDigest: string;
-  rawSarif?: string;
+  rawSarif?: string | undefined;
   metadata: DiagnosticRunMetadata;
 }
 
@@ -35,12 +35,12 @@ export interface NormalizedFinding {
   severity: DiagnosticSeverity;
   message: string;
   filePath: string;
-  startLine?: number;
-  startColumn?: number;
-  endLine?: number;
-  endColumn?: number;
-  chunkId?: string;
-  fingerprint?: string;
+  startLine?: number | undefined;
+  startColumn?: number | undefined;
+  endLine?: number | undefined;
+  endColumn?: number | undefined;
+  chunkId?: string | undefined;
+  fingerprint?: string | undefined;
   properties: Record<string, unknown>;
 }
 
@@ -49,24 +49,24 @@ export interface FindingInput {
   severity: DiagnosticSeverity;
   message: string;
   filePath: string;
-  startLine?: number;
-  startColumn?: number;
-  endLine?: number;
-  endColumn?: number;
-  chunkId?: string;
-  fingerprint?: string;
-  properties?: Record<string, unknown>;
+  startLine?: number | undefined;
+  startColumn?: number | undefined;
+  endLine?: number | undefined;
+  endColumn?: number | undefined;
+  chunkId?: string | undefined;
+  fingerprint?: string | undefined;
+  properties?: Record<string, unknown> | undefined;
 }
 
 export interface SarifParseResult {
   findings: FindingInput[];
-  toolName?: string;
-  toolVersion?: string;
+  toolName?: string | undefined;
+  toolVersion?: string | undefined;
 }
 
 export interface DiagnosticsQueryFilter {
   projectId: string;
-  toolName?: string;
-  toolVersion?: string;
-  treeHash?: string;
+  toolName?: string | undefined;
+  toolVersion?: string | undefined;
+  treeHash?: string | undefined;
 }

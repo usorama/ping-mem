@@ -36,9 +36,11 @@ export interface HTTPServerConfig {
     headers?: string[];
   };
   /** API key for authentication (optional) */
-  apiKey?: string;
+  apiKey?: string | undefined;
   /** Session ID generator for stateful transport (optional) */
-  sessionIdGenerator?: () => string;
+  sessionIdGenerator?: (() => string) | undefined;
+  /** Diagnostics database path (optional) */
+  diagnosticsDbPath?: string | undefined;
 }
 
 // Re-export PingMemServerConfig for convenience

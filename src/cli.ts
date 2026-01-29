@@ -121,11 +121,12 @@ async function collectDiagnostics(args: ArgMap): Promise<void> {
   });
   const normalizedFindings = normalizeFindings(parsed.findings, analysisId);
 
-  const diagnosticsStore = new DiagnosticsStore({
-    dbPath: getArg(args, "diagnosticsDbPath"),
-  });
+  const diagnosticsDbPath = getArg(args, "diagnosticsDbPath");
+  const diagnosticsStore = new DiagnosticsStore(
+    diagnosticsDbPath ? { dbPath: diagnosticsDbPath } : {}
+  );
   const runId = diagnosticsStore.createRunId();
-  const status =
+  const diagnosticStatus =
     (statusArg as "passed" | "failed" | "partial" | undefined) ??
     (normalizedFindings.length === 0 ? "passed" : "failed");
 
@@ -135,11 +136,11 @@ async function collectDiagnostics(args: ArgMap): Promise<void> {
       analysisId,
       projectId,
       treeHash,
-      commitHash: getCommitHash(projectDir),
+      commitHash: getCommitHash(projectDir) ?? undefined,
       tool: { name: toolName, version: toolVersion },
       configHash,
-      environmentHash,
-      status,
+      environmentHash: environmentHash ?? undefined,
+      status: diagnosticStatus,
       createdAt: new Date().toISOString(),
       durationMs: durationMs ? parseInt(durationMs, 10) : undefined,
       findingsDigest,
@@ -150,25 +151,27 @@ async function collectDiagnostics(args: ArgMap): Promise<void> {
   );
 
   if (recordWorklog) {
-    const eventStore = new EventStore({ dbPath: getArg(args, "eventsDbPath") });
+    const eventsDbPath = getArg(args, "eventsDbPath");
+    const eventStore = new EventStore(eventsDbPath ? { dbPath: eventsDbPath } : {});
     const sessionManager = new SessionManager({ eventStore });
     const session = await sessionManager.startSession({
       name: getArg(args, "sessionName") ?? "collector",
       projectDir,
     });
 
+    const worklogStatus = diagnosticStatus === "passed" ? "success" : diagnosticStatus;
     const payload: WorklogEventData = {
       sessionId: session.id,
       kind: "diagnostics",
       title: `${toolName} diagnostics`,
-      status,
+      status: worklogStatus,
       toolName,
       toolVersion,
       configHash,
       environmentHash,
       projectId,
       treeHash,
-      commitHash: getCommitHash(projectDir),
+      commitHash: getCommitHash(projectDir) ?? undefined,
       runId,
       summary: `${normalizedFindings.length} findings`,
     };

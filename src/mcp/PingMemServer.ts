@@ -447,27 +447,27 @@ export const TOOLS = [
 
 export interface PingMemServerConfig {
   /** Database path for persistence (':memory:' for in-memory) */
-  dbPath?: string;
+  dbPath?: string | undefined;
   /** Enable vector search */
-  enableVectorSearch?: boolean;
+  enableVectorSearch?: boolean | undefined;
   /** Vector dimensions (default: 768) */
-  vectorDimensions?: number;
+  vectorDimensions?: number | undefined;
   /** Optional GraphManager for entity storage (required for extractEntities feature) */
-  graphManager?: GraphManager;
+  graphManager?: GraphManager | undefined;
   /** Optional EntityExtractor instance (created automatically if graphManager provided) */
-  entityExtractor?: EntityExtractor;
+  entityExtractor?: EntityExtractor | undefined;
   /** Optional HybridSearchEngine for combined semantic/keyword/graph search */
-  hybridSearchEngine?: HybridSearchEngine;
+  hybridSearchEngine?: HybridSearchEngine | undefined;
   /** Optional LineageEngine for entity lineage queries */
-  lineageEngine?: LineageEngine;
+  lineageEngine?: LineageEngine | undefined;
   /** Optional EvolutionEngine for temporal evolution queries */
-  evolutionEngine?: EvolutionEngine;
+  evolutionEngine?: EvolutionEngine | undefined;
   /** Optional IngestionService for codebase ingestion */
-  ingestionService?: IngestionService;
+  ingestionService?: IngestionService | undefined;
   /** Optional DiagnosticsStore for diagnostics ingestion */
-  diagnosticsStore?: DiagnosticsStore;
-  /** Optional diagnostics DB path */
-  diagnosticsDbPath?: string;
+  diagnosticsStore?: DiagnosticsStore | undefined;
+  /** Optional diagnostics database path (for automatic DiagnosticsStore creation) */
+  diagnosticsDbPath?: string | undefined;
 }
 
 // ============================================================================
@@ -1799,6 +1799,7 @@ export class PingMemServer {
 export async function main(): Promise<void> {
   const runtimeConfig = loadRuntimeConfig();
   const services = await createRuntimeServices();
+  const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
 
   // Create IngestionService
   const ingestionService = new IngestionService({
@@ -1813,6 +1814,7 @@ export async function main(): Promise<void> {
     lineageEngine: services.lineageEngine,
     evolutionEngine: services.evolutionEngine,
     ingestionService,
+    diagnosticsDbPath,
   });
 
   // Handle shutdown gracefully

@@ -10,10 +10,10 @@ import type {
 } from "./types.js";
 
 export interface DiagnosticsStoreConfig {
-  dbPath?: string;
-  walMode?: boolean;
-  foreignKeys?: boolean;
-  busyTimeout?: number;
+  dbPath?: string | undefined;
+  walMode?: boolean | undefined;
+  foreignKeys?: boolean | undefined;
+  busyTimeout?: number | undefined;
 }
 
 const DEFAULT_CONFIG: Required<DiagnosticsStoreConfig> = {
@@ -59,17 +59,22 @@ interface DiagnosticFindingRow {
 
 export class DiagnosticsStore {
   private db: Database;
-  private config: Required<DiagnosticsStoreConfig>;
+  private config: {
+    dbPath: string;
+    walMode: boolean;
+    foreignKeys: boolean;
+    busyTimeout: number;
+  };
 
-  private stmtInsertRun: Statement;
-  private stmtInsertFinding: Statement;
-  private stmtGetLatestRun: Statement;
-  private stmtGetRunByAnalysis: Statement;
-  private stmtGetFindingsByAnalysis: Statement;
-  private stmtGetFindingIdsByAnalysis: Statement;
+  private stmtInsertRun!: Statement;
+  private stmtInsertFinding!: Statement;
+  private stmtGetLatestRun!: Statement;
+  private stmtGetRunByAnalysis!: Statement;
+  private stmtGetFindingsByAnalysis!: Statement;
+  private stmtGetFindingIdsByAnalysis!: Statement;
 
-  constructor(config?: DiagnosticsStoreConfig) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+  constructor(config?: DiagnosticsStoreConfig | undefined) {
+    this.config = { ...DEFAULT_CONFIG, ...config } as typeof this.config;
 
     if (this.config.dbPath !== ":memory:") {
       const dbDir = path.dirname(this.config.dbPath);

@@ -25,8 +25,8 @@ export interface ChunkSearchResult {
   filePath: string;
   type: "code" | "comment" | "docstring";
   content: string;
-  lineStart?: number;
-  lineEnd?: number;
+  lineStart?: number | undefined;
+  lineEnd?: number | undefined;
   score: number;
 }
 

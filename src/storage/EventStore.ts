@@ -31,11 +31,11 @@ import type {
  */
 export interface EventStoreConfig {
   /** Path to SQLite database file */
-  dbPath?: string;
+  dbPath?: string | undefined;
   /** Enable WAL mode for better concurrency */
-  walMode?: boolean;
+  walMode?: boolean | undefined;
   /** Enable foreign key constraints */
-  foreignKeys?: boolean;
+  foreignKeys?: boolean | undefined;
   /** Busy timeout in milliseconds */
   busyTimeout?: number;
 }
@@ -126,7 +126,12 @@ export interface Checkpoint {
  */
 export class EventStore {
   private db: Database;
-  private config: Required<EventStoreConfig>;
+  private config: {
+    dbPath: string;
+    walMode: boolean;
+    foreignKeys: boolean;
+    busyTimeout: number;
+  };
 
   // Prepared statements
   private stmtInsertEvent: Statement;
@@ -138,7 +143,7 @@ export class EventStore {
   private stmtGetCheckpointsBySession: Statement;
 
   constructor(config?: EventStoreConfig) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config = { ...DEFAULT_CONFIG, ...config } as typeof this.config;
 
     // Ensure directory exists (skip for in-memory)
     if (this.config.dbPath !== ":memory:") {

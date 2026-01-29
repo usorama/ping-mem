@@ -31,6 +31,7 @@ export async function startHTTPServer(): Promise<void> {
   const port = parseInt(process.env.PING_MEM_PORT ?? "3000");
   const host = process.env.PING_MEM_HOST ?? "0.0.0.0";
   const apiKey = process.env.PING_MEM_API_KEY;
+  const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
 
   console.log(`[HTTP Server] Starting with transport: ${transport}`);
   console.log(`[HTTP Server] Listening on ${host}:${port}`);
@@ -52,6 +53,7 @@ export async function startHTTPServer(): Promise<void> {
     serverInstance = new RESTPingMemServer({
       ...restConfig,
       dbPath: runtimeConfig.pingMem.dbPath,
+      diagnosticsDbPath,
       graphManager: services.graphManager,
       lineageEngine: services.lineageEngine,
       evolutionEngine: services.evolutionEngine,
@@ -71,6 +73,7 @@ export async function startHTTPServer(): Promise<void> {
     serverInstance = new SSEPingMemServer({
       ...sseConfig,
       dbPath: runtimeConfig.pingMem.dbPath,
+      diagnosticsDbPath,
       graphManager: services.graphManager,
       lineageEngine: services.lineageEngine,
       evolutionEngine: services.evolutionEngine,

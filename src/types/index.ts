@@ -231,18 +231,18 @@ export interface WorklogEventData {
   sessionId: SessionId;
   kind: "tool" | "diagnostics" | "git" | "task";
   title: string;
-  status?: "success" | "failed" | "partial";
-  toolName?: string;
-  toolVersion?: string;
-  configHash?: string;
-  environmentHash?: string;
-  projectId?: string;
-  treeHash?: string;
-  commitHash?: string;
-  runId?: string;
-  command?: string;
-  durationMs?: number;
-  summary?: string;
+  status?: "success" | "failed" | "partial" | undefined;
+  toolName?: string | undefined;
+  toolVersion?: string | undefined;
+  configHash?: string | undefined;
+  environmentHash?: string | undefined;
+  projectId?: string | undefined;
+  treeHash?: string | undefined;
+  commitHash?: string | undefined;
+  runId?: string | undefined;
+  command?: string | undefined;
+  durationMs?: number | undefined;
+  summary?: string | undefined;
   metadata?: Record<string, unknown>;
 }
 
