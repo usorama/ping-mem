@@ -54,9 +54,12 @@ services:
       - PING_MEM_PORT=3000
       - PING_MEM_TRANSPORT=sse
       - NEO4J_URI=bolt://ping-mem-neo4j:7687
+      - NEO4J_USERNAME=neo4j
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=neo4j_password
       - QDRANT_URL=http://ping-mem-qdrant:6333
+      - QDRANT_COLLECTION_NAME=ping-mem-vectors
+      - QDRANT_VECTOR_DIMENSIONS=768
       - NODE_ENV=production
     volumes:
       - ping-mem-data:/data
@@ -88,9 +91,12 @@ services:
       - PING_MEM_PORT=3001
       - PING_MEM_TRANSPORT=rest
       - NEO4J_URI=bolt://ping-mem-neo4j:7687
+      - NEO4J_USERNAME=neo4j
       - NEO4J_USER=neo4j
       - NEO4J_PASSWORD=neo4j_password
       - QDRANT_URL=http://ping-mem-qdrant:6333
+      - QDRANT_COLLECTION_NAME=ping-mem-vectors
+      - QDRANT_VECTOR_DIMENSIONS=768
       - NODE_ENV=production
     volumes:
       - ping-mem-data:/data

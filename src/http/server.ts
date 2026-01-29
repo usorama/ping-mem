@@ -11,6 +11,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { SSEPingMemServer, createDefaultSSEConfig } from "./sse-server.js";
 import { RESTPingMemServer, createDefaultRESTConfig } from "./rest-server.js";
 import type { HTTPTransportType } from "./types.js";
+import { createRuntimeServices, loadRuntimeConfig } from "../config/runtime.js";
 
 // ============================================================================
 // Server Factory
@@ -23,6 +24,9 @@ import type { HTTPTransportType } from "./types.js";
  * PING_MEM_TRANSPORT (sse, rest, or streamable-http).
  */
 export async function startHTTPServer(): Promise<void> {
+  const runtimeConfig = loadRuntimeConfig();
+  const services = await createRuntimeServices();
+
   const transport = (process.env.PING_MEM_TRANSPORT as HTTPTransportType) ?? "streamable-http";
   const port = parseInt(process.env.PING_MEM_PORT ?? "3000");
   const host = process.env.PING_MEM_HOST ?? "0.0.0.0";
@@ -45,7 +49,13 @@ export async function startHTTPServer(): Promise<void> {
       restConfig.apiKey = apiKey;
     }
 
-    serverInstance = new RESTPingMemServer(restConfig);
+    serverInstance = new RESTPingMemServer({
+      ...restConfig,
+      dbPath: runtimeConfig.pingMem.dbPath,
+      graphManager: services.graphManager,
+      lineageEngine: services.lineageEngine,
+      evolutionEngine: services.evolutionEngine,
+    });
   } else {
     // SSE / Streamable HTTP mode
     const sseConfig = createDefaultSSEConfig({
@@ -58,7 +68,13 @@ export async function startHTTPServer(): Promise<void> {
       sseConfig.apiKey = apiKey;
     }
 
-    serverInstance = new SSEPingMemServer(sseConfig);
+    serverInstance = new SSEPingMemServer({
+      ...sseConfig,
+      dbPath: runtimeConfig.pingMem.dbPath,
+      graphManager: services.graphManager,
+      lineageEngine: services.lineageEngine,
+      evolutionEngine: services.evolutionEngine,
+    });
   }
 
   // Start the server

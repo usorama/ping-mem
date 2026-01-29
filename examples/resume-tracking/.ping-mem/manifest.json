@@ -1,0 +1,24 @@
+{
+  "projectId": "b3cc87bafc307d19a68376d340fd41dc7e63b0541f7c8f45b34a1edd185055d4",
+  "rootPath": "/Users/umasankr/Projects/ping-mem/examples/resume-tracking",
+  "treeHash": "543ea519cd5ef75a0dd018dd5093faebb5c1ee9ffe8052af0c73187d624ecc1e",
+  "files": [
+    {
+      "path": "applications.json",
+      "sha256": "3c4c33f83c155ca4a0f358580be001cce4abbe4790576a5008c8a7c9ff918f08",
+      "bytes": 1539
+    },
+    {
+      "path": "decisions.yaml",
+      "sha256": "1b557540f98bd0e107a2724b69a0fa064a039e870a6f360f8dbfec5d52aab703",
+      "bytes": 823
+    },
+    {
+      "path": "my-resume.md",
+      "sha256": "310974d09f2d5c87894eebd06b63e10b3ece1a1b4d379d738114f66dd6271faf",
+      "bytes": 1151
+    }
+  ],
+  "generatedAt": "2026-01-29T09:08:15.522Z",
+  "schemaVersion": 1
+}

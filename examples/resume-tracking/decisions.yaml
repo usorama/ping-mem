@@ -1,0 +1,28 @@
+decisions:
+  - decision_id: dec-001
+    date: "2026-01-20"
+    title: "Focus on infrastructure roles"
+    rationale: "My experience aligns best with distributed systems and infrastructure positions"
+    impact: "High"
+    status: "active"
+    
+  - decision_id: dec-002
+    date: "2026-01-18"
+    title: "Target companies with strong engineering culture"
+    rationale: "Work-life balance and technical excellence matter most"
+    companies:
+      - Meta
+      - Google
+      - Stripe
+      - Anthropic
+    impact: "High"
+    status: "active"
+    
+  - decision_id: dec-003
+    date: "2026-01-12"
+    title: "Update resume to emphasize system design"
+    rationale: "Most job postings require strong system design skills"
+    action_taken: "yes"
+    completion_date: "2026-01-15"
+    impact: "Medium"
+    status: "completed"

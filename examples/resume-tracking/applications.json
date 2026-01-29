@@ -1,0 +1,53 @@
+{
+  "applications": [
+    {
+      "id": "app-001",
+      "company": "Meta",
+      "position": "Staff Software Engineer",
+      "status": "interviewed",
+      "applied_date": "2026-01-15",
+      "recruiter": "Jane Smith",
+      "recruiter_email": "jane.smith@meta.com",
+      "resume_version": "v2.3-meta",
+      "interview_rounds": [
+        {
+          "round": 1,
+          "type": "phone_screen",
+          "date": "2026-01-22",
+          "result": "pass"
+        },
+        {
+          "round": 2,
+          "type": "technical",
+          "date": "2026-01-28",
+          "result": "pending"
+        }
+      ],
+      "notes": "Focus on distributed systems experience. Mentioned PostgreSQL scaling work."
+    },
+    {
+      "id": "app-002",
+      "company": "Google",
+      "position": "Senior SWE, Infrastructure",
+      "status": "applied",
+      "applied_date": "2026-01-10",
+      "recruiter": "Bob Johnson",
+      "recruiter_email": "bob.j@google.com",
+      "resume_version": "v2.2-google",
+      "notes": "Applied through referral. Waiting for response."
+    },
+    {
+      "id": "app-003",
+      "company": "Anthropic",
+      "position": "ML Infrastructure Engineer",
+      "status": "rejected",
+      "applied_date": "2025-12-20",
+      "recruiter": "Alice Wong",
+      "recruiter_email": "alice@anthropic.com",
+      "resume_version": "v2.1",
+      "rejection_date": "2026-01-05",
+      "rejection_reason": "Not enough ML systems experience",
+      "notes": "Consider building ML projects for future applications."
+    }
+  ]
+}

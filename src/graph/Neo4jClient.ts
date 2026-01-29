@@ -529,12 +529,12 @@ export function createNeo4jClient(config: Neo4jClientConfig): Neo4jClient {
  */
 export function createNeo4jClientFromEnv(): Neo4jClient {
   const uri = process.env["NEO4J_URI"];
-  const username = process.env["NEO4J_USERNAME"];
+  const username = process.env["NEO4J_USERNAME"] ?? process.env["NEO4J_USER"];
   const password = process.env["NEO4J_PASSWORD"];
 
   if (!uri || !username || !password) {
     throw new Error(
-      "Missing required environment variables: NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD"
+      "Missing required environment variables: NEO4J_URI, NEO4J_USERNAME (or NEO4J_USER), NEO4J_PASSWORD"
     );
   }
 

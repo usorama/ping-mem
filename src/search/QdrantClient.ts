@@ -175,9 +175,10 @@ export class QdrantClientWrapper {
 
     try {
       // Build client config, only including apiKey if defined
-      const clientConfig: { url: string; apiKey?: string; timeout?: number } = {
+      const clientConfig: { url: string; apiKey?: string; timeout?: number; checkCompatibility?: boolean } = {
         url: this.config.url,
         timeout: this.config.timeout,
+        checkCompatibility: false, // Allow version mismatches
       };
       if (this.config.apiKey !== undefined) {
         clientConfig.apiKey = this.config.apiKey;

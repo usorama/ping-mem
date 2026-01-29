@@ -36,6 +36,8 @@ import type {
   Relationship,
 } from "../types/index.js";
 import { RelationshipType } from "../types/index.js";
+import { createRuntimeServices, loadRuntimeConfig } from "../config/runtime.js";
+import { IngestionService } from "../ingest/IngestionService.js";
 
 // ============================================================================
 // Tool Schemas
@@ -239,6 +241,61 @@ export const TOOLS = [
       required: ["entityId"],
     },
   },
+  {
+    name: "codebase_ingest",
+    description: "Ingest a project codebase: scan files, extract chunks, index git history, persist to graph+vectors. Deterministic and reproducible.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectDir: { type: "string", description: "Absolute path to project root" },
+        forceReingest: { type: "boolean", description: "Force re-ingestion even if no changes detected" },
+      },
+      required: ["projectDir"],
+    },
+  },
+  {
+    name: "codebase_verify",
+    description: "Verify that the ingested manifest matches the current on-disk project state. Returns validation result.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectDir: { type: "string", description: "Absolute path to project root" },
+      },
+      required: ["projectDir"],
+    },
+  },
+  {
+    name: "codebase_search",
+    description: "Search code chunks semantically using deterministic vectors. Returns relevant code snippets with provenance.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: { type: "string", description: "Natural language query" },
+        projectId: { type: "string", description: "Filter by project ID" },
+        filePath: { type: "string", description: "Filter by file path" },
+        type: {
+          type: "string",
+          enum: ["code", "comment", "docstring"],
+          description: "Filter by chunk type",
+        },
+        limit: { type: "number", description: "Maximum results (default: 10)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "codebase_timeline",
+    description: "Query temporal timeline for a project or file. Returns commits with explicit-only 'why' (from commit messages, issue refs, ADRs).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectId: { type: "string", description: "Project ID" },
+        filePath: { type: "string", description: "Optional: filter by specific file" },
+        limit: { type: "number", description: "Maximum commits to return (default: 100)" },
+      },
+      required: ["projectId"],
+    },
+  },
 ];
 
 // ============================================================================
@@ -262,6 +319,8 @@ export interface PingMemServerConfig {
   lineageEngine?: LineageEngine;
   /** Optional EvolutionEngine for temporal evolution queries */
   evolutionEngine?: EvolutionEngine;
+  /** Optional IngestionService for codebase ingestion */
+  ingestionService?: IngestionService;
 }
 
 // ============================================================================
@@ -284,6 +343,7 @@ export class PingMemServer {
   private hybridSearchEngine: HybridSearchEngine | null = null;
   private lineageEngine: LineageEngine | null = null;
   private evolutionEngine: EvolutionEngine | null = null;
+  private ingestionService: IngestionService | null = null;
 
   constructor(config: PingMemServerConfig = {}) {
     this.config = {
@@ -324,6 +384,9 @@ export class PingMemServer {
     }
     if (config.evolutionEngine) {
       this.evolutionEngine = config.evolutionEngine;
+    }
+    if (config.ingestionService) {
+      this.ingestionService = config.ingestionService;
     }
 
     // Initialize MCP server
@@ -409,6 +472,18 @@ export class PingMemServer {
 
       case "context_query_evolution":
         return this.handleQueryEvolution(args);
+
+      case "codebase_ingest":
+        return this.handleCodebaseIngest(args);
+
+      case "codebase_verify":
+        return this.handleCodebaseVerify(args);
+
+      case "codebase_search":
+        return this.handleCodebaseSearch(args);
+
+      case "codebase_timeline":
+        return this.handleCodebaseTimeline(args);
 
       default:
         throw new Error(`Unknown tool: ${name}`);
@@ -1032,6 +1107,138 @@ export class PingMemServer {
   }
 
   // ============================================================================
+  // Codebase Ingestion Handlers
+  // ============================================================================
+
+  private async handleCodebaseIngest(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.ingestionService) {
+      throw new Error("IngestionService not configured. Provide ingestionService in PingMemServerConfig.");
+    }
+
+    const projectDir = args.projectDir as string;
+    const forceReingest = args.forceReingest === true;
+
+    const result = await this.ingestionService.ingestProject({
+      projectDir,
+      forceReingest,
+    });
+
+    if (!result) {
+      return {
+        success: true,
+        hadChanges: false,
+        message: "No changes detected since last ingestion.",
+      };
+    }
+
+    return {
+      success: true,
+      hadChanges: true,
+      projectId: result.projectId,
+      treeHash: result.treeHash,
+      filesIndexed: result.filesIndexed,
+      chunksIndexed: result.chunksIndexed,
+      commitsIndexed: result.commitsIndexed,
+      ingestedAt: result.ingestedAt,
+    };
+  }
+
+  private async handleCodebaseVerify(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.ingestionService) {
+      throw new Error("IngestionService not configured. Provide ingestionService in PingMemServerConfig.");
+    }
+
+    const projectDir = args.projectDir as string;
+    const result = await this.ingestionService.verifyProject(projectDir);
+
+    return {
+      projectId: result.projectId,
+      valid: result.valid,
+      manifestTreeHash: result.manifestTreeHash,
+      currentTreeHash: result.currentTreeHash,
+      message: result.message,
+    };
+  }
+
+  private async handleCodebaseSearch(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.ingestionService) {
+      throw new Error("IngestionService not configured. Provide ingestionService in PingMemServerConfig.");
+    }
+
+    const query = args.query as string;
+    const options: {
+      projectId?: string;
+      filePath?: string;
+      type?: "code" | "comment" | "docstring";
+      limit?: number;
+    } = {};
+
+    if (args.projectId !== undefined) {
+      options.projectId = args.projectId as string;
+    }
+    if (args.filePath !== undefined) {
+      options.filePath = args.filePath as string;
+    }
+    if (args.type !== undefined) {
+      options.type = args.type as "code" | "comment" | "docstring";
+    }
+    if (args.limit !== undefined) {
+      options.limit = args.limit as number;
+    }
+
+    const results = await this.ingestionService.searchCode(query, options);
+
+    return {
+      query,
+      resultCount: results.length,
+      results: results.map((r) => ({
+        chunkId: r.chunkId,
+        projectId: r.projectId,
+        filePath: r.filePath,
+        type: r.type,
+        content: r.content,
+        score: r.score,
+      })),
+    };
+  }
+
+  private async handleCodebaseTimeline(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.ingestionService) {
+      throw new Error("IngestionService not configured. Provide ingestionService in PingMemServerConfig.");
+    }
+
+    const projectId = args.projectId as string;
+    const options: {
+      projectId: string;
+      filePath?: string;
+      limit?: number;
+    } = { projectId };
+
+    if (args.filePath !== undefined) {
+      options.filePath = args.filePath as string;
+    }
+    if (args.limit !== undefined) {
+      options.limit = args.limit as number;
+    }
+
+    const timeline = await this.ingestionService.queryTimeline(options);
+
+    return {
+      projectId,
+      filePath: options.filePath,
+      eventCount: timeline.length,
+      events: timeline.map((e) => ({
+        commitHash: e.commitHash,
+        date: e.date,
+        authorName: e.authorName,
+        message: e.message,
+        changeType: e.changeType,
+        why: e.why,
+      })),
+    };
+  }
+
+  // ============================================================================
   // Helper Methods
   // ============================================================================
 
@@ -1132,9 +1339,22 @@ export class PingMemServer {
  * Start the server if running as main module
  */
 export async function main(): Promise<void> {
+  const runtimeConfig = loadRuntimeConfig();
+  const services = await createRuntimeServices();
+
+  // Create IngestionService
+  const ingestionService = new IngestionService({
+    neo4jClient: services.neo4jClient,
+    qdrantClient: services.qdrantClient,
+  });
+
   const server = new PingMemServer({
-    dbPath: process.env.PING_MEM_DB_PATH ?? ":memory:",
-    enableVectorSearch: process.env.PING_MEM_VECTOR_SEARCH === "true",
+    dbPath: runtimeConfig.pingMem.dbPath,
+    enableVectorSearch: false,
+    graphManager: services.graphManager,
+    lineageEngine: services.lineageEngine,
+    evolutionEngine: services.evolutionEngine,
+    ingestionService,
   });
 
   // Handle shutdown gracefully

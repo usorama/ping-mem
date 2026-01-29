@@ -11,7 +11,7 @@
 
 **ping-mem** is a **Universal Memory Layer** for AI agents that provides persistent, intelligent, and contextually-aware memory across sessions, tools, and applications. It serves as reusable infrastructure that any AI application can leverage.
 
-**Key Insight**: ping-mem is infrastructure (like a database), not an application (like rad-engineer).
+**Key Insight**: ping-mem is an application that's self-contained for use of AI Agents from other applications and use cases, serving deterministic, repeatable, reproducable memory with/without history, so Agents are always in the know.
 
 ---
 
@@ -626,3 +626,6 @@ curl https://api.openai.com/v1/embeddings \
 **License**: MIT
 **Repository**: https://github.com/ping-gadgets/ping-mem
 **Issues**: https://github.com/ping-gadgets/ping-mem/issues
+
+## Memories:
+current vision and plan: `/Users/umasankr/.cursor/plans/deterministic_temporal_ingestion_06e320ca.plan.md`
