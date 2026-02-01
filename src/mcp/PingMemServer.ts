@@ -52,9 +52,15 @@ import { SummaryGenerator, OpenAIProvider } from "../diagnostics/SummaryGenerato
 import { SummaryCache } from "../diagnostics/SummaryCache.js";
 import { AdminStore } from "../admin/AdminStore.js";
 import { ProjectScanner } from "../ingest/ProjectScanner.js";
-import { ListProjectsSchema, type ListProjectsInput } from "../validation/codebase-schemas.js";
+import {
+  ListProjectsSchema,
+  type ListProjectsInput,
+  DeleteProjectSchema,
+  type DeleteProjectInput
+} from "../validation/codebase-schemas.js";
 import * as fs from "fs";
 import * as path from "path";
+import * as os from "os";
 
 // ============================================================================
 // Tool Schemas
@@ -849,9 +855,14 @@ export class PingMemServer {
 
         ingestResult = result ? (result as unknown as Record<string, unknown>) : { ingested: false, reason: "No changes detected" };
       } catch (error) {
-        // Don't fail session start if ingestion fails
+        // Don't fail session start if ingestion fails, but log the error
+        const errorMessage = error instanceof Error ? error.message : "Unknown ingestion error";
+        console.error(`[AutoIngest] Failed to ingest project at ${args.projectDir}:`, errorMessage);
+        if (error instanceof Error && error.stack) {
+          console.error(`[AutoIngest] Stack trace:`, error.stack);
+        }
         ingestResult = {
-          ingestError: error instanceof Error ? error.message : "Unknown ingestion error",
+          ingestError: errorMessage,
         };
       }
     }
@@ -2215,22 +2226,13 @@ export class PingMemServer {
     const validated: ListProjectsInput = parseResult.data;
 
     try {
-      const options: {
-        projectId?: string;
-        limit?: number;
-        sortBy?: "lastIngestedAt" | "filesCount" | "rootPath";
-      } = {};
-
-      // Only include properties if they are defined (exactOptionalPropertyTypes compliance)
-      if (validated.projectId !== undefined) {
-        options.projectId = validated.projectId;
-      }
-      if (validated.limit !== undefined) {
-        options.limit = validated.limit;
-      }
-      if (validated.sortBy !== undefined) {
-        options.sortBy = validated.sortBy;
-      }
+      // Build options object - only include projectId if defined (exactOptionalPropertyTypes)
+      // limit and sortBy always have defaults from Zod schema
+      const options: Parameters<typeof this.ingestionService.listProjects>[0] = {
+        limit: validated.limit,
+        sortBy: validated.sortBy,
+        ...(validated.projectId !== undefined && { projectId: validated.projectId }),
+      };
 
       const projects = await this.ingestionService.listProjects(options);
 
@@ -2258,8 +2260,16 @@ export class PingMemServer {
       throw new Error("IngestionService not configured. Provide ingestionService in PingMemServerConfig.");
     }
 
-    const projectDir = args.projectDir as string;
-    const normalized = path.resolve(projectDir);
+    // Validate input with Zod
+    const parseResult = DeleteProjectSchema.safeParse(args);
+    if (!parseResult.success) {
+      throw new Error(
+        `Invalid input for project_delete: ${parseResult.error.message}`
+      );
+    }
+
+    const validated: DeleteProjectInput = parseResult.data;
+    const normalized = path.resolve(validated.projectDir);
 
     let projectId: string | null = null;
     if (fs.existsSync(normalized)) {
@@ -2286,7 +2296,7 @@ export class PingMemServer {
       fs.unlinkSync(manifestPath);
     }
 
-    const adminDbPath = process.env.PING_MEM_ADMIN_DB_PATH ?? this.config.dbPath;
+    const adminDbPath = process.env.PING_MEM_ADMIN_DB_PATH ?? path.join(os.homedir(), ".ping-mem", "admin.db");
     if (adminDbPath) {
       try {
         const adminStore = new AdminStore({ dbPath: adminDbPath });

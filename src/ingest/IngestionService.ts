@@ -224,12 +224,6 @@ export class IngestionService {
     limit?: number;
     sortBy?: "lastIngestedAt" | "filesCount" | "rootPath";
   } = {}): Promise<ProjectInfo[]> {
-    if (!this.codeGraph) {
-      throw new Error(
-        "TemporalCodeGraph not configured. Set NEO4J_URI to enable code ingestion."
-      );
-    }
-
     return await this.codeGraph.listProjects(options);
   }
 

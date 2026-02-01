@@ -17,3 +17,12 @@ export const ListProjectsSchema = z.object({
 });
 
 export type ListProjectsInput = z.infer<typeof ListProjectsSchema>;
+
+/**
+ * Schema for project_delete input
+ */
+export const DeleteProjectSchema = z.object({
+  projectDir: z.string().min(1, "projectDir cannot be empty"),
+});
+
+export type DeleteProjectInput = z.infer<typeof DeleteProjectSchema>;
