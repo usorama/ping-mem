@@ -34,13 +34,17 @@
     "test:watch": "bun test --watch",
     "typecheck": "tsc --noEmit",
     "dev": "tsc --watch",
-    "start": "bun run dist/http/index.js",
+    "start": "bun run dist/http/server.js",
     "start:sse": "PING_MEM_TRANSPORT=sse bun run dist/http/index.js",
     "start:rest": "PING_MEM_TRANSPORT=rest bun run dist/http/index.js",
     "start:mcp": "bun run dist/mcp/cli.js",
     "setup": "bash scripts/setup.sh",
     "setup:docker": "docker compose up -d",
     "setup:docker-only": "bash scripts/setup.sh --docker-only",
+    "install:client": "bash scripts/install-client.sh",
+    "install:client:global": "bash scripts/install-client.sh --global",
+    "ingest": "bash scripts/ingest-project.sh",
+    "smoke-test": "bash scripts/smoke-test.sh",
     "health": "curl -sf http://localhost:6333/health && curl -sf http://localhost:7474 && curl -sf http://localhost:3000/health && echo 'All services healthy'",
     "diagnostics:tsc-sarif": "bun run src/diagnostics/tsc-sarif.ts",
     "diagnostics:eslint-sarif": "bun run src/diagnostics/eslint-sarif.ts",
@@ -64,7 +68,8 @@
     "@qdrant/js-client-rest": "^1.16.2",
     "neo4j-driver": "^5.28.3",
     "openai": "^6.16.0",
-    "sqlite-vec": "^0.1.7-alpha.2"
+    "sqlite-vec": "^0.1.7-alpha.2",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/bun": "^1.2.5",
