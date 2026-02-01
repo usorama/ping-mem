@@ -14,6 +14,7 @@ import { TemporalCodeGraph } from "../graph/TemporalCodeGraph.js";
 import { CodeIndexer } from "../search/CodeIndexer.js";
 import { Neo4jClient } from "../graph/Neo4jClient.js";
 import { QdrantClientWrapper } from "../search/QdrantClient.js";
+import type { ProjectInfo } from "./types.js";
 
 export interface IngestionServiceOptions {
   neo4jClient: Neo4jClient;
@@ -204,6 +205,32 @@ export class IngestionService {
     } = {}
   ) {
     return this.codeIndexer.search(query, options);
+  }
+
+  /**
+   * Delete all indexed data for a project.
+   */
+  async deleteProject(projectId: string): Promise<void> {
+    await this.codeGraph.deleteProject(projectId);
+    await this.codeIndexer.deleteProject(projectId);
+  }
+
+  /**
+   * List all ingested projects with metadata.
+   * Returns project info including file/chunk/commit counts.
+   */
+  async listProjects(options: {
+    projectId?: string;
+    limit?: number;
+    sortBy?: "lastIngestedAt" | "filesCount" | "rootPath";
+  } = {}): Promise<ProjectInfo[]> {
+    if (!this.codeGraph) {
+      throw new Error(
+        "TemporalCodeGraph not configured. Set NEO4J_URI to enable code ingestion."
+      );
+    }
+
+    return await this.codeGraph.listProjects(options);
   }
 
   /**

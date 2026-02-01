@@ -17,3 +17,16 @@ export interface ProjectScanResult {
   manifest: ProjectManifest;
   hasChanges: boolean;
 }
+
+/**
+ * Project information returned by listProjects query
+ */
+export interface ProjectInfo {
+  projectId: string;
+  rootPath: string;
+  treeHash: string;
+  filesCount: number;
+  chunksCount: number;
+  commitsCount: number;
+  lastIngestedAt: string; // ISO 8601
+}

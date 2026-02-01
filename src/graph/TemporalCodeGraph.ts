@@ -30,6 +30,7 @@ import type {
   GitCommit,
   GitFileChange,
   GitDiffHunk,
+  ProjectInfo,
 } from "../ingest/index.js";
 import type { ExtractedSymbol } from "../ingest/SymbolExtractor.js";
 import * as crypto from "crypto";
@@ -223,6 +224,95 @@ export class TemporalCodeGraph {
         commitHash: r.get("commitHash") as string,
         changeType: r.get("changeType") as string,
         date: r.get("date") as string,
+      }));
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Delete all nodes and relationships for a project.
+   */
+  async deleteProject(projectId: string): Promise<void> {
+    const session = this.neo4j.getSession();
+    try {
+      await session.run(
+        `
+        MATCH (p:Project { projectId: $projectId })
+        OPTIONAL MATCH (p)-[:HAS_FILE]->(f:File)
+        OPTIONAL MATCH (f)-[:HAS_CHUNK]->(c:Chunk)
+        OPTIONAL MATCH (c)-[:DEFINES_SYMBOL]->(s:Symbol)
+        OPTIONAL MATCH (p)-[:HAS_COMMIT]->(commit:Commit)
+        DETACH DELETE p, f, c, s, commit
+        `,
+        { projectId }
+      );
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * List all projects with metadata (file/chunk/commit counts).
+   * Optionally filter by projectId, limit results, and sort by various fields.
+   */
+  async listProjects(options: {
+    projectId?: string;
+    limit?: number;
+    sortBy?: "lastIngestedAt" | "filesCount" | "rootPath";
+  } = {}): Promise<ProjectInfo[]> {
+    const session = this.neo4j.getSession();
+    try {
+      const { projectId, limit = 100, sortBy = "lastIngestedAt" } = options;
+
+      // Build WHERE clause for optional projectId filter
+      const whereClause = projectId
+        ? "WHERE p.projectId = $projectId"
+        : "";
+
+      // Build ORDER BY clause
+      const orderByClause =
+        sortBy === "lastIngestedAt"
+          ? "ORDER BY p.lastIngestedAt DESC"
+          : sortBy === "filesCount"
+            ? "ORDER BY filesCount DESC"
+            : "ORDER BY p.rootPath ASC";
+
+      const result = await session.run(
+        `
+        MATCH (p:Project)
+        ${whereClause}
+        OPTIONAL MATCH (p)-[:HAS_FILE]->(f:File)
+        OPTIONAL MATCH (f)-[:HAS_CHUNK]->(c:Chunk)
+        OPTIONAL MATCH (p)-[:HAS_COMMIT]->(commit:Commit)
+        WITH p,
+             count(DISTINCT f) AS filesCount,
+             count(DISTINCT c) AS chunksCount,
+             count(DISTINCT commit) AS commitsCount
+        RETURN p.projectId AS projectId,
+               p.rootPath AS rootPath,
+               p.treeHash AS treeHash,
+               p.lastIngestedAt AS lastIngestedAt,
+               filesCount,
+               chunksCount,
+               commitsCount
+        ${orderByClause}
+        LIMIT $limit
+        `,
+        {
+          projectId: projectId ?? null,
+          limit: neo4j.int(limit),
+        }
+      );
+
+      return result.records.map((r) => ({
+        projectId: r.get("projectId") as string,
+        rootPath: r.get("rootPath") as string,
+        treeHash: r.get("treeHash") as string,
+        filesCount: r.get("filesCount").toNumber() as number,
+        chunksCount: r.get("chunksCount").toNumber() as number,
+        commitsCount: r.get("commitsCount").toNumber() as number,
+        lastIngestedAt: r.get("lastIngestedAt") as string,
       }));
     } finally {
       await session.close();
