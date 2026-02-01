@@ -13,6 +13,7 @@ export type {
   FileHashEntry,
   ProjectManifest,
   ProjectScanResult,
+  ProjectInfo,
 } from "./types.js";
 
 export type {

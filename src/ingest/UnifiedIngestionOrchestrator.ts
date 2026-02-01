@@ -107,7 +107,7 @@ export class UnifiedIngestionOrchestrator {
       codeFiles = this.processCodeFiles(projectPath, codeEntries);
 
       if (options.includeGitHistory !== false) {
-        const gitHistoryResult = this.gitReader.readHistory(projectPath);
+        const gitHistoryResult = await this.gitReader.readHistory(projectPath);
         gitHistory = {
           commits: gitHistoryResult.commits.map((c) => ({
             hash: c.hash,

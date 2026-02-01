@@ -14,6 +14,7 @@ import { TemporalCodeGraph } from "../graph/TemporalCodeGraph.js";
 import { CodeIndexer } from "../search/CodeIndexer.js";
 import { Neo4jClient } from "../graph/Neo4jClient.js";
 import { QdrantClientWrapper } from "../search/QdrantClient.js";
+import type { ProjectInfo } from "./types.js";
 
 export interface IngestionServiceOptions {
   neo4jClient: Neo4jClient;
@@ -204,6 +205,39 @@ export class IngestionService {
     } = {}
   ) {
     return this.codeIndexer.search(query, options);
+  }
+
+  /**
+   * Delete all indexed data for a project.
+   */
+  async deleteProject(projectId: string): Promise<void> {
+    await this.codeGraph.deleteProject(projectId);
+    await this.codeIndexer.deleteProject(projectId);
+  }
+
+  /**
+   * List all ingested projects with metadata.
+   * Returns project info including file/chunk/commit counts.
+   */
+  async listProjects(options: {
+    projectId?: string;
+    limit?: number;
+    sortBy?: "lastIngestedAt" | "filesCount" | "rootPath";
+  } = {}): Promise<ProjectInfo[]> {
+    try {
+      return await this.codeGraph.listProjects(options);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Log at service layer with context
+      console.error(`[IngestionService] listProjects failed:`, {
+        error: errorMessage,
+        filters: options,
+      });
+
+      // Re-throw - let caller decide how to handle
+      throw error;
+    }
   }
 
   /**

@@ -5,8 +5,8 @@
  * All data is deterministic: same repo state → same output.
  */
 
-import { execSync } from "child_process";
 import * as path from "path";
+import { SafeGit, createSafeGit } from "./SafeGit.js";
 
 export interface GitCommit {
   hash: string; // Full SHA-1
@@ -49,42 +49,38 @@ export class GitHistoryReader {
    * Read full git history from a repository.
    * Returns commits in topological order (parents before children when possible).
    */
-  readHistory(projectDir: string): GitHistoryResult {
-    const gitRoot = this.getGitRoot(projectDir);
+  async readHistory(projectDir: string): Promise<GitHistoryResult> {
+    const gitRoot = await this.getGitRoot(projectDir);
     if (!gitRoot) {
       return { commits: [], fileChanges: [], hunks: [] };
     }
 
-    const commits = this.readCommits(gitRoot);
+    const commits = await this.readCommits(gitRoot);
     const fileChanges: GitFileChange[] = [];
     const hunks: GitDiffHunk[] = [];
 
     for (const commit of commits) {
-      const changes = this.readFileChanges(gitRoot, commit.hash);
+      const changes = await this.readFileChanges(gitRoot, commit.hash);
       fileChanges.push(...changes);
 
-      const commitHunks = this.readDiffHunks(gitRoot, commit.hash);
+      const commitHunks = await this.readDiffHunks(gitRoot, commit.hash);
       hunks.push(...commitHunks);
     }
 
     return { commits, fileChanges, hunks };
   }
 
-  private getGitRoot(projectDir: string): string | null {
+  private async getGitRoot(projectDir: string): Promise<string | null> {
     try {
-      const root = execSync("git rev-parse --show-toplevel", {
-        cwd: projectDir,
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-        .toString()
-        .trim();
+      const git = createSafeGit(projectDir);
+      const root = await git.getRoot();
       return root;
     } catch {
       return null;
     }
   }
 
-  private readCommits(gitRoot: string): GitCommit[] {
+  private async readCommits(gitRoot: string): Promise<GitCommit[]> {
     // Use a delimiter that won't appear in commit messages
     const delimiter = "---COMMIT-SEPARATOR---";
     const format = [
@@ -100,11 +96,8 @@ export class GitHistoryReader {
       "%B", // Body (message)
     ].join("%n") + delimiter;
 
-    const output = execSync(`git log --all --topo-order --format="${format}"`, {
-      cwd: gitRoot,
-      stdio: ["ignore", "pipe", "ignore"],
-      maxBuffer: 100 * 1024 * 1024, // 100MB
-    }).toString();
+    const git = createSafeGit(gitRoot, { maxBuffer: 100 * 1024 * 1024 });
+    const output = await git.getLog(1000, format);
 
     const commits: GitCommit[] = [];
     const commitBlocks = output.split(delimiter).filter((b) => b.trim());
@@ -144,16 +137,10 @@ export class GitHistoryReader {
     return commits;
   }
 
-  private readFileChanges(gitRoot: string, commitHash: string): GitFileChange[] {
+  private async readFileChanges(gitRoot: string, commitHash: string): Promise<GitFileChange[]> {
     // Use --name-status to get change type + file paths
-    const output = execSync(
-      `git show --name-status --format="" ${commitHash}`,
-      {
-        cwd: gitRoot,
-        stdio: ["ignore", "pipe", "ignore"],
-        maxBuffer: 10 * 1024 * 1024,
-      }
-    ).toString();
+    const git = createSafeGit(gitRoot, { maxBuffer: 10 * 1024 * 1024 });
+    const output = await git.getFileChanges(commitHash);
 
     const changes: GitFileChange[] = [];
     const lines = output.split("\n").filter((l) => l.trim());
@@ -180,13 +167,10 @@ export class GitHistoryReader {
     return changes;
   }
 
-  private readDiffHunks(gitRoot: string, commitHash: string): GitDiffHunk[] {
+  private async readDiffHunks(gitRoot: string, commitHash: string): Promise<GitDiffHunk[]> {
     // Get unified diff
-    const output = execSync(`git show --unified=3 ${commitHash}`, {
-      cwd: gitRoot,
-      stdio: ["ignore", "pipe", "ignore"],
-      maxBuffer: 50 * 1024 * 1024,
-    }).toString();
+    const git = createSafeGit(gitRoot, { maxBuffer: 50 * 1024 * 1024 });
+    const output = await git.getDiff(commitHash);
 
     const hunks: GitDiffHunk[] = [];
     const lines = output.split("\n");

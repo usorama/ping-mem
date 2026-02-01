@@ -50,6 +50,17 @@ import {
 import type { FindingInput } from "../diagnostics/types.js";
 import { SummaryGenerator, OpenAIProvider } from "../diagnostics/SummaryGenerator.js";
 import { SummaryCache } from "../diagnostics/SummaryCache.js";
+import { AdminStore } from "../admin/AdminStore.js";
+import { ProjectScanner } from "../ingest/ProjectScanner.js";
+import {
+  ListProjectsSchema,
+  type ListProjectsInput,
+  DeleteProjectSchema,
+  type DeleteProjectInput
+} from "../validation/codebase-schemas.js";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
 
 // ============================================================================
 // Tool Schemas
@@ -58,14 +69,15 @@ import { SummaryCache } from "../diagnostics/SummaryCache.js";
 export const TOOLS = [
   {
     name: "context_session_start",
-    description: "Start a new memory session with optional configuration",
+    description: "Start a new memory session with optional configuration. If projectDir is provided with autoIngest=true, automatically ingests the project codebase.",
     inputSchema: {
       type: "object" as const,
       properties: {
         name: { type: "string", description: "Session name" },
-        projectDir: { type: "string", description: "Project directory for context isolation" },
+        projectDir: { type: "string", description: "Project directory for context isolation and automatic code ingestion" },
         continueFrom: { type: "string", description: "Session ID to continue from" },
         defaultChannel: { type: "string", description: "Default channel for memories" },
+        autoIngest: { type: "boolean", description: "Automatically ingest project codebase when projectDir is provided (default: false)" },
       },
       required: ["name"],
     },
@@ -501,6 +513,33 @@ export const TOOLS = [
       required: ["projectId"],
     },
   },
+  {
+    name: "codebase_list_projects",
+    description: "List all ingested projects with metadata (file/chunk/commit counts). Returns project info sorted by lastIngestedAt (default), filesCount, or rootPath.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectId: { type: "string", description: "Optional: filter by specific project ID" },
+        limit: { type: "number", description: "Maximum projects to return (1-1000, default: 100)" },
+        sortBy: {
+          type: "string",
+          description: "Sort field: 'lastIngestedAt' (default), 'filesCount', or 'rootPath'",
+          enum: ["lastIngestedAt", "filesCount", "rootPath"]
+        },
+      },
+    },
+  },
+  {
+    name: "project_delete",
+    description: "Delete all memory, diagnostics, graph, and vectors for a project directory",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        projectDir: { type: "string", description: "Absolute path to project root" },
+      },
+      required: ["projectDir"],
+    },
+  },
 ];
 
 // ============================================================================
@@ -601,13 +640,14 @@ export class PingMemServer {
     }
     this.diagnosticsStore =
       config.diagnosticsStore ??
-      new DiagnosticsStore({
-        dbPath: config.diagnosticsDbPath,
-      });
+      new DiagnosticsStore(
+        config.diagnosticsDbPath ? { dbPath: config.diagnosticsDbPath } : undefined
+      );
 
-    // Initialize LLM summary generator if OpenAI API key available
+    // Initialize LLM summary generator only when explicitly enabled
     const openaiKey = process.env.OPENAI_API_KEY;
-    if (openaiKey && this.diagnosticsStore) {
+    const enableLLMSummaries = process.env.PING_MEM_ENABLE_LLM_SUMMARIES === "true";
+    if (enableLLMSummaries && openaiKey && this.diagnosticsStore) {
       const summaryCache = new SummaryCache({ db: this.diagnosticsStore.getDatabase() });
       const provider = new OpenAIProvider(openaiKey);
       this.summaryGenerator = new SummaryGenerator(provider, summaryCache);
@@ -742,6 +782,12 @@ export class PingMemServer {
       case "codebase_timeline":
         return this.handleCodebaseTimeline(args);
 
+      case "codebase_list_projects":
+        return this.handleCodebaseListProjects(args);
+
+      case "project_delete":
+        return this.handleProjectDelete(args);
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -795,12 +841,39 @@ export class PingMemServer {
     const memoryManager = new MemoryManager(memoryManagerConfig);
     this.memoryManagers.set(session.id, memoryManager);
 
+    // Auto-ingest project if requested
+    let ingestResult: Record<string, unknown> | undefined;
+    if (args.projectDir !== undefined && args.autoIngest === true && this.ingestionService) {
+      try {
+        const projectDir = args.projectDir as string;
+        const forceReingest = args.forceReingest as boolean ?? false;
+
+        const result = await this.ingestionService.ingestProject({
+          projectDir,
+          forceReingest,
+        });
+
+        ingestResult = result ? (result as unknown as Record<string, unknown>) : { ingested: false, reason: "No changes detected" };
+      } catch (error) {
+        // Don't fail session start if ingestion fails, but log the error
+        const errorMessage = error instanceof Error ? error.message : "Unknown ingestion error";
+        console.error(`[AutoIngest] Failed to ingest project at ${args.projectDir}:`, errorMessage);
+        if (error instanceof Error && error.stack) {
+          console.error(`[AutoIngest] Stack trace:`, error.stack);
+        }
+        ingestResult = {
+          ingestError: errorMessage,
+        };
+      }
+    }
+
     return {
       success: true,
       sessionId: session.id,
       name: session.name,
       status: session.status,
       startedAt: session.startedAt.toISOString(),
+      ...(ingestResult && { ingestResult }),
     };
   }
 
@@ -2135,6 +2208,187 @@ export class PingMemServer {
     };
   }
 
+  private async handleCodebaseListProjects(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.ingestionService) {
+      throw new Error(
+        "IngestionService not configured. Set NEO4J_URI and QDRANT_URL to enable code ingestion."
+      );
+    }
+
+    // Validate input with Zod
+    const parseResult = ListProjectsSchema.safeParse(args);
+    if (!parseResult.success) {
+      // Log validation failure for debugging/security
+      console.error(`[PingMemServer] codebase_list_projects validation failed:`, {
+        receivedInput: args,
+        validationErrors: parseResult.error.format(),
+        sessionId: this.currentSessionId,
+      });
+
+      throw new Error(
+        `Invalid input for codebase_list_projects: ${parseResult.error.message}`
+      );
+    }
+
+    const validated: ListProjectsInput = parseResult.data;
+
+    try {
+      // Build options object - only include projectId if defined (exactOptionalPropertyTypes)
+      // limit and sortBy always have defaults from Zod schema
+      const options: Parameters<typeof this.ingestionService.listProjects>[0] = {
+        limit: validated.limit,
+        sortBy: validated.sortBy,
+        ...(validated.projectId !== undefined && { projectId: validated.projectId }),
+      };
+
+      const projects = await this.ingestionService.listProjects(options);
+
+      return {
+        count: projects.length,
+        sortBy: validated.sortBy,
+        projects: projects.map((p) => ({
+          projectId: p.projectId,
+          rootPath: p.rootPath,
+          treeHash: p.treeHash,
+          filesCount: p.filesCount,
+          chunksCount: p.chunksCount,
+          commitsCount: p.commitsCount,
+          lastIngestedAt: p.lastIngestedAt,
+        })),
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Log error before re-throwing for debugging
+      console.error(`[PingMemServer] codebase_list_projects failed:`, {
+        error: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
+        input: validated,
+      });
+
+      throw new Error(`Failed to list projects: ${errorMessage}`);
+    }
+  }
+
+  private async handleProjectDelete(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.ingestionService) {
+      throw new Error("IngestionService not configured. Provide ingestionService in PingMemServerConfig.");
+    }
+
+    // Validate input with Zod
+    const parseResult = DeleteProjectSchema.safeParse(args);
+    if (!parseResult.success) {
+      // Log validation failure for debugging/security
+      console.error(`[PingMemServer] project_delete validation failed:`, {
+        receivedInput: args,
+        validationErrors: parseResult.error.format(),
+        sessionId: this.currentSessionId,
+      });
+
+      throw new Error(
+        `Invalid input for project_delete: ${parseResult.error.message}`
+      );
+    }
+
+    const validated: DeleteProjectInput = parseResult.data;
+    const normalized = path.resolve(validated.projectDir);
+
+    let projectId: string | null = null;
+    if (fs.existsSync(normalized)) {
+      try {
+        const scanner = new ProjectScanner();
+        const scan = scanner.scanProject(normalized);
+        projectId = scan.manifest.projectId;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        console.error(`[ProjectDelete] Failed to scan project directory:`, {
+          error: errorMessage,
+          projectDir: normalized,
+        });
+
+        // Fall through to "not found" error below
+      }
+    }
+
+    if (!projectId) {
+      throw new Error(
+        `Project not found at ${normalized}. Directory may not exist or may not be a valid ping-mem project.`
+      );
+    }
+
+    await this.ingestionService.deleteProject(projectId);
+
+    if (this.diagnosticsStore) {
+      this.diagnosticsStore.deleteProject(projectId);
+    }
+
+    let sessionsDeleted = 0;
+    try {
+      const sessionIds = this.eventStore.findSessionIdsByProjectDir(normalized);
+
+      if (sessionIds.length > 0) {
+        console.log(`[ProjectDelete] Deleting ${sessionIds.length} sessions for project ${projectId}`);
+        this.eventStore.deleteSessions(sessionIds);
+        sessionsDeleted = sessionIds.length;
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Log but don't fail - session cleanup is supplementary
+      console.error(`[ProjectDelete] Failed to delete sessions for project ${projectId}:`, {
+        error: errorMessage,
+        projectDir: normalized,
+      });
+
+      // Continue with delete - session cleanup failure shouldn't block project deletion
+    }
+
+    const manifestPath = path.join(normalized, ".ping-mem", "manifest.json");
+    if (fs.existsSync(manifestPath)) {
+      try {
+        fs.unlinkSync(manifestPath);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        console.error(`[ProjectDelete] Failed to delete manifest file:`, {
+          error: errorMessage,
+          path: manifestPath,
+          projectId,
+        });
+
+        // Don't throw - manifest cleanup failure shouldn't block overall deletion
+      }
+    }
+
+    const adminDbPath = process.env.PING_MEM_ADMIN_DB_PATH ?? path.join(os.homedir(), ".ping-mem", "admin.db");
+    if (adminDbPath) {
+      try {
+        const adminStore = new AdminStore({ dbPath: adminDbPath });
+        adminStore.deleteProject(projectId);
+        adminStore.close();
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        // Log admin cleanup failure - critical for diagnosing admin DB inconsistencies
+        console.error(`[ProjectDelete] Failed to cleanup admin store for project ${projectId}:`, {
+          error: errorMessage,
+          stack: error instanceof Error ? error.stack : undefined,
+          adminDbPath,
+        });
+
+        // Don't re-throw - admin cleanup failure shouldn't block project deletion
+      }
+    }
+
+    return {
+      success: true,
+      projectId,
+      projectDir: normalized,
+      sessionsDeleted,
+    };
+  }
+
   // ============================================================================
   // Helper Methods
   // ============================================================================
@@ -2244,11 +2498,14 @@ export async function main(): Promise<void> {
   const services = await createRuntimeServices();
   const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
 
-  // Create IngestionService
-  const ingestionService = new IngestionService({
-    neo4jClient: services.neo4jClient,
-    qdrantClient: services.qdrantClient,
-  });
+  // Create IngestionService only when both Neo4j and Qdrant are available
+  let ingestionService: IngestionService | undefined;
+  if (services.neo4jClient && services.qdrantClient) {
+    ingestionService = new IngestionService({
+      neo4jClient: services.neo4jClient,
+      qdrantClient: services.qdrantClient,
+    });
+  }
 
   const server = new PingMemServer({
     dbPath: runtimeConfig.pingMem.dbPath,

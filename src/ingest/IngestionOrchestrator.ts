@@ -91,7 +91,7 @@ export class IngestionOrchestrator {
     const codeFiles = this.chunkCodeFiles(projectPath, scanResult.manifest.files);
 
     // Step 3: Read git history
-    const gitHistory = this.gitReader.readHistory(projectPath);
+    const gitHistory = await this.gitReader.readHistory(projectPath);
 
     // Step 4: Save manifest
     this.manifestStore.save(projectPath, scanResult.manifest);
