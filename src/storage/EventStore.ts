@@ -141,6 +141,7 @@ export class EventStore {
   private stmtInsertCheckpoint: Statement;
   private stmtGetCheckpoint: Statement;
   private stmtGetCheckpointsBySession: Statement;
+  private stmtListSessionStarts: Statement;
 
   constructor(config?: EventStoreConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config } as typeof this.config;
@@ -211,6 +212,12 @@ export class EventStore {
       SELECT * FROM checkpoints
       WHERE session_id = $session_id
       ORDER BY timestamp DESC
+    `);
+
+    this.stmtListSessionStarts = this.db.prepare(`
+      SELECT session_id, metadata
+      FROM events
+      WHERE event_type = 'SESSION_STARTED'
     `);
   }
 
@@ -395,6 +402,59 @@ export class EventStore {
   async getBySession(sessionId: SessionId): Promise<Event[]> {
     const rows = this.stmtGetEventsBySession.all({ $session_id: sessionId }) as EventRow[];
     return rows.map((row) => this.rowToEvent(row));
+  }
+
+  /**
+   * Find session IDs for a specific projectDir.
+   */
+  findSessionIdsByProjectDir(projectDir: string): SessionId[] {
+    const rows = this.stmtListSessionStarts.all() as Array<{
+      session_id: string;
+      metadata: string;
+    }>;
+
+    const matching: SessionId[] = [];
+    for (const row of rows) {
+      try {
+        const metadata = JSON.parse(row.metadata) as { projectDir?: string };
+        if (metadata.projectDir === projectDir) {
+          matching.push(row.session_id as SessionId);
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return Array.from(new Set(matching));
+  }
+
+  /**
+   * Delete events and checkpoints for the provided session IDs.
+   *
+   * Security: Uses parameterized queries to prevent SQL injection.
+   * Each session ID is deleted individually within a transaction.
+   */
+  deleteSessions(sessionIds: SessionId[]): void {
+    if (sessionIds.length === 0) {
+      return;
+    }
+
+    // Use individual parameterized deletes instead of IN clause interpolation
+    // This prevents SQL injection even if sessionIds contains malicious values
+    const deleteMany = this.db.transaction(() => {
+      const stmtCheckpoint = this.db.prepare(
+        "DELETE FROM checkpoints WHERE session_id = $sessionId"
+      );
+      const stmtEvent = this.db.prepare(
+        "DELETE FROM events WHERE session_id = $sessionId"
+      );
+
+      for (const sessionId of sessionIds) {
+        stmtCheckpoint.run({ $sessionId: sessionId });
+        stmtEvent.run({ $sessionId: sessionId });
+      }
+    });
+    deleteMany();
   }
 
   /**
