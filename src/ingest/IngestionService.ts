@@ -224,7 +224,20 @@ export class IngestionService {
     limit?: number;
     sortBy?: "lastIngestedAt" | "filesCount" | "rootPath";
   } = {}): Promise<ProjectInfo[]> {
-    return await this.codeGraph.listProjects(options);
+    try {
+      return await this.codeGraph.listProjects(options);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Log at service layer with context
+      console.error(`[IngestionService] listProjects failed:`, {
+        error: errorMessage,
+        filters: options,
+      });
+
+      // Re-throw - let caller decide how to handle
+      throw error;
+    }
   }
 
   /**

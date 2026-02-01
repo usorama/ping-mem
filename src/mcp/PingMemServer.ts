@@ -2218,6 +2218,13 @@ export class PingMemServer {
     // Validate input with Zod
     const parseResult = ListProjectsSchema.safeParse(args);
     if (!parseResult.success) {
+      // Log validation failure for debugging/security
+      console.error(`[PingMemServer] codebase_list_projects validation failed:`, {
+        receivedInput: args,
+        validationErrors: parseResult.error.format(),
+        sessionId: this.currentSessionId,
+      });
+
       throw new Error(
         `Invalid input for codebase_list_projects: ${parseResult.error.message}`
       );
@@ -2251,6 +2258,14 @@ export class PingMemServer {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Log error before re-throwing for debugging
+      console.error(`[PingMemServer] codebase_list_projects failed:`, {
+        error: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
+        input: validated,
+      });
+
       throw new Error(`Failed to list projects: ${errorMessage}`);
     }
   }
@@ -2263,6 +2278,13 @@ export class PingMemServer {
     // Validate input with Zod
     const parseResult = DeleteProjectSchema.safeParse(args);
     if (!parseResult.success) {
+      // Log validation failure for debugging/security
+      console.error(`[PingMemServer] project_delete validation failed:`, {
+        receivedInput: args,
+        validationErrors: parseResult.error.format(),
+        sessionId: this.currentSessionId,
+      });
+
       throw new Error(
         `Invalid input for project_delete: ${parseResult.error.message}`
       );
@@ -2273,13 +2295,26 @@ export class PingMemServer {
 
     let projectId: string | null = null;
     if (fs.existsSync(normalized)) {
-      const scanner = new ProjectScanner();
-      const scan = scanner.scanProject(normalized);
-      projectId = scan.manifest.projectId;
+      try {
+        const scanner = new ProjectScanner();
+        const scan = scanner.scanProject(normalized);
+        projectId = scan.manifest.projectId;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        console.error(`[ProjectDelete] Failed to scan project directory:`, {
+          error: errorMessage,
+          projectDir: normalized,
+        });
+
+        // Fall through to "not found" error below
+      }
     }
 
     if (!projectId) {
-      throw new Error("Project not found or projectDir is invalid.");
+      throw new Error(
+        `Project not found at ${normalized}. Directory may not exist or may not be a valid ping-mem project.`
+      );
     }
 
     await this.ingestionService.deleteProject(projectId);
@@ -2288,12 +2323,42 @@ export class PingMemServer {
       this.diagnosticsStore.deleteProject(projectId);
     }
 
-    const sessionIds = this.eventStore.findSessionIdsByProjectDir(normalized);
-    this.eventStore.deleteSessions(sessionIds);
+    let sessionsDeleted = 0;
+    try {
+      const sessionIds = this.eventStore.findSessionIdsByProjectDir(normalized);
+
+      if (sessionIds.length > 0) {
+        console.log(`[ProjectDelete] Deleting ${sessionIds.length} sessions for project ${projectId}`);
+        this.eventStore.deleteSessions(sessionIds);
+        sessionsDeleted = sessionIds.length;
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Log but don't fail - session cleanup is supplementary
+      console.error(`[ProjectDelete] Failed to delete sessions for project ${projectId}:`, {
+        error: errorMessage,
+        projectDir: normalized,
+      });
+
+      // Continue with delete - session cleanup failure shouldn't block project deletion
+    }
 
     const manifestPath = path.join(normalized, ".ping-mem", "manifest.json");
     if (fs.existsSync(manifestPath)) {
-      fs.unlinkSync(manifestPath);
+      try {
+        fs.unlinkSync(manifestPath);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        console.error(`[ProjectDelete] Failed to delete manifest file:`, {
+          error: errorMessage,
+          path: manifestPath,
+          projectId,
+        });
+
+        // Don't throw - manifest cleanup failure shouldn't block overall deletion
+      }
     }
 
     const adminDbPath = process.env.PING_MEM_ADMIN_DB_PATH ?? path.join(os.homedir(), ".ping-mem", "admin.db");
@@ -2302,8 +2367,17 @@ export class PingMemServer {
         const adminStore = new AdminStore({ dbPath: adminDbPath });
         adminStore.deleteProject(projectId);
         adminStore.close();
-      } catch {
-        // Ignore admin store cleanup errors
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+
+        // Log admin cleanup failure - critical for diagnosing admin DB inconsistencies
+        console.error(`[ProjectDelete] Failed to cleanup admin store for project ${projectId}:`, {
+          error: errorMessage,
+          stack: error instanceof Error ? error.stack : undefined,
+          adminDbPath,
+        });
+
+        // Don't re-throw - admin cleanup failure shouldn't block project deletion
       }
     }
 
@@ -2311,7 +2385,7 @@ export class PingMemServer {
       success: true,
       projectId,
       projectDir: normalized,
-      sessionsDeleted: sessionIds.length,
+      sessionsDeleted,
     };
   }
 

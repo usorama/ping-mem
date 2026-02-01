@@ -22,7 +22,13 @@ export type ListProjectsInput = z.infer<typeof ListProjectsSchema>;
  * Schema for project_delete input
  */
 export const DeleteProjectSchema = z.object({
-  projectDir: z.string().min(1, "projectDir cannot be empty"),
+  projectDir: z.string()
+    .min(1, "projectDir cannot be empty")
+    .max(4096, "projectDir path too long")
+    .refine(
+      (p) => !p.includes(".."),
+      { message: "projectDir cannot contain path traversal sequences" }
+    ),
 });
 
 export type DeleteProjectInput = z.infer<typeof DeleteProjectSchema>;

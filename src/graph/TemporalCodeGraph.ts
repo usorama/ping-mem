@@ -314,6 +314,21 @@ export class TemporalCodeGraph {
         commitsCount: r.get("commitsCount").toNumber() as number,
         lastIngestedAt: r.get("lastIngestedAt") as string,
       }));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      // Log with context for debugging
+      console.error(`[TemporalCodeGraph] Failed to list projects:`, {
+        error: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined,
+        filters: { projectId: options.projectId, limit: options.limit, sortBy: options.sortBy }
+      });
+
+      // Re-throw with user-friendly message
+      throw new Error(
+        `Failed to query project graph database: ${errorMessage}. ` +
+        `Check Neo4j connection and logs for details.`
+      );
     } finally {
       await session.close();
     }
