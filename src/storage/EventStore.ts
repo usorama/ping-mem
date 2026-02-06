@@ -578,6 +578,17 @@ export class EventStore {
   // ========== Utility Operations ==========
 
   /**
+   * List all unique session IDs in the event store
+   */
+  async listSessions(): Promise<SessionId[]> {
+    const stmt = this.db.prepare(
+      "SELECT DISTINCT session_id FROM events ORDER BY timestamp ASC"
+    );
+    const rows = stmt.all() as Array<{ session_id: string }>;
+    return rows.map((row) => row.session_id);
+  }
+
+  /**
    * Test database connectivity
    */
   async ping(): Promise<boolean> {
