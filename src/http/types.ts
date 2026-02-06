@@ -131,6 +131,8 @@ export interface ContextSaveRequest {
   createdAt?: string;
   /** Custom updatedAt timestamp (for migration, ISO 8601 string) */
   updatedAt?: string;
+  /** Skip proactive recall on save (for bulk operations) */
+  skipProactiveRecall?: boolean;
 }
 
 /**

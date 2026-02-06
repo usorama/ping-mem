@@ -375,18 +375,23 @@ Replace memory-keeper with ping-mem across all Paro channels.
 6. Add 200ms timeout on hybrid search — if search takes longer, return save result without related memories (don't block)
 7. Update MCP tool response schema
 
-### Phase 5: Integration [~1 hour]
+### Phase 5: Integration [~1 hour] ✅ COMPLETE
 
-**Files to modify:**
-- `~/.claude/mcp.json` — swap MCP servers
-- `~/.claude/skills/paro/SKILL.md` — update boot sequence
-- `/Users/umasankr/Projects/paro/src/memory/` — add ping-mem REST client
+**Files modified:**
+- ✅ `~/.claude/mcp.json` — ping-mem configured, memory-keeper removed
+- ✅ `~/.claude/skills/paro/SKILL.md` — updated boot sequence with targeted searches
+- ✅ `/Users/umasankr/Projects/Paro/src/memory/ping-mem-client.ts` — full REST client with correct API v1 routes
+- ✅ `/Users/umasankr/Projects/Paro/src/memory/intents.ts` — dual-write to Postgres + ping-mem
+- ✅ `/Users/umasankr/Projects/Paro/src/channels/telegram.ts` — enhanced context builder with 3 parallel targeted searches
+- ✅ `/Users/umasankr/Projects/Paro/src/index.ts` — ping-mem URL set to port 3003
 
-**Tasks:**
-1. Update Claude Code MCP config
-2. Update Paro skill to use ping-mem tools
-3. Add ping-mem REST client to Paro Telegram bot
-4. Verify end-to-end: save via Telegram → query via Claude Code
+**Completed tasks:**
+1. ✅ MCP config has ping-mem (memory-keeper removed)
+2. ✅ Paro skill updated with targeted search commands and intelligence layer docs
+3. ✅ PingMemClient: startSession, save, search, get, checkpoint, logMessage, getRecentContext, getStatus, getBaseUrl
+4. ✅ Memory intents (facts/goals/preferences) dual-write to both Postgres and ping-mem
+5. ✅ buildPromptContext() does 3 parallel targeted searches (goals, decisions, notes) + stats
+6. ✅ End-to-end verified: session start → save → targeted search → stats all working on port 3003
 
 ## Phase Dependency Graph
 

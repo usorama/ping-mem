@@ -51,6 +51,7 @@ import type { FindingInput } from "../diagnostics/types.js";
 import { SummaryGenerator, OpenAIProvider } from "../diagnostics/SummaryGenerator.js";
 import { SummaryCache } from "../diagnostics/SummaryCache.js";
 import { AdminStore } from "../admin/AdminStore.js";
+import { RelevanceEngine } from "../memory/RelevanceEngine.js";
 import { ProjectScanner } from "../ingest/ProjectScanner.js";
 import {
   ListProjectsSchema,
@@ -115,6 +116,10 @@ export const TOOLS = [
         extractEntities: {
           type: "boolean",
           description: "When true, extract entities from value and store in knowledge graph",
+        },
+        skipProactiveRecall: {
+          type: "boolean",
+          description: "When true, skip proactive recall of related memories on save (default: false)",
         },
       },
       required: ["key", "value"],
@@ -540,6 +545,25 @@ export const TOOLS = [
       required: ["projectDir"],
     },
   },
+  {
+    name: "memory_stats",
+    description: "Show relevance decay distribution, stale count, total tracked memories, and average relevance score",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "memory_consolidate",
+    description: "Archive stale memories (low relevance, old access) into digest entries. Groups by channel/category, creates summaries, and moves originals to archived_memories table.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        maxScore: { type: "number", description: "Maximum relevance score for consolidation (default: 0.3)" },
+        minDaysOld: { type: "number", description: "Minimum days since last access (default: 30)" },
+      },
+    },
+  },
 ];
 
 // ============================================================================
@@ -594,6 +618,7 @@ export class PingMemServer {
   private ingestionService: IngestionService | null = null;
   private diagnosticsStore: DiagnosticsStore | null = null;
   private summaryGenerator: SummaryGenerator | null = null;
+  private relevanceEngine: RelevanceEngine | null = null;
 
   constructor(config: PingMemServerConfig = {}) {
     this.config = {
@@ -609,6 +634,9 @@ export class PingMemServer {
     this.sessionManager = new SessionManager({
       eventStore: this.eventStore,
     });
+
+    // Initialize relevance engine using EventStore's database
+    this.relevanceEngine = new RelevanceEngine(this.eventStore.getDatabase());
 
     // Initialize vector index if enabled
     if (this.config.enableVectorSearch && this.config.vectorDimensions !== undefined) {
@@ -788,6 +816,12 @@ export class PingMemServer {
       case "project_delete":
         return this.handleProjectDelete(args);
 
+      case "memory_stats":
+        return this.handleMemoryStats();
+
+      case "memory_consolidate":
+        return this.handleMemoryConsolidate(args);
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -920,7 +954,16 @@ export class PingMemServer {
       saveOptions.metadata = args.metadata as Record<string, unknown>;
     }
 
-    const memoryId = await memoryManager.save(args.key as string, args.value as string, saveOptions);
+    const savedMemory = await memoryManager.save(args.key as string, args.value as string, saveOptions);
+
+    // Track relevance for the new memory
+    if (this.relevanceEngine) {
+      this.relevanceEngine.ensureTracking(
+        savedMemory.id,
+        savedMemory.priority,
+        savedMemory.category
+      );
+    }
 
     // Handle entity extraction if requested
     const extractEntities = args.extractEntities === true;
@@ -953,13 +996,93 @@ export class PingMemServer {
 
     const result: Record<string, unknown> = {
       success: true,
-      memoryId,
+      memoryId: savedMemory.id,
       key: args.key,
     };
 
     // Include entityIds in response when extraction was requested
     if (extractEntities) {
       result.entityIds = entityIds ?? [];
+    }
+
+    // Proactive recall: surface related memories (unless explicitly skipped)
+    // Combines same-session (in-memory) and cross-session (SQLite) results
+    if (args.skipProactiveRecall !== true) {
+      try {
+        const timeoutMs = 200;
+        const recallPromise = new Promise<Array<Record<string, unknown>>>((resolve) => {
+          const excludeKeys = [args.key as string];
+          const searchLimit = 5;
+
+          // 1. Same-session results (in-memory Map)
+          const sameSessionOpts: Parameters<typeof memoryManager.findRelated>[1] = {
+            excludeKeys,
+            limit: searchLimit,
+          };
+          if (this.currentSessionId) {
+            sameSessionOpts.excludeSessionId = this.currentSessionId;
+          }
+          const sameSession = memoryManager.findRelated(args.value as string, sameSessionOpts);
+
+          // 2. Cross-session results (SQLite query across all sessions)
+          const crossSessionOpts: Parameters<typeof memoryManager.findRelatedAcrossSessions>[1] = {
+            excludeKeys,
+            limit: searchLimit,
+          };
+          if (this.currentSessionId) {
+            crossSessionOpts.excludeSessionId = this.currentSessionId;
+          }
+          const crossSession = memoryManager.findRelatedAcrossSessions(
+            args.value as string,
+            crossSessionOpts
+          );
+
+          // 3. Merge and deduplicate by key (higher score wins)
+          const byKey = new Map<string, { memory: { id: string; key: string; value: string; sessionId: string; category?: string; priority: string; createdAt: Date }; score: number }>();
+          for (const r of [...sameSession, ...crossSession]) {
+            const existing = byKey.get(r.memory.key);
+            if (!existing || r.score > existing.score) {
+              byKey.set(r.memory.key, r);
+            }
+          }
+
+          // 4. Sort by score descending and take top N
+          const merged = Array.from(byKey.values())
+            .sort((a, b) => b.score - a.score)
+            .slice(0, searchLimit);
+
+          // 5. Filter by relevance score from RelevanceEngine
+          const withRelevance = merged
+            .filter((r) => {
+              if (!this.relevanceEngine) return r.score > 0.3;
+              const tracking = this.relevanceEngine.getRelevanceScore(r.memory.id);
+              return tracking >= 0.5;
+            })
+            .map((r) => ({
+              key: r.memory.key,
+              value: r.memory.value.length > 200
+                ? r.memory.value.substring(0, 200) + "..."
+                : r.memory.value,
+              category: r.memory.category ?? "note",
+              relevance: r.score,
+              sessionId: r.memory.sessionId,
+              createdAt: r.memory.createdAt.toISOString(),
+            }));
+
+          resolve(withRelevance);
+        });
+
+        const timeout = new Promise<Array<Record<string, unknown>>>((resolve) => {
+          setTimeout(() => resolve([]), timeoutMs);
+        });
+
+        const relatedMemories = await Promise.race([recallPromise, timeout]);
+        if (relatedMemories.length > 0) {
+          result.relatedMemories = relatedMemories;
+        }
+      } catch {
+        // Proactive recall is best-effort — don't fail the save
+      }
     }
 
     return result;
@@ -973,6 +1096,10 @@ export class PingMemServer {
       const memory = await memoryManager.get(args.key as string);
       if (!memory) {
         return { found: false, key: args.key };
+      }
+      // Track access for relevance scoring
+      if (this.relevanceEngine) {
+        this.relevanceEngine.trackAccess(memory.id);
       }
       return {
         found: true,
@@ -1002,6 +1129,13 @@ export class PingMemServer {
     }
 
     const results = await memoryManager.recall(query);
+
+    // Track access for all returned memories
+    if (this.relevanceEngine) {
+      for (const r of results) {
+        this.relevanceEngine.trackAccess(r.memory.id);
+      }
+    }
 
     return {
       count: results.length,
@@ -2391,6 +2525,36 @@ export class PingMemServer {
       projectDir: normalized,
       sessionsDeleted,
     };
+  }
+
+  // ============================================================================
+  // Relevance Engine Handlers
+  // ============================================================================
+
+  private async handleMemoryStats(): Promise<Record<string, unknown>> {
+    if (!this.relevanceEngine) {
+      throw new Error("RelevanceEngine not available.");
+    }
+
+    const stats = this.relevanceEngine.getStats();
+    return { stats };
+  }
+
+  private async handleMemoryConsolidate(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.relevanceEngine) {
+      throw new Error("RelevanceEngine not available.");
+    }
+
+    const options: Parameters<typeof this.relevanceEngine.consolidate>[0] = {};
+    if (typeof args.maxScore === "number") {
+      options.maxScore = args.maxScore;
+    }
+    if (typeof args.minDaysOld === "number") {
+      options.minDaysOld = args.minDaysOld;
+    }
+
+    const result = this.relevanceEngine.consolidate(options);
+    return { result };
   }
 
   // ============================================================================

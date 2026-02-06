@@ -731,6 +731,171 @@ export class MemoryManager {
     return results;
   }
 
+  // ========== Proactive Recall ==========
+
+  /**
+   * Find memories related to the given text by keyword overlap.
+   * Used for proactive recall on save — surfaces relevant existing memories.
+   * Excludes memories from the current session by default.
+   */
+  findRelated(
+    text: string,
+    options: {
+      excludeSessionId?: string;
+      limit?: number;
+      excludeKeys?: string[];
+    } = {}
+  ): Array<{ memory: Memory; score: number }> {
+    const limit = options.limit ?? 5;
+    const excludeKeys = new Set(options.excludeKeys ?? []);
+
+    // Extract keywords (words >= 3 chars, lowercase, deduplicated)
+    const keywords = [
+      ...new Set(
+        text
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ")
+          .split(/\s+/)
+          .filter((w) => w.length >= 3)
+      ),
+    ];
+
+    if (keywords.length === 0) return [];
+
+    const scored: Array<{ memory: Memory; score: number }> = [];
+
+    for (const memory of this.memories.values()) {
+      // Skip same-session memories
+      if (options.excludeSessionId && memory.sessionId === options.excludeSessionId) {
+        continue;
+      }
+      // Skip excluded keys
+      if (excludeKeys.has(memory.key)) continue;
+
+      // Score by keyword overlap
+      const memoryText = `${memory.key} ${memory.value}`.toLowerCase();
+      let matchCount = 0;
+      for (const keyword of keywords) {
+        if (memoryText.includes(keyword)) {
+          matchCount++;
+        }
+      }
+
+      if (matchCount > 0) {
+        const score = matchCount / keywords.length;
+        scored.push({ memory, score });
+      }
+    }
+
+    // Sort by score descending, take top N
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, limit);
+  }
+
+  /**
+   * Find memories related to the given text across ALL sessions by querying the
+   * EventStore's SQLite database directly. This surfaces memories from other
+   * sessions (e.g., Telegram session memories visible in Claude Code session).
+   *
+   * The current session's memories are excluded since they are already covered
+   * by the in-memory `findRelated()` method.
+   */
+  findRelatedAcrossSessions(
+    text: string,
+    options: {
+      excludeSessionId?: string;
+      limit?: number;
+      excludeKeys?: string[];
+    } = {}
+  ): Array<{ memory: Memory; score: number }> {
+    const limit = options.limit ?? 5;
+    const excludeKeys = new Set(options.excludeKeys ?? []);
+
+    // Extract keywords (same logic as findRelated)
+    const keywords = [
+      ...new Set(
+        text
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, " ")
+          .split(/\s+/)
+          .filter((w) => w.length >= 3)
+      ),
+    ];
+
+    if (keywords.length === 0) return [];
+
+    // Query EventStore directly for MEMORY_SAVED events from OTHER sessions
+    const db = this.eventStore.getDatabase();
+    const stmt = db.prepare(`
+      SELECT payload FROM events
+      WHERE event_type = 'MEMORY_SAVED'
+      AND session_id != $excludeSession
+      ORDER BY timestamp DESC
+      LIMIT 500
+    `);
+    const excludeSession = options.excludeSessionId ?? this.sessionId;
+    const rows = stmt.all({ $excludeSession: excludeSession }) as Array<{ payload: string }>;
+
+    const scored: Array<{ memory: Memory; score: number }> = [];
+    // Track keys we've already seen to avoid duplicates (keep most recent)
+    const seenKeys = new Set<string>();
+
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload) as MemoryEventData;
+        const memData = payload.memory;
+        if (!memData) continue;
+
+        const key = payload.key;
+        const value = memData.value ?? "";
+
+        if (!key || !value) continue;
+        if (excludeKeys.has(key)) continue;
+        // Skip duplicate keys (rows are ordered DESC so first seen = most recent)
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+
+        // Score by keyword overlap
+        const memoryText = `${key} ${value}`.toLowerCase();
+        let matchCount = 0;
+        for (const keyword of keywords) {
+          if (memoryText.includes(keyword)) {
+            matchCount++;
+          }
+        }
+
+        if (matchCount > 0) {
+          const score = matchCount / keywords.length;
+          // Reconstruct Memory object from event payload
+          // Use the same pattern as hydrate() to handle exactOptionalPropertyTypes
+          const reconstructed: Memory = {
+            id: payload.memoryId as MemoryId,
+            key,
+            value,
+            sessionId: payload.sessionId as SessionId,
+            priority: memData.priority ?? "normal",
+            privacy: memData.privacy ?? "session",
+            createdAt: memData.createdAt ? new Date(memData.createdAt as unknown as string) : new Date(),
+            updatedAt: memData.updatedAt ? new Date(memData.updatedAt as unknown as string) : new Date(),
+            metadata: memData.metadata ?? {},
+          };
+          if (memData.category !== undefined) {
+            reconstructed.category = memData.category;
+          }
+          if (memData.channel !== undefined) {
+            reconstructed.channel = memData.channel;
+          }
+          scored.push({ memory: reconstructed, score });
+        }
+      } catch {
+        continue; // Skip malformed events
+      }
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, limit);
+  }
+
   // ========== Utility Operations ==========
 
   /**

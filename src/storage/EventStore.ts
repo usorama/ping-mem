@@ -632,6 +632,13 @@ export class EventStore {
   }
 
   /**
+   * Get the underlying database instance
+   */
+  getDatabase(): Database {
+    return this.db;
+  }
+
+  /**
    * Close database connection
    */
   async close(): Promise<void> {

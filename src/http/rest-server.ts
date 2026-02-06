@@ -18,6 +18,7 @@ import { SessionManager } from "../session/SessionManager.js";
 import { MemoryManager, type MemoryManagerConfig } from "../memory/MemoryManager.js";
 import { EventStore } from "../storage/EventStore.js";
 import { VectorIndex, createInMemoryVectorIndex } from "../search/VectorIndex.js";
+import { RelevanceEngine } from "../memory/RelevanceEngine.js";
 import type { GraphManager } from "../graph/GraphManager.js";
 import type { HybridSearchEngine } from "../search/HybridSearchEngine.js";
 import {
@@ -72,6 +73,7 @@ export class RESTPingMemServer {
   private hybridSearchEngine: HybridSearchEngine | null = null;
   private diagnosticsStore: DiagnosticsStore;
   private summaryGenerator: SummaryGenerator | null = null;
+  private relevanceEngine: RelevanceEngine;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -84,6 +86,7 @@ export class RESTPingMemServer {
     // Initialize core components
     this.eventStore = new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
     this.sessionManager = new SessionManager({ eventStore: this.eventStore });
+    this.relevanceEngine = new RelevanceEngine(this.eventStore.getDatabase());
     this.diagnosticsStore =
       this.config.diagnosticsStore ??
       new DiagnosticsStore({
@@ -304,10 +307,70 @@ export class RESTPingMemServer {
         if (body.createdAt !== undefined) options.createdAt = new Date(body.createdAt);
         if (body.updatedAt !== undefined) options.updatedAt = new Date(body.updatedAt);
 
-        await memoryManager.save(body.key, body.value, options);
+        const savedMemory = await memoryManager.save(body.key, body.value, options);
 
-        return c.json<RESTSuccessResponse<{ message: string }>>({
-          data: { message: "Memory saved successfully" },
+        // Track relevance for the new memory
+        this.relevanceEngine.ensureTracking(
+          savedMemory.id,
+          savedMemory.priority,
+          savedMemory.category
+        );
+
+        // Proactive recall: surface related memories from other sessions
+        let relatedMemories: Array<{
+          key: string;
+          value: string;
+          category: string;
+          relevance: number;
+          sessionId: string;
+        }> = [];
+
+        if (body.skipProactiveRecall !== true) {
+          try {
+            const findOpts: { excludeKeys?: string[]; limit?: number; excludeSessionId?: string } = {
+              excludeKeys: [body.key],
+              limit: 5,
+            };
+            if (sessionId) {
+              findOpts.excludeSessionId = sessionId;
+            }
+
+            // Cross-session search with 200ms timeout
+            const recallPromise = new Promise<typeof relatedMemories>((resolve) => {
+              const crossSession = memoryManager.findRelatedAcrossSessions(
+                body.value,
+                findOpts
+              );
+              const withRelevance = crossSession
+                .filter((r) => {
+                  const tracking = this.relevanceEngine.getRelevanceScore(r.memory.id);
+                  return tracking >= 0.5 || r.score > 0.3;
+                })
+                .map((r) => ({
+                  key: r.memory.key,
+                  value: r.memory.value.length > 200 ? r.memory.value.substring(0, 200) + "..." : r.memory.value,
+                  category: r.memory.category ?? "note",
+                  relevance: r.score,
+                  sessionId: String(r.memory.sessionId),
+                }));
+              resolve(withRelevance);
+            });
+            const timeout = new Promise<typeof relatedMemories>((resolve) =>
+              setTimeout(() => resolve([]), 200)
+            );
+            relatedMemories = await Promise.race([recallPromise, timeout]);
+          } catch {
+            // Best-effort: don't block save
+          }
+        }
+
+        const result: Record<string, unknown> = { message: "Memory saved successfully" };
+        if (relatedMemories.length > 0) {
+          result.relatedMemories = relatedMemories;
+        }
+
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: result,
         });
       } catch (error) {
         return this.handleError(c, error);
@@ -821,8 +884,20 @@ export class RESTPingMemServer {
 
         const results = await memoryManager.recall(queryParams);
 
-        return c.json<RESTSuccessResponse<typeof results>>({
-          data: results,
+        // Apply relevance decay weighting to search results
+        const weightedResults = results.map((r) => {
+          const relevanceScore = this.relevanceEngine.getRelevanceScore(r.memory.id);
+          const baseScore = r.score ?? 1.0;
+          // Blend original score with relevance decay (70% match score, 30% relevance)
+          const weightedScore = baseScore * 0.7 + relevanceScore * 0.3;
+          return { ...r, score: weightedScore };
+        });
+
+        // Re-sort by weighted score
+        weightedResults.sort((a, b) => b.score - a.score);
+
+        return c.json<RESTSuccessResponse<typeof weightedResults>>({
+          data: weightedResults,
         });
       } catch (error) {
         return this.handleError(c, error);
@@ -907,6 +982,36 @@ export class RESTPingMemServer {
 
     this.app.get("/api/v1/stats", async (c) => {
       return c.redirect("/api/v1/status");
+    });
+
+    // ============================================================================
+    // Relevance Engine Operations
+    // ============================================================================
+
+    this.app.get("/api/v1/memory/stats", async (c) => {
+      try {
+        const stats = this.relevanceEngine.getStats();
+        return c.json({ data: stats });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.post("/api/v1/memory/consolidate", async (c) => {
+      try {
+        const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
+        const options: Parameters<typeof this.relevanceEngine.consolidate>[0] = {};
+        if (typeof body.maxScore === "number") {
+          options.maxScore = body.maxScore;
+        }
+        if (typeof body.minDaysOld === "number") {
+          options.minDaysOld = body.minDaysOld;
+        }
+        const result = this.relevanceEngine.consolidate(options);
+        return c.json({ data: result });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
     });
   }
 
