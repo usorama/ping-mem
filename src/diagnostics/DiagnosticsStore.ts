@@ -16,7 +16,12 @@ export interface DiagnosticsStoreConfig {
   busyTimeout?: number | undefined;
 }
 
-const DEFAULT_CONFIG: Required<DiagnosticsStoreConfig> = {
+const DEFAULT_CONFIG: {
+  dbPath: string;
+  walMode: boolean;
+  foreignKeys: boolean;
+  busyTimeout: number;
+} = {
   dbPath: path.join(os.homedir(), ".ping-mem", "diagnostics.db"),
   walMode: true,
   foreignKeys: true,
@@ -77,7 +82,12 @@ export class DiagnosticsStore {
   private stmtGetFindingIdsByAnalysis!: Statement;
 
   constructor(config?: DiagnosticsStoreConfig | undefined) {
-    this.config = { ...DEFAULT_CONFIG, ...config } as typeof this.config;
+    this.config = {
+      dbPath: config?.dbPath ?? DEFAULT_CONFIG.dbPath,
+      walMode: config?.walMode ?? DEFAULT_CONFIG.walMode,
+      foreignKeys: config?.foreignKeys ?? DEFAULT_CONFIG.foreignKeys,
+      busyTimeout: config?.busyTimeout ?? DEFAULT_CONFIG.busyTimeout,
+    };
 
     if (this.config.dbPath !== ":memory:") {
       const dbDir = path.dirname(this.config.dbPath);
@@ -270,6 +280,27 @@ export class DiagnosticsStore {
     });
 
     insertMany();
+  }
+
+  deleteProject(projectId: string): void {
+    const stmtDeleteSummaries = this.db.prepare(`
+      DELETE FROM diagnostic_summaries
+      WHERE analysis_id IN (SELECT analysis_id FROM diagnostic_runs WHERE project_id = $project_id)
+    `);
+    const stmtDeleteFindings = this.db.prepare(`
+      DELETE FROM diagnostic_findings
+      WHERE analysis_id IN (SELECT analysis_id FROM diagnostic_runs WHERE project_id = $project_id)
+    `);
+    const stmtDeleteRuns = this.db.prepare(
+      "DELETE FROM diagnostic_runs WHERE project_id = $project_id"
+    );
+
+    const deleteMany = this.db.transaction(() => {
+      stmtDeleteSummaries.run({ $project_id: projectId });
+      stmtDeleteFindings.run({ $project_id: projectId });
+      stmtDeleteRuns.run({ $project_id: projectId });
+    });
+    deleteMany();
   }
 
   getLatestRun(filter: DiagnosticsQueryFilter): DiagnosticRun | null {

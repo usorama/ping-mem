@@ -243,6 +243,7 @@ describe("Factory Functions", () => {
     it("should throw when NEO4J_USERNAME is missing", () => {
       process.env["NEO4J_URI"] = "bolt://localhost:7687";
       delete process.env["NEO4J_USERNAME"];
+      delete process.env["NEO4J_USER"];
       process.env["NEO4J_PASSWORD"] = "password";
 
       expect(() => createNeo4jClientFromEnv()).toThrow(

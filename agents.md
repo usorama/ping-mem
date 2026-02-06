@@ -7,32 +7,6 @@
 
 ---
 
-## Agent Workflow Reference
-
-**ALL agents working on this project MUST follow** the ping-mem Agent Workflow documented at:
-**`~/.claude/ping-mem-agent-workflow.md`**
-
-This workflow covers:
-- Session start with auto-ingest
-- Code search before changes
-- Context save (decisions, progress, errors)
-- Verification with local tools
-- Session end
-
-Quick start:
-```json
-{
-  "name": "context_session_start",
-  "arguments": {
-    "name": "agent-session",
-    "projectDir": "/Users/umasankr/Projects/ping-mem",
-    "autoIngest": true
-  }
-}
-```
-
----
-
 ## What is ping-mem?
 
 **ping-mem** is a **Universal Memory Layer** for AI agents that provides persistent, intelligent, and contextually-aware memory across sessions, tools, and applications. It serves as reusable infrastructure that any AI application can leverage.
@@ -829,82 +803,6 @@ ping-mem/
 ├── IMPLEMENTATION_SUMMARY.md # v1.1.0 implementation details
 └── README.md
 ```
-
----
-
-## Serena MCP Integration
-
-**Status**: Active | **Projects**: ping-mem, livekit-tutor | **Indexed**: 387 files
-
-**Serena** is an AI-powered coding assistant MCP server providing semantic code navigation, symbol search, and LSP integration. It's configured for this project with deterministic verification workflows.
-
-### Quick Reference
-
-| Task | Serena Tool | Verification Tool |
-|------|------------|-------------------|
-| Find symbol | `serena_find_symbol` | `grep -r "Symbol" src/` |
-| Find references | `serena_find_referencing_symbols` | `grep -r "Symbol" src/` |
-| Get file overview | `serena_get_symbols_overview` | `grep "^export" file.ts` |
-| Search pattern | `serena_search_for_pattern` | `grep -rE "pattern" src/` |
-
-### Verification Protocol (MANDATORY)
-
-**ALWAYS follow this pattern when using Serena**:
-
-```
-1. Query Serena (semantic search)
-   ↓
-2. Verify with Local Tools (Grep/Glob/Read)
-   ↓
-3. Cross-check Results
-   ↓
-4. Document Discrepancies
-```
-
-**Example**:
-```bash
-# 1. Serena query
-serena_find_symbol({query: "EventStore", symbol_types: ["class"]})
-# → Returns: src/storage/EventStore.ts:15
-
-# 2. Local verification
-grep -r "class EventStore" src/ --include="*.ts"
-# → Returns: src/storage/EventStore.ts:15:export class EventStore {
-
-# 3. Cross-check: ✅ Match confirmed
-```
-
-### Risk Mitigation
-
-- **Symbol Search**: Always verify with Grep (Serena may miss ignored files)
-- **File Edits**: Run `git diff`, `bun run typecheck`, `bun test` after edits
-- **Stale Index**: Re-index after external changes or branch switches
-- **LSP Issues**: Restart language server if content is outdated
-
-### Re-indexing
-
-```bash
-# ping-mem
-cd ~/Projects/ping-mem
-uvx --from git+https://github.com/oraios/serena serena project index .
-
-# livekit-tutor
-cd ~/Projects/livekit-gemini-voice-tutor-prototype
-uvx --from git+https://github.com/oraios/serena serena project index .
-```
-
-### Documentation
-
-- **Full Guide**: `docs/SERENA_INTEGRATION.md`
-- **Quick Ref**: `docs/SERENA_QUICK_REF.md`
-- **Official Docs**: https://oraios.github.io/serena/
-
-### Activation
-
-**Requirements**:
-- Claude Code restart (to load MCP server)
-- Tools appear with `serena_*` prefix
-- `.serena/project.yml` exists in project root
 
 ---
 

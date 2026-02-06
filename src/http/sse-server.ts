@@ -138,9 +138,17 @@ export class SSEPingMemServer {
     }
 
     // Validate API key if configured
-    if (this.config.apiKey) {
-      const apiKey = req.headers["x-api-key"] as string;
-      if (apiKey !== this.config.apiKey) {
+    // Auth is required only when: (apiKeyManager has seed key) OR (explicit apiKey is set non-empty)
+    const authRequired = this.config.apiKeyManager
+      ? this.config.apiKeyManager.hasSeedKey()
+      : (this.config.apiKey && this.config.apiKey.trim().length > 0);
+
+    if (authRequired) {
+      const apiKey = req.headers["x-api-key"] as string | undefined;
+      const isValid = this.config.apiKeyManager
+        ? this.config.apiKeyManager.isValid(apiKey)
+        : apiKey === this.config.apiKey;
+      if (!isValid) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid API key" }));
         return;

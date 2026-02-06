@@ -72,6 +72,63 @@ export class SessionManager {
   }
 
   /**
+   * Hydrate sessions from event store
+   * Rebuilds in-memory session state from persisted events
+   */
+  async hydrate(): Promise<void> {
+    // Clear existing in-memory state before rebuilding
+    this.sessions.clear();
+
+    // Get all SESSION_STARTED events
+    const sessionEvents = await this.eventStore.listSessions();
+
+    for (const sessionId of sessionEvents) {
+      // Get session details from first event
+      const events = await this.eventStore.getBySession(sessionId);
+      const startEvent = events.find((e) => e.eventType === "SESSION_STARTED");
+
+      if (!startEvent) {
+        continue;
+      }
+
+      const payload = startEvent.payload as SessionEventData;
+      const config = payload.config;
+
+      // Reconstruct session from event (only include defined optional fields)
+      const session: Session = {
+        id: sessionId,
+        name: payload.name ?? "unknown",
+        status: "active", // Assume active (can be updated by SESSION_ENDED events)
+        startedAt: new Date(startEvent.timestamp),
+        lastActivityAt: new Date(startEvent.timestamp),
+        memoryCount: 0, // Will be accurate after MemoryManager hydration
+        eventCount: events.length,
+        metadata: config?.metadata ?? {},
+      };
+
+      // Add optional fields only if they're defined
+      if (config?.projectDir !== undefined) {
+        session.projectDir = config.projectDir;
+      }
+      if (config?.defaultChannel !== undefined) {
+        session.defaultChannel = config.defaultChannel;
+      }
+      if (config?.continueFrom !== undefined) {
+        session.parentSessionId = config.continueFrom;
+      }
+
+      // Check for SESSION_ENDED event
+      const endEvent = events.find((e) => e.eventType === "SESSION_ENDED");
+      if (endEvent) {
+        session.status = "ended";
+        session.endedAt = new Date(endEvent.timestamp);
+      }
+
+      this.sessions.set(sessionId, session);
+    }
+  }
+
+  /**
    * Generate UUID v7 (time-sortable)
    */
   private generateUUID(): string {

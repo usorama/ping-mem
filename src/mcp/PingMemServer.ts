@@ -839,6 +839,10 @@ export class PingMemServer {
     }
 
     const memoryManager = new MemoryManager(memoryManagerConfig);
+
+    // Hydrate memory state from event store
+    await memoryManager.hydrate();
+
     this.memoryManagers.set(session.id, memoryManager);
 
     // Auto-ingest project if requested

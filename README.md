@@ -22,45 +22,31 @@ ping-mem is a Model Context Protocol (MCP) server that provides persistent memor
 
 ## Quick Start
 
-### Installation
+### One-Command Installation
 
 ```bash
-# Clone repository
-git clone https://github.com/ping-gadgets/ping-mem.git
-cd ping-mem
+# 1. Install ping-mem infrastructure
+./scripts/setup.sh
 
-# Install dependencies
-bun install
+# 2. Install client tools for your project
+./scripts/install-client.sh /path/to/your/project
+
+# 3. Ingest your project
+./scripts/ingest-project.sh /path/to/your/project
 ```
 
-### Basic Usage (SQLite only)
+Done! Your IDE now has ping-mem tools available.
 
-```bash
-# Build
-bun run build
+### What Gets Installed
 
-# Run MCP server
-bun run dist/mcp/cli.js
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Docker services | localhost:3000, :7474, :6333 | Neo4j, Qdrant, ping-mem HTTP |
+| MCP server | Runs locally via stdio | IDE integration |
+| Client config | `.cursor/mcp.json` or `~/.claude/mcp.json` | MCP configuration |
+| Agent rules | `.cursorrules` | IDE agent instructions |
 
-# Or start HTTP server (REST mode)
-bun run start
-```
-
-### Full Stack (with Neo4j and Qdrant)
-
-```bash
-# Copy environment template
-cp .env.example .env
-
-# Edit .env with your API keys
-vim .env
-
-# Start all services
-docker-compose up -d
-
-# Verify health
-docker-compose ps
-```
+See [docs/INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions.
 
 ## Usage as Library
 
@@ -122,14 +108,34 @@ See [examples/multi-tool-diagnostics](examples/multi-tool-diagnostics/) for usag
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PING_MEM_DB_PATH` | | `:memory:` | SQLite database path |
+| `PING_MEM_DIAGNOSTICS_DB_PATH` | | `:memory:` | Diagnostics SQLite database path |
+| `PING_MEM_ADMIN_DB_PATH` | | `:memory:` | Admin metadata SQLite database path |
 | `PING_MEM_VECTOR_SEARCH` | | `false` | Enable vector search |
 | `NEO4J_URI` | For graph | | Neo4j Bolt URI |
 | `NEO4J_USERNAME` | For graph | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | For graph | | Neo4j password |
 | `QDRANT_URL` | For vectors | | Qdrant REST URL |
-| `OPENAI_API_KEY` | For embeddings | | OpenAI API key |
+| `QDRANT_COLLECTION_NAME` | For vectors | `ping-mem-vectors` | Qdrant collection name |
+| `OPENAI_API_KEY` | For LLM summaries | | OpenAI API key |
+| `PING_MEM_ENABLE_LLM_SUMMARIES` | | `false` | Enable LLM summaries for diagnostics |
 | `PING_MEM_PORT` | | `3000` | HTTP server port |
 | `PING_MEM_TRANSPORT` | | `rest` | HTTP transport mode (rest/sse) |
+| `PING_MEM_API_KEY` | Recommended | | API key required for HTTP calls |
+| `PING_MEM_ADMIN_USER` | For admin UI | | Basic auth username for `/admin` |
+| `PING_MEM_ADMIN_PASS` | For admin UI | | Basic auth password for `/admin` |
+| `PING_MEM_SECRET_KEY` | For admin UI | | Secret used to encrypt stored LLM keys |
+
+### Admin UI
+
+ping-mem includes an admin dashboard for key management, project cleanup, and LLM provider settings.
+
+- URL: `/admin`
+- Auth: `PING_MEM_ADMIN_USER` + `PING_MEM_ADMIN_PASS`
+- API calls still require `X-API-Key`
+
+### Project Cleanup (MCP)
+
+Use MCP tool `project_delete` to remove all memory, diagnostics, graph, and vector data for a project directory.
 
 ### Claude Code Integration
 

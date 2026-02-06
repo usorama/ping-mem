@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "ping-mem": {
+      "command": "bun",
+      "args": ["run", "./dist/mcp/cli.js"],
+      "env": {
+        "NEO4J_URI": "bolt://localhost:7687",
+        "NEO4J_USERNAME": "neo4j",
+        "NEO4J_PASSWORD": "neo4j_password",
+        "QDRANT_URL": "http://localhost:6333",
+        "QDRANT_COLLECTION_NAME": "ping-mem-vectors",
+        "QDRANT_VECTOR_DIMENSIONS": "768",
+        "PING_MEM_DB_PATH": "/Users/umasankr/.ping-mem/shared.db",
+        "PING_MEM_DIAGNOSTICS_DB_PATH": "/Users/umasankr/.ping-mem/diagnostics.db",
+        "PING_MEM_ADMIN_DB_PATH": "/Users/umasankr/.ping-mem/admin.db"
+      }
+    }
+  }
+}
