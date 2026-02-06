@@ -181,6 +181,53 @@ docker-compose logs -f ping-mem-qdrant
 4. **Monitoring**: Add monitoring for health checks and logs
 5. **TLS**: Enable HTTPS for production deployments
 6. **API Keys**: Set `PING_MEM_API_KEY` for authentication
+7. **Admin UI**: Set `PING_MEM_ADMIN_USER`, `PING_MEM_ADMIN_PASS`, and `PING_MEM_SECRET_KEY`
+8. **Single Instance**: Run a single ping-mem container (SQLite is not multi-writer)
+
+## Production (VPS)
+
+Use the hardened compose file with private database networking:
+
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Key notes:
+
+- `docker-compose.prod.yml` only exposes port 3000 on localhost
+- Neo4j and Qdrant do not expose public ports
+- Use a reverse proxy (Nginx/Caddy) for HTTPS and routing
+
+### Required Production Env
+
+- `PING_MEM_API_KEY` (required for all API calls)
+- `PING_MEM_SECRET_KEY` (encrypts stored LLM provider keys)
+- `PING_MEM_ADMIN_USER` + `PING_MEM_ADMIN_PASS` (basic auth for `/admin`)
+- `NEO4J_PASSWORD` and `QDRANT_COLLECTION_NAME`
+
+### Admin UI
+
+- Visit `https://<domain>/admin`
+- Requires basic auth (admin user/pass)
+- API calls require `X-API-Key`
+
+### Project Deletion
+
+Use MCP tool `project_delete` with `projectDir` to purge:
+
+```json
+{
+  "projectDir": "/path/to/project"
+}
+```
+
+This removes:
+
+- Memory events + sessions
+- Diagnostics runs + summaries
+- Graph nodes + relationships (Neo4j)
+- Vector embeddings (Qdrant)
+- `.ping-mem/manifest.json` in the project folder
 
 ## See Also
 

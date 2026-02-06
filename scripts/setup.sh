@@ -107,6 +107,12 @@ fi
 
 echo ""
 
+API_KEY="${PING_MEM_API_KEY:-}"
+AUTH_HEADER=()
+if [[ -n "$API_KEY" ]]; then
+  AUTH_HEADER=("-H" "X-API-Key: $API_KEY")
+fi
+
 # ============================================================================
 # Step 3: Install Dependencies
 # ============================================================================
@@ -169,7 +175,7 @@ if [ "$SKIP_DOCKER" = false ]; then
   fi
 
   # Check ping-mem
-  if curl -sf http://localhost:3000/health > /dev/null 2>&1; then
+  if curl -sf "${AUTH_HEADER[@]}" http://localhost:3000/health > /dev/null 2>&1; then
     echo -e "  ${GREEN}✓${NC} ping-mem: healthy (http://localhost:3000)"
   else
     echo -e "  ${YELLOW}⚠${NC} ping-mem: not responding yet (check: docker compose logs ping-mem)"

@@ -56,10 +56,17 @@ export class GitHistoryReader {
     }
 
     const commits = await this.readCommits(gitRoot);
+    console.log(`  Found ${commits.length} commits, processing diffs...`);
     const fileChanges: GitFileChange[] = [];
     const hunks: GitDiffHunk[] = [];
 
+    let processed = 0;
     for (const commit of commits) {
+      processed++;
+      if (processed % 10 === 0 || processed === commits.length) {
+        console.log(`  Progress: ${processed}/${commits.length} commits`);
+      }
+
       const changes = await this.readFileChanges(gitRoot, commit.hash);
       fileChanges.push(...changes);
 
@@ -100,7 +107,10 @@ export class GitHistoryReader {
     const output = await git.getLog(1000, format);
 
     const commits: GitCommit[] = [];
-    const commitBlocks = output.split(delimiter).filter((b) => b.trim());
+    const commitBlocks = output
+      .split(delimiter)
+      .map((b) => b.trim()) // Trim leading/trailing whitespace from each block
+      .filter((b) => b.length > 0); // Filter empty blocks
 
     for (const block of commitBlocks) {
       const lines = block.split("\n");
@@ -115,7 +125,7 @@ export class GitHistoryReader {
       const committerEmail = lines[6]!.trim();
       const committerDate = lines[7]!.trim();
       const parentHashesLine = lines[8]!.trim();
-      const parentHashes = parentHashesLine ? parentHashesLine.split(" ") : [];
+      const parentHashes = parentHashesLine ? parentHashesLine.split(" ").filter(h => h.length > 0) : [];
 
       // Everything from line 9 onwards is the message
       const message = lines.slice(9).join("\n").trim();

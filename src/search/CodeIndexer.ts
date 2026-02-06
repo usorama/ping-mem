@@ -174,7 +174,8 @@ export class CodeIndexer {
             chunkId: chunk.chunkId,
             sha256: fileResult.sha256,
             type: chunk.type,
-            content: chunk.content,
+            // Don't store full content in Qdrant to avoid oversized payloads
+            // Content is stored in Neo4j and can be retrieved from files
             start: chunk.start,
             end: chunk.end,
             lineStart: chunk.lineStart,
@@ -190,10 +191,34 @@ export class CodeIndexer {
 
   /**
    * Convert SHA-256 hex string to UUID format for Qdrant point IDs.
-   * Takes first 32 hex chars and formats as UUID.
+   * Creates a valid UUID v5 (namespace-based) using SHA-256 hash.
    */
   private hexToUuid(hex: string): string {
+    // SHA-256 produces 64 hex chars. We need 32 hex chars for UUID.
+    // Use first 32 chars and format as UUID v5 (name-based)
+    // UUID v5 format: xxxxxxxx-xxxx-5xxx-yxxx-xxxxxxxxxxxx
+    // where x is random and y is one of 8, 9, a, b (version 5, variant 1)
+
+    // Take first 32 hex chars from SHA-256
     const h = hex.substring(0, 32);
-    return `${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20, 32)}`;
+
+    // Set version to 5 (name-based UUID with SHA-256)
+    // The 13th character (index 12) should be 5 for version 5
+    // The 17th character (index 16) should be one of 8, 9, a, b (variant 1)
+    const chars = h.split('');
+
+    // Set version bits (13th char = '5' for UUID v5)
+    chars[12] = '5';
+
+    // Set variant bits (17th char = one of '8', '9', 'a', 'b')
+    const variantByte = chars[16] ?? '0';
+    const variantChar =
+      variantByte <= '7' ? '8' :
+      variantByte <= '9' ? '9' :
+      variantByte <= 'b' ? 'a' : 'b';
+    chars[16] = variantChar;
+
+    const modified = chars.join('');
+    return `${modified.substring(0, 8)}-${modified.substring(8, 12)}-${modified.substring(12, 16)}-${modified.substring(16, 20)}-${modified.substring(20, 32)}`;
   }
 }

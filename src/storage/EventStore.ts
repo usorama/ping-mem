@@ -225,6 +225,10 @@ export class EventStore {
    * Initialize database schema
    */
   private initializeSchema(): void {
+    // Temporarily disable foreign keys during schema creation
+    // (events table has self-referencing foreign key that would fail validation)
+    this.db.exec("PRAGMA foreign_keys = OFF");
+
     this.db.exec(`
       -- Events table (append-only)
       CREATE TABLE IF NOT EXISTS events (
@@ -269,6 +273,11 @@ export class EventStore {
       CREATE INDEX IF NOT EXISTS idx_checkpoint_items_checkpoint
         ON checkpoint_items(checkpoint_id);
     `);
+
+    // Re-enable foreign keys if configured
+    if (this.config.foreignKeys) {
+      this.db.exec("PRAGMA foreign_keys = ON");
+    }
   }
 
   /**

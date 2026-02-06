@@ -13,6 +13,11 @@ import { RESTPingMemServer, createDefaultRESTConfig } from "./rest-server.js";
 import type { HTTPTransportType } from "./types.js";
 import { createRuntimeServices, loadRuntimeConfig } from "../config/runtime.js";
 import { IngestionService } from "../ingest/IngestionService.js";
+import { AdminStore } from "../admin/AdminStore.js";
+import { ApiKeyManager } from "../admin/ApiKeyManager.js";
+import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
+import { EventStore } from "../storage/EventStore.js";
+import { handleAdminRequest } from "./admin.js";
 
 // ============================================================================
 // Server Factory
@@ -28,17 +33,30 @@ export async function startHTTPServer(): Promise<void> {
   const runtimeConfig = loadRuntimeConfig();
   const services = await createRuntimeServices();
 
-  // Create IngestionService for codebase_* tools
-  const ingestionService = new IngestionService({
-    neo4jClient: services.neo4jClient,
-    qdrantClient: services.qdrantClient,
-  });
+  // Create IngestionService only when both Neo4j and Qdrant are available
+  let ingestionService: IngestionService | undefined;
+  if (services.neo4jClient && services.qdrantClient) {
+    ingestionService = new IngestionService({
+      neo4jClient: services.neo4jClient,
+      qdrantClient: services.qdrantClient,
+    });
+  }
 
   const transport = (process.env.PING_MEM_TRANSPORT as HTTPTransportType) ?? "streamable-http";
   const port = parseInt(process.env.PING_MEM_PORT ?? "3000");
   const host = process.env.PING_MEM_HOST ?? "0.0.0.0";
   const apiKey = process.env.PING_MEM_API_KEY;
   const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
+  const adminDbPath = process.env.PING_MEM_ADMIN_DB_PATH ?? runtimeConfig.pingMem.dbPath;
+
+  const adminStore = new AdminStore({ dbPath: adminDbPath });
+  const apiKeyManager = new ApiKeyManager(adminStore);
+  apiKeyManager.ensureSeedKey(apiKey);
+
+  const diagnosticsStore = new DiagnosticsStore(
+    diagnosticsDbPath ? { dbPath: diagnosticsDbPath } : undefined
+  );
+  const eventStore = new EventStore({ dbPath: runtimeConfig.pingMem.dbPath });
 
   console.log(`[HTTP Server] Starting with transport: ${transport}`);
   console.log(`[HTTP Server] Listening on ${host}:${port}`);
@@ -56,6 +74,8 @@ export async function startHTTPServer(): Promise<void> {
     if (apiKey) {
       restConfig.apiKey = apiKey;
     }
+    restConfig.apiKeyManager = apiKeyManager;
+    restConfig.adminStore = adminStore;
 
     serverInstance = new RESTPingMemServer({
       ...restConfig,
@@ -77,6 +97,7 @@ export async function startHTTPServer(): Promise<void> {
     if (apiKey) {
       sseConfig.apiKey = apiKey;
     }
+    sseConfig.apiKeyManager = apiKeyManager;
 
     serverInstance = new SSEPingMemServer({
       ...sseConfig,
@@ -94,7 +115,20 @@ export async function startHTTPServer(): Promise<void> {
 
   // Create Node.js HTTP server
   const httpServer = createServer((req, res) => {
-    serverInstance.handleRequest(req, res).catch((error) => {
+    handleAdminRequest(req, res, {
+      adminStore,
+      apiKeyManager,
+      ingestionService,
+      diagnosticsStore,
+      eventStore,
+    })
+      .then((handled) => {
+        if (handled) {
+          return;
+        }
+        return serverInstance.handleRequest(req, res);
+      })
+      .catch((error) => {
       console.error("[HTTP Server] Unhandled error:", error);
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "application/json" });
@@ -105,7 +139,7 @@ export async function startHTTPServer(): Promise<void> {
           })
         );
       }
-    });
+      });
   });
 
   // Start listening
@@ -123,6 +157,8 @@ export async function startHTTPServer(): Promise<void> {
     console.log("\n[HTTP Server] Shutting down...");
     httpServer.close();
     await serverInstance.stop();
+    await eventStore.close();
+    adminStore.close();
     console.log("[HTTP Server] Shutdown complete");
     process.exit(0);
   };

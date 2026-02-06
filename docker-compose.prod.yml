@@ -1,0 +1,75 @@
+services:
+  ping-mem-neo4j:
+    image: neo4j:5.25-community
+    container_name: ping-mem-neo4j
+    environment:
+      - NEO4J_AUTH=${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD}
+      - NEO4J_dbms_memory_heap_initial__size=1G
+      - NEO4J_dbms_memory_heap_max__size=2G
+      - NEO4J_dbms_memory_pagecache_size=1G
+    volumes:
+      - ping-mem-neo4j-data:/data
+      - ping-mem-neo4j-logs:/logs
+    networks:
+      - ping-mem-network
+    restart: unless-stopped
+
+  ping-mem-qdrant:
+    image: qdrant/qdrant:v1.12.0
+    container_name: ping-mem-qdrant
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    volumes:
+      - ping-mem-qdrant-data:/qdrant/storage
+    networks:
+      - ping-mem-network
+    restart: unless-stopped
+
+  ping-mem:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ping-mem
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - PING_MEM_HOST=0.0.0.0
+      - PING_MEM_PORT=3000
+      - PING_MEM_TRANSPORT=streamable-http
+      - PING_MEM_DB_PATH=/data/ping-mem.db
+      - PING_MEM_DIAGNOSTICS_DB_PATH=/data/ping-mem-diagnostics.db
+      - PING_MEM_ADMIN_DB_PATH=/data/ping-mem-admin.db
+      - PING_MEM_API_KEY=${PING_MEM_API_KEY}
+      - PING_MEM_ADMIN_USER=${PING_MEM_ADMIN_USER}
+      - PING_MEM_ADMIN_PASS=${PING_MEM_ADMIN_PASS}
+      - PING_MEM_SECRET_KEY=${PING_MEM_SECRET_KEY}
+      - NEO4J_URI=bolt://ping-mem-neo4j:7687
+      - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - QDRANT_URL=http://ping-mem-qdrant:6333
+      - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-ping-mem-vectors}
+      - QDRANT_VECTOR_DIMENSIONS=${QDRANT_VECTOR_DIMENSIONS:-768}
+      - NODE_ENV=production
+    volumes:
+      - ping-mem-data:/data
+    networks:
+      - ping-mem-network
+    depends_on:
+      - ping-mem-neo4j
+      - ping-mem-qdrant
+    restart: unless-stopped
+
+networks:
+  ping-mem-network:
+    driver: bridge
+    name: ping-mem-network
+
+volumes:
+  ping-mem-neo4j-data:
+    name: ping-mem-neo4j-data
+  ping-mem-neo4j-logs:
+    name: ping-mem-neo4j-logs
+  ping-mem-qdrant-data:
+    name: ping-mem-qdrant-data
+  ping-mem-data:
+    name: ping-mem-data

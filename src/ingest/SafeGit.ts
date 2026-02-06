@@ -55,13 +55,13 @@ export class SafeGit {
 
   async getDiff(commitHash: string): Promise<string> {
     const safeHash = this.validateHash(commitHash);
-    const { stdout } = await this.run(["show", "--unified=3", "--", safeHash]);
+    const { stdout } = await this.run(["show", "--unified=3", safeHash]);
     return stdout;
   }
 
   async getFileChanges(commitHash: string): Promise<string> {
     const safeHash = this.validateHash(commitHash);
-    const { stdout } = await this.run(["show", "--name-status", "--format=", "--", safeHash]);
+    const { stdout } = await this.run(["show", "--name-status", "--format=", safeHash]);
     return stdout;
   }
 

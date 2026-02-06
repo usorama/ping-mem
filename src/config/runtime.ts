@@ -1,7 +1,9 @@
 /**
- * Runtime configuration loader for mandatory dependencies (Neo4j + Qdrant).
+ * Runtime configuration loader.
  *
- * Ensures required services are reachable before the server starts.
+ * Neo4j and Qdrant are optional — core memory works with SQLite only.
+ * When their env vars are present, the services are created and connected.
+ * When missing, the server starts in SQLite-only mode (no ingestion/graph).
  */
 
 import {
@@ -15,14 +17,14 @@ import { EvolutionEngine } from "../graph/EvolutionEngine.js";
 import { QdrantClientWrapper } from "../search/QdrantClient.js";
 
 export interface RuntimeConfig {
-  neo4j: {
+  neo4j?: {
     uri: string;
     username: string;
     password: string;
     database?: string;
     maxConnectionPoolSize?: number;
   };
-  qdrant: {
+  qdrant?: {
     url: string;
     collectionName: string;
     apiKey?: string;
@@ -34,102 +36,123 @@ export interface RuntimeConfig {
 }
 
 export interface RuntimeServices {
-  neo4jClient: Neo4jClient;
-  graphManager: GraphManager;
-  temporalStore: TemporalStore;
-  lineageEngine: LineageEngine;
-  evolutionEngine: EvolutionEngine;
-  qdrantClient: QdrantClientWrapper;
+  neo4jClient?: Neo4jClient;
+  graphManager?: GraphManager;
+  temporalStore?: TemporalStore;
+  lineageEngine?: LineageEngine;
+  evolutionEngine?: EvolutionEngine;
+  qdrantClient?: QdrantClientWrapper;
 }
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
-
-function getNeo4jUsername(): string {
-  const username = process.env["NEO4J_USERNAME"] ?? process.env["NEO4J_USER"];
-  if (!username) {
-    throw new Error("Missing required environment variable: NEO4J_USERNAME (or NEO4J_USER)");
-  }
-  return username;
+function getNeo4jUsername(): string | undefined {
+  return process.env["NEO4J_USERNAME"] ?? process.env["NEO4J_USER"];
 }
 
 export function loadRuntimeConfig(): RuntimeConfig {
-  const neo4jUri = requireEnv("NEO4J_URI");
-  const neo4jUsername = getNeo4jUsername();
-  const neo4jPassword = requireEnv("NEO4J_PASSWORD");
-
-  const qdrantUrl = requireEnv("QDRANT_URL");
-  const qdrantCollectionName = requireEnv("QDRANT_COLLECTION_NAME");
-
   const dbPath = process.env["PING_MEM_DB_PATH"] ?? ":memory:";
 
-  const neo4jDatabase = process.env["NEO4J_DATABASE"];
-  const maxPoolSizeStr = process.env["NEO4J_MAX_POOL_SIZE"];
-  const maxPoolSize = maxPoolSizeStr ? parseInt(maxPoolSizeStr, 10) : undefined;
+  // Neo4j config — optional, all three must be present to enable
+  const neo4jUri = process.env["NEO4J_URI"];
+  const neo4jUsername = getNeo4jUsername();
+  const neo4jPassword = process.env["NEO4J_PASSWORD"];
 
-  const qdrantApiKey = process.env["QDRANT_API_KEY"];
-  const qdrantVectorDimensionsStr = process.env["QDRANT_VECTOR_DIMENSIONS"];
-  const qdrantVectorDimensions = qdrantVectorDimensionsStr
-    ? parseInt(qdrantVectorDimensionsStr, 10)
-    : undefined;
+  let neo4j: RuntimeConfig["neo4j"];
+  if (neo4jUri && neo4jUsername && neo4jPassword) {
+    const neo4jDatabase = process.env["NEO4J_DATABASE"];
+    const maxPoolSizeStr = process.env["NEO4J_MAX_POOL_SIZE"];
+    const maxPoolSize = maxPoolSizeStr ? parseInt(maxPoolSizeStr, 10) : undefined;
 
-  return {
-    neo4j: {
+    neo4j = {
       uri: neo4jUri,
       username: neo4jUsername,
       password: neo4jPassword,
       ...(neo4jDatabase && { database: neo4jDatabase }),
       ...(maxPoolSize && { maxConnectionPoolSize: maxPoolSize }),
-    },
-    qdrant: {
+    };
+  }
+
+  // Qdrant config — optional, url and collection must be present to enable
+  const qdrantUrl = process.env["QDRANT_URL"];
+  const qdrantCollectionName = process.env["QDRANT_COLLECTION_NAME"];
+
+  let qdrant: RuntimeConfig["qdrant"];
+  if (qdrantUrl && qdrantCollectionName) {
+    const qdrantApiKey = process.env["QDRANT_API_KEY"];
+    const qdrantVectorDimensionsStr = process.env["QDRANT_VECTOR_DIMENSIONS"];
+    const qdrantVectorDimensions = qdrantVectorDimensionsStr
+      ? parseInt(qdrantVectorDimensionsStr, 10)
+      : undefined;
+
+    qdrant = {
       url: qdrantUrl,
       collectionName: qdrantCollectionName,
       ...(qdrantApiKey && { apiKey: qdrantApiKey }),
       ...(qdrantVectorDimensions && { vectorDimensions: qdrantVectorDimensions }),
-    },
-    pingMem: {
-      dbPath,
-    },
+    };
+  }
+
+  return {
+    ...(neo4j && { neo4j }),
+    ...(qdrant && { qdrant }),
+    pingMem: { dbPath },
   };
 }
 
 export async function createRuntimeServices(): Promise<RuntimeServices> {
   const config = loadRuntimeConfig();
+  const services: RuntimeServices = {};
 
-  const neo4jClient = createNeo4jClient({
-    uri: config.neo4j.uri,
-    username: config.neo4j.username,
-    password: config.neo4j.password,
-    ...(config.neo4j.database && { database: config.neo4j.database }),
-    ...(config.neo4j.maxConnectionPoolSize && { maxConnectionPoolSize: config.neo4j.maxConnectionPoolSize }),
-  });
-  await neo4jClient.connect();
+  // Connect to Neo4j if configured
+  if (config.neo4j) {
+    try {
+      const neo4jClient = createNeo4jClient({
+        uri: config.neo4j.uri,
+        username: config.neo4j.username,
+        password: config.neo4j.password,
+        ...(config.neo4j.database && { database: config.neo4j.database }),
+        ...(config.neo4j.maxConnectionPoolSize && { maxConnectionPoolSize: config.neo4j.maxConnectionPoolSize }),
+      });
+      await neo4jClient.connect();
 
-  const graphManager = new GraphManager({ neo4jClient });
-  const temporalStore = new TemporalStore({ neo4jClient });
-  const lineageEngine = new LineageEngine(neo4jClient);
-  const evolutionEngine = new EvolutionEngine({ temporalStore, graphManager });
+      services.neo4jClient = neo4jClient;
+      services.graphManager = new GraphManager({ neo4jClient });
+      services.temporalStore = new TemporalStore({ neo4jClient });
+      services.lineageEngine = new LineageEngine(neo4jClient);
+      services.evolutionEngine = new EvolutionEngine({
+        temporalStore: services.temporalStore,
+        graphManager: services.graphManager,
+      });
+      console.log("[Runtime] Neo4j connected");
+    } catch (err) {
+      console.warn(
+        `[Runtime] Neo4j connection failed (ingestion/graph features disabled): ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  } else {
+    console.log("[Runtime] Neo4j not configured (ingestion/graph features disabled)");
+  }
 
-  const qdrantClient = new QdrantClientWrapper({
-    url: config.qdrant.url,
-    collectionName: config.qdrant.collectionName,
-    ...(config.qdrant.apiKey && { apiKey: config.qdrant.apiKey }),
-    ...(config.qdrant.vectorDimensions && { vectorDimensions: config.qdrant.vectorDimensions }),
-    enableFallback: false,
-  });
-  await qdrantClient.connect();
+  // Connect to Qdrant if configured
+  if (config.qdrant) {
+    try {
+      const qdrantClient = new QdrantClientWrapper({
+        url: config.qdrant.url,
+        collectionName: config.qdrant.collectionName,
+        ...(config.qdrant.apiKey && { apiKey: config.qdrant.apiKey }),
+        ...(config.qdrant.vectorDimensions && { vectorDimensions: config.qdrant.vectorDimensions }),
+        enableFallback: false,
+      });
+      await qdrantClient.connect();
+      services.qdrantClient = qdrantClient;
+      console.log("[Runtime] Qdrant connected");
+    } catch (err) {
+      console.warn(
+        `[Runtime] Qdrant connection failed (code search disabled): ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  } else {
+    console.log("[Runtime] Qdrant not configured (code search disabled)");
+  }
 
-  return {
-    neo4jClient,
-    graphManager,
-    temporalStore,
-    lineageEngine,
-    evolutionEngine,
-    qdrantClient,
-  };
+  return services;
 }

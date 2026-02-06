@@ -64,7 +64,10 @@ async function migrate(config: MigrationConfig): Promise<void> {
   const memoryKeeperReader = new MemoryKeeperReader(config.sourceDbPath);
   const ledger = new MigrationLedger();
   const eventStore = new EventStore({ dbPath: config.targetDbPath });
-  const sessionManager = new SessionManager({ eventStore });
+  const sessionManager = new SessionManager({
+    eventStore,
+    maxActiveSessions: 50, // Allow more sessions for migration (default is 10)
+  });
   const memoryManagers = new Map<string, MemoryManager>();
 
   try {
@@ -100,19 +103,22 @@ async function migrate(config: MigrationConfig): Promise<void> {
     console.log("\n--- Phase 1: Migrating Sessions ---");
     const sourceSessions = memoryKeeperReader.getSessions();
     for (const sourceSession of sourceSessions) {
-      if (ledger.wasMigrated("sessions", sourceSession.session_id) && !config.force) {
+      if (ledger.wasMigrated("sessions", sourceSession.id) && !config.force) {
         console.log(`  ⏭️  Skipping session ${sourceSession.name} (already migrated)`);
         continue;
       }
 
       try {
-        const metadata = JSON.parse(sourceSession.metadata || "{}");
         const session = await sessionManager.startSession({
           name: sourceSession.name,
-          projectDir: sourceSession.project_dir ?? undefined,
+          projectDir: sourceSession.working_directory ?? undefined,
           defaultChannel: sourceSession.default_channel ?? undefined,
           continueFrom: undefined,
-          metadata,
+          metadata: {
+            description: sourceSession.description,
+            branch: sourceSession.branch,
+            parent_id: sourceSession.parent_id,
+          },
         });
 
         // Create memory manager for this session
@@ -127,11 +133,11 @@ async function migrate(config: MigrationConfig): Promise<void> {
 
         memoryManagers.set(session.id, memoryManager);
 
-        ledger.recordSuccess("sessions", sourceSession.session_id, session.id);
+        ledger.recordSuccess("sessions", sourceSession.id, session.id);
         console.log(`  ✅ ${sourceSession.name} -> ${session.id}`);
       } catch (error) {
         const errorMsg = error instanceof Error ? error.message : String(error);
-        ledger.recordFailure("sessions", sourceSession.session_id, "", errorMsg);
+        ledger.recordFailure("sessions", sourceSession.id, "", errorMsg);
         console.log(`  ❌ ${sourceSession.name}: ${errorMsg}`);
       }
     }

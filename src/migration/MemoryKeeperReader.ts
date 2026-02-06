@@ -15,27 +15,31 @@ import { Database } from "bun:sqlite";
 // ============================================================================
 
 export interface MemoryKeeperSession {
-  session_id: string;
+  id: string;
   name: string;
-  project_dir: string | null;
+  working_directory: string | null;
   default_channel: string | null;
   created_at: string;
-  last_accessed: string;
-  metadata: string; // JSON
+  updated_at: string;
+  description: string | null;
+  branch: string | null;
+  parent_id: string | null;
 }
 
 export interface MemoryKeeperContextItem {
-  id: number;
+  id: string;
   session_id: string;
   key: string;
   value: string;
   category: string | null;
   priority: string | null;
   channel: string | null;
-  private: number; // 0 or 1 (boolean)
+  is_private: number; // 0 or 1 (boolean)
   created_at: string;
   updated_at: string;
   metadata: string | null; // JSON
+  size: number;
+  sequence_number: number;
 }
 
 export interface MemoryKeeperCheckpoint {
