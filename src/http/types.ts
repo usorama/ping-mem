@@ -10,6 +10,8 @@
 
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
 import type { IngestionService } from "../ingest/IngestionService.js";
+import type { ApiKeyManager } from "../admin/ApiKeyManager.js";
+import type { AdminStore } from "../admin/AdminStore.js";
 
 // ============================================================================
 // HTTP Server Types
@@ -38,6 +40,10 @@ export interface HTTPServerConfig {
   };
   /** API key for authentication (optional) */
   apiKey?: string | undefined;
+  /** API key manager for rotation (optional) */
+  apiKeyManager?: ApiKeyManager | undefined;
+  /** Admin store for UI metadata (optional) */
+  adminStore?: AdminStore | undefined;
   /** Session ID generator for stateful transport (optional) */
   sessionIdGenerator?: (() => string) | undefined;
   /** Diagnostics database path (optional) */
@@ -121,6 +127,10 @@ export interface ContextSaveRequest {
   metadata?: Record<string, unknown>;
   /** Private flag (optional) */
   private?: boolean;
+  /** Custom createdAt timestamp (for migration, ISO 8601 string) */
+  createdAt?: string;
+  /** Custom updatedAt timestamp (for migration, ISO 8601 string) */
+  updatedAt?: string;
 }
 
 /**

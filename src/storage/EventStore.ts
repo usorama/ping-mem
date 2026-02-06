@@ -249,6 +249,14 @@ export class EventStore {
         FOREIGN KEY (last_event_id) REFERENCES events(event_id)
       );
 
+      -- Checkpoint items table (stores which memories are part of each checkpoint)
+      CREATE TABLE IF NOT EXISTS checkpoint_items (
+        checkpoint_id TEXT NOT NULL,
+        memory_key TEXT NOT NULL,
+        PRIMARY KEY (checkpoint_id, memory_key),
+        FOREIGN KEY (checkpoint_id) REFERENCES checkpoints(checkpoint_id) ON DELETE CASCADE
+      );
+
       -- Indexes for performance
       CREATE INDEX IF NOT EXISTS idx_events_session
         ON events(session_id, timestamp);
@@ -258,6 +266,8 @@ export class EventStore {
         ON events(event_type);
       CREATE INDEX IF NOT EXISTS idx_checkpoints_session
         ON checkpoints(session_id, timestamp);
+      CREATE INDEX IF NOT EXISTS idx_checkpoint_items_checkpoint
+        ON checkpoint_items(checkpoint_id);
     `);
   }
 
@@ -476,7 +486,8 @@ export class EventStore {
   async createCheckpoint(
     sessionId: SessionId,
     memoryCount: number,
-    description?: string
+    description?: string,
+    memoryKeys?: string[]
   ): Promise<Checkpoint> {
     // Get latest event for this session
     const events = await this.getBySession(sessionId);
@@ -500,14 +511,28 @@ export class EventStore {
       checkpoint.description = description;
     }
 
-    this.stmtInsertCheckpoint.run({
-      $checkpoint_id: checkpoint.checkpointId,
-      $session_id: checkpoint.sessionId,
-      $timestamp: checkpoint.timestamp.toISOString(),
-      $last_event_id: checkpoint.lastEventId,
-      $memory_count: checkpoint.memoryCount,
-      $description: description ?? null,
+    // Insert checkpoint and items in a transaction
+    const insertCheckpoint = this.db.transaction(() => {
+      this.stmtInsertCheckpoint.run({
+        $checkpoint_id: checkpoint.checkpointId,
+        $session_id: checkpoint.sessionId,
+        $timestamp: checkpoint.timestamp.toISOString(),
+        $last_event_id: checkpoint.lastEventId,
+        $memory_count: checkpoint.memoryCount,
+        $description: description ?? null,
+      });
+
+      // Insert checkpoint items if provided
+      if (memoryKeys && memoryKeys.length > 0) {
+        const insertItemStmt = this.db.prepare(
+          "INSERT INTO checkpoint_items (checkpoint_id, memory_key) VALUES (?, ?)"
+        );
+        for (const memoryKey of memoryKeys) {
+          insertItemStmt.run(checkpoint.checkpointId, memoryKey);
+        }
+      }
     });
+    insertCheckpoint();
 
     return checkpoint;
   }
@@ -528,6 +553,17 @@ export class EventStore {
   async getCheckpointsBySession(sessionId: SessionId): Promise<Checkpoint[]> {
     const rows = this.stmtGetCheckpointsBySession.all({ $session_id: sessionId }) as CheckpointRow[];
     return rows.map((row) => this.rowToCheckpoint(row));
+  }
+
+  /**
+   * Get memory keys associated with a checkpoint
+   */
+  async getCheckpointItems(checkpointId: string): Promise<string[]> {
+    const stmt = this.db.prepare(
+      "SELECT memory_key FROM checkpoint_items WHERE checkpoint_id = ?"
+    );
+    const rows = stmt.all(checkpointId) as Array<{ memory_key: string }>;
+    return rows.map((row) => row.memory_key);
   }
 
   // ========== Utility Operations ==========

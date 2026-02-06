@@ -221,6 +221,17 @@ export class VectorIndex {
       )
     `);
 
+    // Create companion table for relevance tracking
+    // Note: vec0 virtual tables don't support ALTER TABLE
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_relevance (
+        memory_id TEXT PRIMARY KEY,
+        last_accessed TEXT,
+        access_count INTEGER DEFAULT 0,
+        relevance_score REAL DEFAULT 1.0
+      )
+    `);
+
     // Create indexes for better query performance
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_vector_memories_session
@@ -230,6 +241,16 @@ export class VectorIndex {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_vector_memories_category
       ON vector_memories(category)
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_memory_relevance_score
+      ON memory_relevance(relevance_score)
+    `);
+
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_memory_relevance_accessed
+      ON memory_relevance(last_accessed)
     `);
   }
 

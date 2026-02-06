@@ -225,6 +225,8 @@ export interface MemoryEventData {
   operation: "save" | "update" | "delete" | "recall";
   /** Number of memories affected */
   affectedCount?: number;
+  /** Full memory data for hydration (included in MEMORY_SAVED events) */
+  memory?: Partial<Omit<Memory, "id">>;
 }
 
 export interface WorklogEventData {

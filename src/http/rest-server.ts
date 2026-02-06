@@ -12,6 +12,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
+import * as path from "path";
 
 import { SessionManager } from "../session/SessionManager.js";
 import { MemoryManager, type MemoryManagerConfig } from "../memory/MemoryManager.js";
@@ -89,9 +90,10 @@ export class RESTPingMemServer {
         dbPath: this.config.diagnosticsDbPath,
       });
 
-    // Initialize LLM summary generator if OpenAI API key available
+    // Initialize LLM summary generator only when explicitly enabled
     const openaiKey = process.env.OPENAI_API_KEY;
-    if (openaiKey) {
+    const enableLLMSummaries = process.env.PING_MEM_ENABLE_LLM_SUMMARIES === "true";
+    if (enableLLMSummaries && openaiKey) {
       const summaryCache = new SummaryCache({ db: this.diagnosticsStore.getDatabase() });
       const provider = new OpenAIProvider(openaiKey);
       this.summaryGenerator = new SummaryGenerator(provider, summaryCache);
@@ -144,10 +146,18 @@ export class RESTPingMemServer {
     this.app.use("*", logger());
 
     // API Key authentication (if configured)
-    if (this.config.apiKey) {
+    // Auth is required only when: (apiKeyManager has seed key) OR (explicit apiKey is set non-empty)
+    const authRequired = this.config.apiKeyManager
+      ? this.config.apiKeyManager.hasSeedKey()
+      : (this.config.apiKey && this.config.apiKey.trim().length > 0);
+
+    if (authRequired) {
       this.app.use("/api/*", async (c, next) => {
         const apiKey = c.req.header("x-api-key");
-        if (apiKey !== this.config.apiKey) {
+        const isValid = this.config.apiKeyManager
+          ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
+          : apiKey === this.config.apiKey;
+        if (!isValid) {
           return c.json(
             {
               error: "Unauthorized",
@@ -167,6 +177,23 @@ export class RESTPingMemServer {
   private setupRoutes(): void {
     // Health check
     this.app.get("/health", (c) => {
+      // Auth is required for health check only when keys are configured
+      const authRequired = this.config.apiKeyManager
+        ? this.config.apiKeyManager.hasSeedKey()
+        : (this.config.apiKey && this.config.apiKey.trim().length > 0);
+
+      if (authRequired) {
+        const apiKey = c.req.header("x-api-key");
+        const isValid = this.config.apiKeyManager
+          ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
+          : apiKey === this.config.apiKey;
+        if (!isValid) {
+          return c.json(
+            { error: "Unauthorized", message: "Invalid API key" },
+            401
+          );
+        }
+      }
       return c.json({ status: "ok", timestamp: new Date().toISOString() });
     });
 
@@ -197,6 +224,10 @@ export class RESTPingMemServer {
         }
 
         const memoryManager = new MemoryManager(memoryConfig);
+
+        // Hydrate memory state from event store
+        await memoryManager.hydrate();
+
         this.memoryManagers.set(session.id, memoryManager);
 
         return c.json<RESTSuccessResponse<typeof session>>({
@@ -270,6 +301,8 @@ export class RESTPingMemServer {
         if (body.priority !== undefined) options.priority = body.priority;
         if (body.channel !== undefined) options.channel = body.channel;
         if (body.metadata !== undefined) options.metadata = body.metadata;
+        if (body.createdAt !== undefined) options.createdAt = new Date(body.createdAt);
+        if (body.updatedAt !== undefined) options.updatedAt = new Date(body.updatedAt);
 
         await memoryManager.save(body.key, body.value, options);
 
@@ -391,6 +424,136 @@ export class RESTPingMemServer {
       } catch (error) {
         return this.handleError(c, error);
       }
+    });
+
+    // ============================================================================
+    // Codebase Ingestion (requires IngestionService)
+    // ============================================================================
+
+    this.app.post("/api/v1/codebase/ingest", async (c) => {
+      if (!this.config.ingestionService) {
+        return c.json(
+          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+          503
+        );
+      }
+
+      const body = await c.req.json();
+      const rawProjectDir = body.projectDir as string | undefined;
+      const projectDir = rawProjectDir ? path.resolve(rawProjectDir) : undefined;
+      if (!projectDir) {
+        return c.json({ error: "BadRequest", message: "projectDir is required" }, 400);
+      }
+      const forceReingest = body.forceReingest === true;
+
+      const result = await this.config.ingestionService.ingestProject({
+        projectDir,
+        forceReingest,
+      });
+
+      if (result) {
+        if (this.config.adminStore) {
+          this.config.adminStore.upsertProject({
+            projectId: result.projectId,
+            projectDir,
+            treeHash: result.treeHash,
+            lastIngestedAt: result.ingestedAt,
+          });
+        }
+        return c.json({ data: result });
+      }
+
+      const verify = await this.config.ingestionService.verifyProject(projectDir);
+      if (verify.projectId && this.config.adminStore) {
+        this.config.adminStore.upsertProject({
+          projectId: verify.projectId,
+          projectDir,
+          treeHash: verify.currentTreeHash ?? undefined,
+          lastIngestedAt: new Date().toISOString(),
+        });
+      }
+
+      return c.json({
+        data: {
+          projectId: verify.projectId,
+          treeHash: verify.currentTreeHash,
+          filesIndexed: 0,
+          chunksIndexed: 0,
+          commitsIndexed: 0,
+          ingestedAt: new Date().toISOString(),
+          hadChanges: false,
+        },
+      });
+    });
+
+    this.app.post("/api/v1/codebase/verify", async (c) => {
+      if (!this.config.ingestionService) {
+        return c.json(
+          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+          503
+        );
+      }
+      const body = await c.req.json();
+      const rawProjectDir = body.projectDir as string | undefined;
+      const projectDir = rawProjectDir ? path.resolve(rawProjectDir) : undefined;
+      if (!projectDir) {
+        return c.json({ error: "BadRequest", message: "projectDir is required" }, 400);
+      }
+      const result = await this.config.ingestionService.verifyProject(projectDir);
+      return c.json({ data: result });
+    });
+
+    this.app.get("/api/v1/codebase/search", async (c) => {
+      if (!this.config.ingestionService) {
+        return c.json(
+          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+          503
+        );
+      }
+      const query = c.req.query("query");
+      if (!query) {
+        return c.json({ error: "BadRequest", message: "query is required" }, 400);
+      }
+      const projectId = c.req.query("projectId");
+      const filePath = c.req.query("filePath");
+      const type = c.req.query("type") as "code" | "comment" | "docstring" | undefined;
+      const limit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
+      const searchOptions: {
+        projectId?: string;
+        filePath?: string;
+        type?: "code" | "comment" | "docstring";
+        limit?: number;
+      } = {};
+      if (projectId) searchOptions.projectId = projectId;
+      if (filePath) searchOptions.filePath = filePath;
+      if (type) searchOptions.type = type;
+      if (limit !== undefined) searchOptions.limit = limit;
+
+      const results = await this.config.ingestionService.searchCode(query, searchOptions);
+      return c.json({ data: { count: results.length, results } });
+    });
+
+    this.app.get("/api/v1/codebase/timeline", async (c) => {
+      if (!this.config.ingestionService) {
+        return c.json(
+          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+          503
+        );
+      }
+      const projectId = c.req.query("projectId");
+      if (!projectId) {
+        return c.json({ error: "BadRequest", message: "projectId is required" }, 400);
+      }
+      const filePath = c.req.query("filePath") ?? undefined;
+      const limit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
+      const timelineOptions: { projectId: string; filePath?: string; limit?: number } = {
+        projectId,
+      };
+      if (filePath) timelineOptions.filePath = filePath;
+      if (limit !== undefined) timelineOptions.limit = limit;
+
+      const results = await this.config.ingestionService.queryTimeline(timelineOptions);
+      return c.json({ data: results });
     });
 
     this.app.get("/api/v1/diagnostics/latest", async (c) => {

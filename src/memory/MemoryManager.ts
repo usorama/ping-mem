@@ -63,6 +63,10 @@ export interface SaveMemoryOptions {
   metadata?: Record<string, unknown>;
   /** Pre-computed embedding vector for semantic search */
   embedding?: Float32Array;
+  /** Custom createdAt timestamp (for migration, defaults to now) */
+  createdAt?: Date;
+  /** Custom updatedAt timestamp (for migration, defaults to now) */
+  updatedAt?: Date;
 }
 
 /**
@@ -155,6 +159,106 @@ export class MemoryManager {
   }
 
   /**
+   * Hydrate in-memory state from event store
+   * Replays MEMORY_SAVED, MEMORY_UPDATED, MEMORY_DELETED events to rebuild memory cache
+   * This MUST be called after construction to restore state from persistent storage
+   */
+  async hydrate(): Promise<void> {
+    // Clear existing in-memory state
+    this.memories.clear();
+    this.memoriesById.clear();
+
+    // Get all events for this session
+    const events = await this.eventStore.getBySession(this.sessionId);
+
+    // Replay events in chronological order
+    for (const event of events) {
+      const payload = event.payload as MemoryEventData;
+
+      switch (event.eventType) {
+        case "MEMORY_SAVED": {
+          // Reconstruct memory from MEMORY_SAVED event
+          if (payload.memory) {
+            const memory: Memory = {
+              id: payload.memoryId,
+              key: payload.key,
+              value: payload.memory.value!,
+              sessionId: payload.sessionId,
+              priority: payload.memory.priority ?? "normal",
+              privacy: payload.memory.privacy ?? "session",
+              createdAt: new Date(payload.memory.createdAt!),
+              updatedAt: new Date(payload.memory.updatedAt!),
+              metadata: payload.memory.metadata ?? {},
+            };
+
+            // Set optional properties
+            if (payload.memory.category !== undefined) {
+              memory.category = payload.memory.category;
+            }
+            if (payload.memory.channel !== undefined) {
+              memory.channel = payload.memory.channel;
+            }
+            if (payload.memory.embedding !== undefined) {
+              memory.embedding = payload.memory.embedding;
+            }
+
+            // Store in cache
+            this.memories.set(memory.key, memory);
+            this.memoriesById.set(memory.id, memory);
+          }
+          break;
+        }
+
+        case "MEMORY_UPDATED": {
+          // Update memory if it exists
+          const memory = this.memoriesById.get(payload.memoryId);
+          if (memory && payload.memory) {
+            // Apply updates from event
+            if (payload.memory.value !== undefined) {
+              memory.value = payload.memory.value;
+            }
+            if (payload.memory.category !== undefined) {
+              memory.category = payload.memory.category;
+            }
+            if (payload.memory.priority !== undefined) {
+              memory.priority = payload.memory.priority;
+            }
+            if (payload.memory.channel !== undefined) {
+              memory.channel = payload.memory.channel;
+            }
+            if (payload.memory.metadata !== undefined) {
+              memory.metadata = { ...memory.metadata, ...payload.memory.metadata };
+            }
+            if (payload.memory.updatedAt !== undefined) {
+              memory.updatedAt = new Date(payload.memory.updatedAt);
+            }
+            if (payload.memory.embedding !== undefined) {
+              memory.embedding = payload.memory.embedding;
+            }
+          }
+          break;
+        }
+
+        case "MEMORY_DELETED": {
+          // Remove memory from cache
+          if (payload.memoryId) {
+            const memory = this.memoriesById.get(payload.memoryId);
+            if (memory) {
+              this.memories.delete(memory.key);
+              this.memoriesById.delete(payload.memoryId);
+            }
+          }
+          break;
+        }
+
+        default:
+          // Skip other event types
+          break;
+      }
+    }
+  }
+
+  /**
    * Generate UUID v7 (time-sortable)
    */
   private generateUUID(): string {
@@ -201,8 +305,8 @@ export class MemoryManager {
       sessionId: this.sessionId,
       priority: options.priority ?? this.defaultPriority,
       privacy: options.privacy ?? this.defaultPrivacy,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: options.createdAt ?? now,
+      updatedAt: options.updatedAt ?? now,
       metadata: options.metadata ?? {},
     };
 
@@ -224,12 +328,32 @@ export class MemoryManager {
     this.memories.set(key, memory);
     this.memoriesById.set(memoryId, memory);
 
-    // Create event for audit trail
+    // Create event for audit trail with full memory data for hydration
+    const memoryData: Partial<Omit<Memory, "id">> = {
+      key,
+      value,
+      sessionId: this.sessionId,
+      priority: memory.priority,
+      privacy: memory.privacy,
+      createdAt: memory.createdAt,
+      updatedAt: memory.updatedAt,
+      metadata: memory.metadata,
+    };
+
+    // Only include optional properties if they're defined
+    if (memory.category !== undefined) {
+      memoryData.category = memory.category;
+    }
+    if (memory.channel !== undefined) {
+      memoryData.channel = memory.channel;
+    }
+
     const eventData: MemoryEventData = {
       memoryId,
       key,
       sessionId: this.sessionId,
       operation: "save",
+      memory: memoryData,
     };
 
     await this.eventStore.createEvent(this.sessionId, "MEMORY_SAVED", eventData, {
@@ -301,12 +425,31 @@ export class MemoryManager {
     }
     existing.updatedAt = now;
 
-    // Create event for audit trail
+    // Create event for audit trail with updated memory data for hydration
+    const memoryData: Partial<Omit<Memory, "id">> = {
+      value: existing.value,
+      priority: existing.priority,
+      updatedAt: existing.updatedAt,
+      metadata: existing.metadata,
+    };
+
+    // Only include optional properties if they're defined
+    if (existing.category !== undefined) {
+      memoryData.category = existing.category;
+    }
+    if (existing.channel !== undefined) {
+      memoryData.channel = existing.channel;
+    }
+    if (existing.embedding !== undefined) {
+      memoryData.embedding = existing.embedding;
+    }
+
     const eventData: MemoryEventData = {
       memoryId: existing.id,
       key,
       sessionId: this.sessionId,
       operation: "update",
+      memory: memoryData,
     };
 
     await this.eventStore.createEvent(this.sessionId, "MEMORY_UPDATED", eventData, {
