@@ -182,12 +182,16 @@ export class MemoryManager {
             const memory: Memory = {
               id: payload.memoryId,
               key: payload.key,
-              value: payload.memory.value!,
+              value: payload.memory.value ?? "",
               sessionId: payload.sessionId,
               priority: payload.memory.priority ?? "normal",
               privacy: payload.memory.privacy ?? "session",
-              createdAt: new Date(payload.memory.createdAt!),
-              updatedAt: new Date(payload.memory.updatedAt!),
+              createdAt: payload.memory.createdAt
+                ? new Date(payload.memory.createdAt)
+                : new Date(event.timestamp),
+              updatedAt: payload.memory.updatedAt
+                ? new Date(payload.memory.updatedAt)
+                : new Date(event.timestamp),
               metadata: payload.memory.metadata ?? {},
             };
 
@@ -384,6 +388,10 @@ export class MemoryManager {
 
   /**
    * Save or update a memory (upsert)
+   *
+   * Note: If the memory already exists, `createdAt` and `updatedAt` from options
+   * are ignored, and `updatedAt` is set to current time. This means re-running
+   * migration with --force will not preserve original timestamps on updates.
    */
   async saveOrUpdate(key: string, value: string, options: SaveMemoryOptions = {}): Promise<Memory> {
     const existing = this.memories.get(key);

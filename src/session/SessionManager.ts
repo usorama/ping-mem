@@ -76,6 +76,9 @@ export class SessionManager {
    * Rebuilds in-memory session state from persisted events
    */
   async hydrate(): Promise<void> {
+    // Clear existing in-memory state before rebuilding
+    this.sessions.clear();
+
     // Get all SESSION_STARTED events
     const sessionEvents = await this.eventStore.listSessions();
 

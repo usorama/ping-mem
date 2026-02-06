@@ -461,6 +461,9 @@ export class EventStore {
     // Use individual parameterized deletes instead of IN clause interpolation
     // This prevents SQL injection even if sessionIds contains malicious values
     const deleteMany = this.db.transaction(() => {
+      const stmtCheckpointItems = this.db.prepare(
+        "DELETE FROM checkpoint_items WHERE checkpoint_id IN (SELECT checkpoint_id FROM checkpoints WHERE session_id = $sessionId)"
+      );
       const stmtCheckpoint = this.db.prepare(
         "DELETE FROM checkpoints WHERE session_id = $sessionId"
       );
@@ -469,6 +472,7 @@ export class EventStore {
       );
 
       for (const sessionId of sessionIds) {
+        stmtCheckpointItems.run({ $sessionId: sessionId });
         stmtCheckpoint.run({ $sessionId: sessionId });
         stmtEvent.run({ $sessionId: sessionId });
       }
@@ -638,6 +642,7 @@ export class EventStore {
    * Clear all data (for testing only)
    */
   clear(): void {
+    this.db.exec("DELETE FROM checkpoint_items");
     this.db.exec("DELETE FROM checkpoints");
     this.db.exec("DELETE FROM events");
   }
