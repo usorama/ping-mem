@@ -36,7 +36,9 @@ export class ProjectScanner {
   }
 
   scanProject(projectDir: string, previousManifest?: ProjectManifest): ProjectScanResult {
-    const rootPath = path.resolve(projectDir);
+    // Resolve symlinks so path.relative works correctly with git rev-parse
+    // (which always resolves symlinks). macOS: /var → /private/var.
+    const rootPath = fs.realpathSync(path.resolve(projectDir));
     const files = this.collectFiles(rootPath);
     const fileEntries = files.map((filePath) =>
       this.hashFile(rootPath, filePath)
