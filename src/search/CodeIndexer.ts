@@ -46,19 +46,23 @@ export class CodeIndexer {
   async indexIngestion(result: IngestionResult): Promise<void> {
     const points = this.buildIndexPoints(result);
 
-    // Batch upsert to Qdrant using the Qdrant SDK's native upsert
     if (points.length > 0) {
       const qdrantClient = this.qdrant.getClient();
-      const collectionName = this.qdrant["config"]["collectionName"]; // Access via bracket notation
+      const collectionName = this.qdrant["config"]["collectionName"];
 
-      await qdrantClient.upsert(collectionName, {
-        wait: true,
-        points: points.map((p) => ({
-          id: p.id,
-          vector: p.vector,
-          payload: p.payload,
-        })),
-      });
+      // Batch upsert to avoid oversized requests (Qdrant 400 for large payloads)
+      const BATCH_SIZE = 500;
+      for (let i = 0; i < points.length; i += BATCH_SIZE) {
+        const batch = points.slice(i, i + BATCH_SIZE);
+        await qdrantClient.upsert(collectionName, {
+          wait: true,
+          points: batch.map((p) => ({
+            id: p.id,
+            vector: p.vector,
+            payload: p.payload,
+          })),
+        });
+      }
     }
   }
 
