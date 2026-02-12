@@ -136,14 +136,19 @@ export class ProjectScanner {
       })
         .toString()
         .trim();
-      
-      // Include actual project path to ensure subdirectories get unique IDs
-      const normalizedProjectPath = this.normalizePath(rootPath);
-      
+
+      // Use relative path from git root to project dir for subdirectory uniqueness.
+      // This ensures the same repo produces the same projectId regardless of
+      // where it's cloned (local path vs Docker mount vs CI).
+      const relativeToGitRoot = path.relative(gitRoot, rootPath) || ".";
+      const normalizedRelative = this.normalizePath(relativeToGitRoot);
+
       if (remoteUrl) {
-        return `${this.normalizePath(gitRoot)}::${remoteUrl}::${normalizedProjectPath}`;
+        return `${remoteUrl}::${normalizedRelative}`;
       }
-      return `${this.normalizePath(gitRoot)}::${normalizedProjectPath}`;
+      // No remote: fall back to git root basename + relative path
+      const repoName = path.basename(gitRoot);
+      return `${repoName}::${normalizedRelative}`;
     } catch {
       return null;
     }

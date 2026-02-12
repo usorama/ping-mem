@@ -1,8 +1,8 @@
 # CLAUDE.md - ping-mem
 
-**Version**: 1.4.0
+**Version**: 1.4.1
 **Status**: Standalone Project (Production Deployment WIP)
-**Last Updated**: 2026-02-01
+**Last Updated**: 2026-02-12
 **Project**: Universal Memory Layer for AI Agents + Deterministic Code Ingestion + Admin UI
 
 ---
@@ -38,6 +38,112 @@ Quick start:
 **ping-mem** is a **Universal Memory Layer** for AI agents that provides persistent, intelligent, and contextually-aware memory across sessions, tools, and applications. It serves as reusable infrastructure that any AI application can leverage.
 
 **Key Insight**: ping-mem is an application that's self-contained for use of AI Agents from other applications and use cases, serving deterministic, repeatable, reproducable memory with/without history, so Agents are always in the know.
+
+---
+
+## Cross-Project Integration Contract
+
+**ping-mem is shared infrastructure.** Other projects (openclaw, sn-assist, ro-new, etc.) depend on it for codebase intelligence and cross-project awareness. This section defines the contract that ping-mem MUST honor.
+
+### How Other Projects Consume ping-mem
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  Consumer Project (e.g., openclaw, sn-assist)              │
+│  Agent reads/writes via REST API or MCP                    │
+└────────────────────────┬───────────────────────────────────┘
+                         │ HTTP (REST) or MCP (stdio)
+┌────────────────────────▼───────────────────────────────────┐
+│  ping-mem Infrastructure                                   │
+│  ┌──────────┐  ┌──────────┐  ┌─────────┐  ┌──────────┐   │
+│  │ REST API │  │ MCP      │  │ Neo4j   │  │ Qdrant   │   │
+│  │ :3003    │  │ (stdio)  │  │ :7687   │  │ :6333    │   │
+│  └──────────┘  └──────────┘  └─────────┘  └──────────┘   │
+└────────────────────────────────────────────────────────────┘
+```
+
+### REST API Contract (Codebase Operations)
+
+All codebase endpoints require the REST server to have IngestionService configured (Neo4j + Qdrant running). If not configured, endpoints return **503 "Ingestion service not configured"**.
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/api/v1/codebase/ingest` | Ingest a project (body: `{projectDir, forceReingest?}`) |
+| POST | `/api/v1/codebase/verify` | Verify project manifest integrity |
+| GET | `/api/v1/codebase/search?query=...&projectId=...&type=...&limit=...` | Semantic code search |
+| GET | `/api/v1/codebase/timeline?projectId=...&filePath=...&limit=...` | Temporal commit history |
+| GET | `/health` | Health check (always 200 if server running) |
+
+**Important**: Codebase search is a **GET** endpoint with query params, NOT POST.
+
+### Project Registration & Auto-Ingestion
+
+Projects must be registered for automatic ingestion:
+
+```bash
+# Register a project (adds to auto-ingest list)
+echo "/path/to/project" >> ~/.ping-mem/registered-projects.txt
+
+# Registered projects file
+cat ~/.ping-mem/registered-projects.txt
+```
+
+**Auto-ingestion triggers:**
+- Git post-commit hook (global hook, every commit)
+- launchd periodic job (every 10 minutes)
+- Manual: `bun run scripts/force-ingest.ts <projectDir>`
+
+### Project Identity (Path-Independent)
+
+**CRITICAL**: ProjectId is computed from git identity, NOT filesystem paths.
+
+```
+projectId = SHA-256(remoteUrl + "::" + relativeToGitRoot)
+```
+
+This ensures the same project produces the same projectId regardless of:
+- Local clone path vs Docker mount path
+- CI runner paths vs developer machines
+- Different OS path separators
+
+**Example**: A project at `/Users/dev/myproject` and Docker-mounted at `/projects/myproject` with the same git remote will produce identical projectIds.
+
+### Docker Volume Mapping
+
+When running in Docker, host paths are mounted differently:
+
+```yaml
+# docker-compose.yml
+volumes:
+  - /Users/umasankr/Projects:/projects:rw
+```
+
+| Host Path | Container Path |
+|-----------|---------------|
+| `/Users/umasankr/Projects/openclaw` | `/projects/openclaw` |
+| `/Users/umasankr/Projects/ping-mem` | `/projects/ping-mem` |
+
+The path-independent projectId ensures Neo4j graph nodes and Qdrant vectors created by Docker match those created locally.
+
+### Consumer Integration Checklist
+
+For any project integrating with ping-mem:
+
+1. **Register**: Add project path to `~/.ping-mem/registered-projects.txt`
+2. **Verify ingestion**: `curl http://localhost:3003/api/v1/codebase/search?query=test&limit=1`
+3. **Check health**: `curl http://localhost:3003/health`
+4. **If 503**: Ensure Docker containers are running (`docker ps | grep ping-mem`)
+5. **Force reingest**: `bun run scripts/force-ingest.ts /path/to/project`
+
+### Failure Modes for Consumers
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem-rest` container |
+| Empty search results | Project not ingested into Qdrant | Run force-ingest script |
+| Wrong projectId | Path mismatch (Docker vs local) | Verify git remote URL is consistent |
+| Connection refused :3003 | REST container down | `docker-compose up -d ping-mem-rest` |
+| ECONNREFUSED :6333 | Qdrant down | `docker restart ping-mem-qdrant` |
 
 ---
 
