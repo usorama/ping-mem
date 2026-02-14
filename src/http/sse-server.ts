@@ -176,16 +176,22 @@ export class SSEPingMemServer {
    * Add CORS headers to response
    */
   private addCorsHeaders(res: ServerResponse): void {
-    const cors = this.config.cors ?? { origin: "*" };
-    const origins = Array.isArray(cors.origin) ? cors.origin : [cors.origin ?? "*"];
+    const envOrigin = process.env.PING_MEM_CORS_ORIGIN;
+    const defaultOrigin = envOrigin ? envOrigin.split(",").map(s => s.trim()) : [];
+    const cors = this.config.cors ?? { origin: defaultOrigin };
+    const resolvedOrigin = cors.origin ?? defaultOrigin;
+    const origins = Array.isArray(resolvedOrigin) ? resolvedOrigin : [resolvedOrigin];
 
-    res.setHeader("Access-Control-Allow-Origin", origins.join(", "));
-    res.setHeader("Access-Control-Allow-Methods", (cors.methods ?? ["GET", "POST", "OPTIONS"]).join(", "));
-    res.setHeader(
-      "Access-Control-Allow-Headers",
-      (cors.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"]).join(", ")
-    );
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+    // Only set CORS headers if origins are configured
+    if (origins.length > 0 && origins[0] !== "") {
+      res.setHeader("Access-Control-Allow-Origin", origins.join(", "));
+      res.setHeader("Access-Control-Allow-Methods", (cors.methods ?? ["GET", "POST", "OPTIONS"]).join(", "));
+      res.setHeader(
+        "Access-Control-Allow-Headers",
+        (cors.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"]).join(", ")
+      );
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
   }
 
   /**
@@ -246,7 +252,9 @@ export function createDefaultSSEConfig(
     host: "0.0.0.0",
     transport: "streamable-http",
     cors: {
-      origin: "*",
+      origin: process.env.PING_MEM_CORS_ORIGIN
+        ? process.env.PING_MEM_CORS_ORIGIN.split(",").map(s => s.trim())
+        : [],
       methods: ["GET", "POST", "OPTIONS"],
       headers: ["Content-Type", "X-API-Key", "X-Session-ID"],
     },

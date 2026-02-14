@@ -133,12 +133,14 @@ export class RESTPingMemServer {
    * Set up Hono middleware
    */
   private setupMiddleware(): void {
-    // CORS
-    const corsConfig = this.config.cors ?? { origin: "*" };
+    // CORS - default to rejecting cross-origin requests unless configured
+    const envOrigin = process.env.PING_MEM_CORS_ORIGIN;
+    const defaultOrigin = envOrigin ? envOrigin.split(",").map(s => s.trim()) : [];
+    const corsConfig = this.config.cors ?? { origin: defaultOrigin };
     this.app.use(
       "*",
       cors({
-        origin: corsConfig.origin ?? "*",
+        origin: corsConfig.origin ?? defaultOrigin,
         allowMethods: corsConfig.methods ?? ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allowHeaders: corsConfig.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"],
         credentials: true,
@@ -1208,7 +1210,9 @@ export function createDefaultRESTConfig(
     host: "0.0.0.0",
     transport: "rest",
     cors: {
-      origin: "*",
+      origin: process.env.PING_MEM_CORS_ORIGIN
+        ? process.env.PING_MEM_CORS_ORIGIN.split(",").map(s => s.trim())
+        : [],
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       headers: ["Content-Type", "X-API-Key", "X-Session-ID"],
     },
