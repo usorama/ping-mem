@@ -46,14 +46,17 @@ export class TemporalCodeGraph {
     this.neo4j = options.neo4jClient;
   }
 
+  private static readonly BATCH_SIZE = 500;
+
   /**
    * Persist a full ingestion result to Neo4j.
    * Idempotent: can be called multiple times for the same projectId + treeHash.
+   * Uses UNWIND-based batching for performance (10x+ faster than individual queries).
    */
   async persistIngestion(result: IngestionResult): Promise<void> {
     const session = this.neo4j.getSession();
     try {
-      // Create or merge Project node
+      // 1. Create or merge Project node
       await session.run(
         `
         MERGE (p:Project { projectId: $projectId })
@@ -69,25 +72,26 @@ export class TemporalCodeGraph {
         }
       );
 
-      // Persist files + chunks
-      for (const fileResult of result.codeFiles) {
-        await this.persistFile(result.projectId, result.ingestedAt, fileResult);
-      }
+      // 2. Batch persist files
+      await this.persistFilesBatch(session, result.projectId, result.ingestedAt, result.codeFiles);
 
-      // Persist git commits
-      for (const commit of result.gitHistory.commits) {
-        await this.persistCommit(result.projectId, commit);
-      }
+      // 3. Batch persist chunks
+      await this.persistChunksBatch(session, result.ingestedAt, result.codeFiles);
 
-      // Persist file changes (Commit)-[:MODIFIES]->(File)
-      for (const change of result.gitHistory.fileChanges) {
-        await this.persistFileChange(result.projectId, change);
-      }
+      // 4. Batch persist symbols
+      await this.persistSymbolsBatch(session, result.ingestedAt, result.codeFiles);
 
-      // Persist diff hunks (Commit)-[:CHANGES]->(Chunk)
-      for (const hunk of result.gitHistory.hunks) {
-        await this.persistDiffHunk(result.projectId, hunk);
-      }
+      // 5. Batch persist commits
+      await this.persistCommitsBatch(session, result.projectId, result.gitHistory.commits);
+
+      // 6. Batch persist commit parent relationships
+      await this.persistParentsBatch(session, result.gitHistory.commits);
+
+      // 7. Batch persist file changes
+      await this.persistFileChangesBatch(session, result.gitHistory.fileChanges);
+
+      // 8. Batch persist diff hunks
+      await this.persistDiffHunksBatch(session, result.gitHistory.hunks);
     } finally {
       await session.close();
     }
@@ -334,93 +338,117 @@ export class TemporalCodeGraph {
     }
   }
 
-  private async persistFile(
-    projectId: string,
-    ingestedAt: string,
-    fileResult: CodeFileResult
+  // ==========================================================================
+  // Batch write methods using UNWIND for 10x+ performance
+  // ==========================================================================
+
+  private async runBatched<T>(
+    session: import("neo4j-driver").Session,
+    items: T[],
+    cypher: string,
+    buildParams: (batch: T[]) => Record<string, unknown>,
   ): Promise<void> {
-    const session = this.neo4j.getSession();
-    try {
-      const fileId = this.computeFileId(fileResult.filePath);
-
-      // Create or merge File node
-      await session.run(
-        `
-        MATCH (p:Project { projectId: $projectId })
-        MERGE (f:File { fileId: $fileId })
-        SET f.path = $path,
-            f.sha256 = $sha256,
-            f.lastIngestedAt = $ingestedAt
-        MERGE (p)-[:HAS_FILE { ingestedAt: $ingestedAt }]->(f)
-        `,
-        {
-          projectId,
-          fileId,
-          path: fileResult.filePath,
-          sha256: fileResult.sha256,
-          ingestedAt,
-        }
-      );
-
-      // Persist chunks
-      for (const chunk of fileResult.chunks) {
-        await session.run(
-          `
-          MATCH (f:File { fileId: $fileId })
-          MERGE (c:Chunk { chunkId: $chunkId })
-          SET c.type = $type,
-              c.start = $start,
-              c.end = $end,
-              c.lineStart = $lineStart,
-              c.lineEnd = $lineEnd,
-              c.content = $content,
-              c.lastIngestedAt = $ingestedAt
-          MERGE (f)-[:HAS_CHUNK { ingestedAt: $ingestedAt }]->(c)
-          `,
-          {
-            fileId,
-            chunkId: chunk.chunkId,
-            type: chunk.type,
-            start: chunk.start,
-            end: chunk.end,
-            lineStart: chunk.lineStart,
-            lineEnd: chunk.lineEnd,
-            content: chunk.content,
-            ingestedAt,
-          }
-        );
-      }
-
-      // Persist symbols
-      for (const symbol of fileResult.symbols) {
-        await this.persistSymbol(fileId, symbol, ingestedAt);
-      }
-    } finally {
-      await session.close();
+    for (let i = 0; i < items.length; i += TemporalCodeGraph.BATCH_SIZE) {
+      const batch = items.slice(i, i + TemporalCodeGraph.BATCH_SIZE);
+      await session.run(cypher, buildParams(batch));
     }
   }
 
-  private async persistSymbol(
-    fileId: string,
-    symbol: ExtractedSymbol,
-    ingestedAt: string
+  private async persistFilesBatch(
+    session: import("neo4j-driver").Session,
+    projectId: string,
+    ingestedAt: string,
+    codeFiles: CodeFileResult[]
   ): Promise<void> {
-    const session = this.neo4j.getSession();
-    try {
-      // Create or merge Symbol node
-      await session.run(
-        `
-        MATCH (f:File { fileId: $fileId })
-        MERGE (s:Symbol { symbolId: $symbolId })
-        SET s.name = $name,
-            s.kind = $kind,
-            s.startLine = $startLine,
-            s.endLine = $endLine,
-            s.signature = $signature,
-            s.lastIngestedAt = $ingestedAt
-        MERGE (f)-[:DEFINES_SYMBOL { ingestedAt: $ingestedAt }]->(s)
-        `,
-        {
+    const items = codeFiles.map((f) => ({
+      fileId: this.computeFileId(f.filePath),
+      path: f.filePath,
+      sha256: f.sha256,
+    }));
+
+    await this.runBatched(session, items,
+      `
+      UNWIND $items AS item
+      MATCH (p:Project { projectId: $projectId })
+      MERGE (f:File { fileId: item.fileId })
+      SET f.path = item.path,
+          f.sha256 = item.sha256,
+          f.lastIngestedAt = $ingestedAt
+      MERGE (p)-[:HAS_FILE { ingestedAt: $ingestedAt }]->(f)
+      `,
+      (batch) => ({ items: batch, projectId, ingestedAt })
+    );
+  }
+
+  private async persistChunksBatch(
+    session: import("neo4j-driver").Session,
+    ingestedAt: string,
+    codeFiles: CodeFileResult[]
+  ): Promise<void> {
+    const items: Array<{
+      fileId: string;
+      chunkId: string;
+      type: string;
+      start: number;
+      end: number;
+      lineStart: number;
+      lineEnd: number;
+      content: string;
+    }> = [];
+
+    for (const fileResult of codeFiles) {
+      const fileId = this.computeFileId(fileResult.filePath);
+      for (const chunk of fileResult.chunks) {
+        items.push({
+          fileId,
+          chunkId: chunk.chunkId,
+          type: chunk.type,
+          start: chunk.start,
+          end: chunk.end,
+          lineStart: chunk.lineStart,
+          lineEnd: chunk.lineEnd,
+          content: chunk.content,
+        });
+      }
+    }
+
+    await this.runBatched(session, items,
+      `
+      UNWIND $items AS item
+      MATCH (f:File { fileId: item.fileId })
+      MERGE (c:Chunk { chunkId: item.chunkId })
+      SET c.type = item.type,
+          c.start = item.start,
+          c.end = item.end,
+          c.lineStart = item.lineStart,
+          c.lineEnd = item.lineEnd,
+          c.content = item.content,
+          c.lastIngestedAt = $ingestedAt
+      MERGE (f)-[:HAS_CHUNK { ingestedAt: $ingestedAt }]->(c)
+      `,
+      (batch) => ({ items: batch, ingestedAt })
+    );
+  }
+
+  private async persistSymbolsBatch(
+    session: import("neo4j-driver").Session,
+    ingestedAt: string,
+    codeFiles: CodeFileResult[]
+  ): Promise<void> {
+    const symbolItems: Array<{
+      fileId: string;
+      symbolId: string;
+      name: string;
+      kind: string;
+      startLine: number;
+      endLine: number;
+      signature: string | null;
+    }> = [];
+
+    for (const fileResult of codeFiles) {
+      const fileId = this.computeFileId(fileResult.filePath);
+      for (const symbol of fileResult.symbols) {
+        symbolItems.push({
           fileId,
           symbolId: symbol.symbolId,
           name: symbol.name,
@@ -428,141 +456,155 @@ export class TemporalCodeGraph {
           startLine: symbol.startLine,
           endLine: symbol.endLine,
           signature: symbol.signature ?? null,
-          ingestedAt,
-        }
-      );
-
-      // Link symbol to chunks that contain it
-      await session.run(
-        `
-        MATCH (s:Symbol { symbolId: $symbolId })
-        MATCH (f:File { fileId: $fileId })-[:HAS_CHUNK]->(c:Chunk)
-        WHERE c.lineStart <= $symbolEndLine AND c.lineEnd >= $symbolStartLine
-        MERGE (c)-[:CONTAINS_SYMBOL { ingestedAt: $ingestedAt }]->(s)
-        `,
-        {
-          fileId,
-          symbolId: symbol.symbolId,
-          symbolStartLine: symbol.startLine,
-          symbolEndLine: symbol.endLine,
-          ingestedAt,
-        }
-      );
-    } finally {
-      await session.close();
-    }
-  }
-
-  private async persistCommit(projectId: string, commit: GitCommit): Promise<void> {
-    const session = this.neo4j.getSession();
-    try {
-      // Create or merge Commit node
-      await session.run(
-        `
-        MATCH (p:Project { projectId: $projectId })
-        MERGE (c:Commit { hash: $hash })
-        SET c.shortHash = $shortHash,
-            c.authorName = $authorName,
-            c.authorEmail = $authorEmail,
-            c.authorDate = $authorDate,
-            c.committerName = $committerName,
-            c.committerEmail = $committerEmail,
-            c.committerDate = $committerDate,
-            c.message = $message
-        MERGE (p)-[:HAS_COMMIT]->(c)
-        `,
-        {
-          projectId,
-          hash: commit.hash,
-          shortHash: commit.shortHash,
-          authorName: commit.authorName,
-          authorEmail: commit.authorEmail,
-          authorDate: commit.authorDate,
-          committerName: commit.committerName,
-          committerEmail: commit.committerEmail,
-          committerDate: commit.committerDate,
-          message: commit.message,
-        }
-      );
-
-      // Create parent relationships
-      for (const parentHash of commit.parentHashes) {
-        await session.run(
-          `
-          MATCH (c:Commit { hash: $hash })
-          MERGE (parent:Commit { hash: $parentHash })
-          MERGE (c)-[:PARENT]->(parent)
-          `,
-          { hash: commit.hash, parentHash }
-        );
+        });
       }
-    } finally {
-      await session.close();
     }
+
+    if (symbolItems.length === 0) return;
+
+    // Create/merge symbol nodes and link to files
+    await this.runBatched(session, symbolItems,
+      `
+      UNWIND $items AS item
+      MATCH (f:File { fileId: item.fileId })
+      MERGE (s:Symbol { symbolId: item.symbolId })
+      SET s.name = item.name,
+          s.kind = item.kind,
+          s.startLine = item.startLine,
+          s.endLine = item.endLine,
+          s.signature = item.signature,
+          s.lastIngestedAt = $ingestedAt
+      MERGE (f)-[:DEFINES_SYMBOL { ingestedAt: $ingestedAt }]->(s)
+      `,
+      (batch) => ({ items: batch, ingestedAt })
+    );
+
+    // Link symbols to overlapping chunks
+    await this.runBatched(session, symbolItems,
+      `
+      UNWIND $items AS item
+      MATCH (s:Symbol { symbolId: item.symbolId })
+      MATCH (f:File { fileId: item.fileId })-[:HAS_CHUNK]->(c:Chunk)
+      WHERE c.lineStart <= item.endLine AND c.lineEnd >= item.startLine
+      MERGE (c)-[:CONTAINS_SYMBOL { ingestedAt: $ingestedAt }]->(s)
+      `,
+      (batch) => ({ items: batch, ingestedAt })
+    );
   }
 
-  private async persistFileChange(
+  private async persistCommitsBatch(
+    session: import("neo4j-driver").Session,
     projectId: string,
-    change: GitFileChange
+    commits: GitCommit[]
   ): Promise<void> {
-    const session = this.neo4j.getSession();
-    try {
-      const fileId = this.computeFileId(change.filePath);
-      await session.run(
-        `
-        MATCH (c:Commit { hash: $commitHash })
-        MERGE (f:File { fileId: $fileId })
-        ON CREATE SET f.path = $filePath
-        MERGE (c)-[:MODIFIES { changeType: $changeType }]->(f)
-        `,
-        {
-          commitHash: change.commitHash,
-          fileId,
-          filePath: change.filePath,
-          changeType: change.changeType,
-        }
-      );
-    } finally {
-      await session.close();
-    }
+    const items = commits.map((c) => ({
+      hash: c.hash,
+      shortHash: c.shortHash,
+      authorName: c.authorName,
+      authorEmail: c.authorEmail,
+      authorDate: c.authorDate,
+      committerName: c.committerName,
+      committerEmail: c.committerEmail,
+      committerDate: c.committerDate,
+      message: c.message,
+    }));
+
+    await this.runBatched(session, items,
+      `
+      UNWIND $items AS item
+      MATCH (p:Project { projectId: $projectId })
+      MERGE (c:Commit { hash: item.hash })
+      SET c.shortHash = item.shortHash,
+          c.authorName = item.authorName,
+          c.authorEmail = item.authorEmail,
+          c.authorDate = item.authorDate,
+          c.committerName = item.committerName,
+          c.committerEmail = item.committerEmail,
+          c.committerDate = item.committerDate,
+          c.message = item.message
+      MERGE (p)-[:HAS_COMMIT]->(c)
+      `,
+      (batch) => ({ items: batch, projectId })
+    );
   }
 
-  private async persistDiffHunk(
-    projectId: string,
-    hunk: GitDiffHunk
+  private async persistParentsBatch(
+    session: import("neo4j-driver").Session,
+    commits: GitCommit[]
   ): Promise<void> {
-    const session = this.neo4j.getSession();
-    try {
-      const hunkId = this.computeHunkId(hunk);
-      const fileId = this.computeFileId(hunk.filePath);
-
-      // Try to find matching chunks and link them
-      await session.run(
-        `
-        MATCH (c:Commit { hash: $commitHash })
-        MATCH (f:File { fileId: $fileId })-[:HAS_CHUNK]->(chunk:Chunk)
-        WHERE chunk.lineStart <= $newStart AND chunk.lineEnd >= $newStart
-        MERGE (c)-[:CHANGES {
-          hunkId: $hunkId,
-          oldStart: $oldStart,
-          oldLines: $oldLines,
-          newStart: $newStart,
-          newLines: $newLines
-        }]->(chunk)
-        `,
-        {
-          commitHash: hunk.commitHash,
-          fileId,
-          hunkId,
-          oldStart: hunk.oldStart,
-          oldLines: hunk.oldLines,
-          newStart: hunk.newStart,
-          newLines: hunk.newLines,
-        }
-      );
-    } finally {
-      await session.close();
+    const parentItems: Array<{ hash: string; parentHash: string }> = [];
+    for (const commit of commits) {
+      for (const parentHash of commit.parentHashes) {
+        parentItems.push({ hash: commit.hash, parentHash });
+      }
     }
+
+    if (parentItems.length === 0) return;
+
+    await this.runBatched(session, parentItems,
+      `
+      UNWIND $items AS item
+      MATCH (c:Commit { hash: item.hash })
+      MERGE (parent:Commit { hash: item.parentHash })
+      MERGE (c)-[:PARENT]->(parent)
+      `,
+      (batch) => ({ items: batch })
+    );
+  }
+
+  private async persistFileChangesBatch(
+    session: import("neo4j-driver").Session,
+    fileChanges: GitFileChange[]
+  ): Promise<void> {
+    const items = fileChanges.map((change) => ({
+      commitHash: change.commitHash,
+      fileId: this.computeFileId(change.filePath),
+      filePath: change.filePath,
+      changeType: change.changeType,
+    }));
+
+    await this.runBatched(session, items,
+      `
+      UNWIND $items AS item
+      MATCH (c:Commit { hash: item.commitHash })
+      MERGE (f:File { fileId: item.fileId })
+      ON CREATE SET f.path = item.filePath
+      MERGE (c)-[:MODIFIES { changeType: item.changeType }]->(f)
+      `,
+      (batch) => ({ items: batch })
+    );
+  }
+
+  private async persistDiffHunksBatch(
+    session: import("neo4j-driver").Session,
+    hunks: GitDiffHunk[]
+  ): Promise<void> {
+    const items = hunks.map((hunk) => ({
+      commitHash: hunk.commitHash,
+      fileId: this.computeFileId(hunk.filePath),
+      hunkId: this.computeHunkId(hunk),
+      oldStart: hunk.oldStart,
+      oldLines: hunk.oldLines,
+      newStart: hunk.newStart,
+      newLines: hunk.newLines,
+    }));
+
+    await this.runBatched(session, items,
+      `
+      UNWIND $items AS item
+      MATCH (c:Commit { hash: item.commitHash })
+      MATCH (f:File { fileId: item.fileId })-[:HAS_CHUNK]->(chunk:Chunk)
+      WHERE chunk.lineStart <= item.newStart AND chunk.lineEnd >= item.newStart
+      MERGE (c)-[:CHANGES {
+        hunkId: item.hunkId,
+        oldStart: item.oldStart,
+        oldLines: item.oldLines,
+        newStart: item.newStart,
+        newLines: item.newLines
+      }]->(chunk)
+      `,
+      (batch) => ({ items: batch })
+    );
   }
 
   private computeFileId(filePath: string): string {

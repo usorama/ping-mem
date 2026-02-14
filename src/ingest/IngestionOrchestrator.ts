@@ -48,6 +48,7 @@ export interface IngestionResult {
 export interface IngestionOptions {
   scanOptions?: ProjectScanOptions;
   forceReingest?: boolean; // Ignore cached manifest
+  maxCommits?: number; // Max git commits to ingest (default 200)
 }
 
 export class IngestionOrchestrator {
@@ -91,7 +92,10 @@ export class IngestionOrchestrator {
     const codeFiles = this.chunkCodeFiles(projectPath, scanResult.manifest.files);
 
     // Step 3: Read git history
-    const gitHistory = await this.gitReader.readHistory(projectPath);
+    const gitHistory = await this.gitReader.readHistory(
+      projectPath,
+      options.maxCommits !== undefined ? { maxCommits: options.maxCommits } : undefined
+    );
 
     // Step 4: Save manifest
     this.manifestStore.save(projectPath, scanResult.manifest);

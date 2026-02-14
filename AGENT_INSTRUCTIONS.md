@@ -2,6 +2,12 @@
 
 **Universal Memory Layer for AI Agents**
 
+> **Canonical Reference**: [`docs/AGENT_INTEGRATION_GUIDE.md`](docs/AGENT_INTEGRATION_GUIDE.md)
+>
+> This file is a quick-start summary. For the complete guide including REST API reference,
+> all 30+ MCP tools, Docker integration, performance tuning, and troubleshooting,
+> see the canonical guide above.
+
 This document defines the mandatory workflow for AI agents using ping-mem.
 All agents (Claude Code, Cursor, OpenCode, etc.) MUST follow these instructions.
 

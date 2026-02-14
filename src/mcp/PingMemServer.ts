@@ -471,6 +471,7 @@ export const TOOLS = [
       properties: {
         projectDir: { type: "string", description: "Absolute path to project root" },
         forceReingest: { type: "boolean", description: "Force re-ingestion even if no changes detected" },
+        maxCommits: { type: "number", description: "Max git commits to ingest (default 200). Lower for cloned repos you don't own." },
       },
       required: ["projectDir"],
     },
@@ -886,10 +887,15 @@ export class PingMemServer {
         const projectDir = args.projectDir as string;
         const forceReingest = args.forceReingest as boolean ?? false;
 
-        const result = await this.ingestionService.ingestProject({
+        const ingestOpts: import("../ingest/IngestionService.js").IngestProjectOptions = {
           projectDir,
           forceReingest,
-        });
+        };
+        if (typeof args.maxCommits === "number") {
+          ingestOpts.maxCommits = args.maxCommits;
+        }
+
+        const result = await this.ingestionService.ingestProject(ingestOpts);
 
         ingestResult = result ? (result as unknown as Record<string, unknown>) : { ingested: false, reason: "No changes detected" };
       } catch (error) {
@@ -2226,10 +2232,15 @@ export class PingMemServer {
     const projectDir = args.projectDir as string;
     const forceReingest = args.forceReingest === true;
 
-    const result = await this.ingestionService.ingestProject({
+    const ingestOpts: import("../ingest/IngestionService.js").IngestProjectOptions = {
       projectDir,
       forceReingest,
-    });
+    };
+    if (typeof args.maxCommits === "number") {
+      ingestOpts.maxCommits = args.maxCommits;
+    }
+
+    const result = await this.ingestionService.ingestProject(ingestOpts);
 
     if (!result) {
       return {
