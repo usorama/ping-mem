@@ -28,8 +28,8 @@ export function registerIngestionRoutes(deps: UIDependencies) {
           .map((l) => l.trim())
           .filter((l) => l.length > 0);
       }
-    } catch {
-      // ignore read errors
+    } catch (err) {
+      console.error("[Ingestion] Failed to read registered projects:", err instanceof Error ? err.message : err);
     }
 
     const statusBadge = available

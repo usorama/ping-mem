@@ -21,7 +21,8 @@ export function registerHealthPartialRoute(deps: UIDependencies) {
     try {
       // Quick probe: list runs with limit 1
       diagnosticsStore.listRuns({ limit: 1 });
-    } catch {
+    } catch (err) {
+      console.warn("[Health] Diagnostics probe failed:", err instanceof Error ? err.message : err);
       hasDiagnostics = false;
     }
 

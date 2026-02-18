@@ -86,10 +86,12 @@ export function registerDashboardRoutes(deps: UIDependencies) {
         activeRoute: "dashboard",
       }));
     } catch (err) {
-      console.error("[Dashboard] Error:", err);
+      const errName = err instanceof Error ? err.constructor.name : "Unknown";
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[Dashboard] Error:", errName, errMsg);
       return c.html(renderLayout({
         title: "Dashboard",
-        content: `<div class="card" style="padding:24px;color:var(--error)">Error loading dashboard. Check server logs.</div>`,
+        content: `<div class="card" style="padding:24px;color:var(--error)">Dashboard error (${escapeHtml(errName)}): ${escapeHtml(errMsg)}. Check server logs.</div>`,
         activeRoute: "dashboard",
       }));
     }

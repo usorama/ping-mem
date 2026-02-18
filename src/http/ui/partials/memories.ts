@@ -92,7 +92,8 @@ function queryMemories(
           : row.timestamp,
         metadata: (memData.metadata as Record<string, unknown>) ?? {},
       });
-    } catch {
+    } catch (err) {
+      console.warn("[Memories] Skipping corrupted memory payload:", err instanceof Error ? err.message : err);
       continue;
     }
   }
@@ -151,7 +152,8 @@ function getMemoryByKey(eventStore: EventStore, key: string): MemoryRow | null {
       updatedAt: memData.updatedAt ? String(memData.updatedAt) : row.timestamp,
       metadata: (memData.metadata as Record<string, unknown>) ?? {},
     };
-  } catch {
+  } catch (err) {
+    console.warn("[Memories] Failed to parse memory payload for key:", key, err instanceof Error ? err.message : err);
     return null;
   }
 }

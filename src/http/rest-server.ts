@@ -5,7 +5,7 @@
  * without requiring MCP protocol overhead.
  *
  * @module http/rest-server
- * @version 1.0.0
+ * @version 1.4.0
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -1042,8 +1042,9 @@ export class RESTPingMemServer {
         return new Response(file, {
           headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=3600" },
         });
-      } catch {
-        return c.text("Not Found", 404);
+      } catch (err) {
+        console.error("[Static] Error serving file:", filePath, err instanceof Error ? err.message : err);
+        return c.text("Internal Server Error", 500);
       }
     });
 

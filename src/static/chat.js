@@ -135,7 +135,7 @@
                   return;
                 }
               } catch (e) {
-                // skip malformed chunk
+                console.warn("[Chat] Malformed SSE chunk:", line.slice(0, 100), e);
               }
             }
 

@@ -147,27 +147,39 @@ export function registerDiagnosticsPartialRoutes(deps: UIDependencies) {
   return {
     /** GET /ui/partials/diagnostics/findings/:analysisId — findings table */
     findings: async (c: Context) => {
-      const analysisId = decodeURIComponent(c.req.param("analysisId"));
-      const { diagnosticsStore } = deps;
-      const findings = diagnosticsStore.listFindings(analysisId);
-      return c.html(renderFindingsTable(findings, analysisId));
+      try {
+        const analysisId = decodeURIComponent(c.req.param("analysisId"));
+        const { diagnosticsStore } = deps;
+        const findings = diagnosticsStore.listFindings(analysisId);
+        return c.html(renderFindingsTable(findings, analysisId));
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("[Diagnostics] Findings error:", errMsg);
+        return c.html(`<div class="card" style="padding:16px;color:var(--error)">Failed to load findings: ${escapeHtml(errMsg)}</div>`);
+      }
     },
 
     /** GET /ui/partials/diagnostics/diff?a=...&b=... — diff view */
     diff: async (c: Context) => {
-      const analysisIdA = c.req.query("a") ?? "";
-      const analysisIdB = c.req.query("b") ?? "";
-      const { diagnosticsStore } = deps;
+      try {
+        const analysisIdA = c.req.query("a") ?? "";
+        const analysisIdB = c.req.query("b") ?? "";
+        const { diagnosticsStore } = deps;
 
-      if (!analysisIdA || !analysisIdB) {
-        return c.html(`<div class="detail-panel"><p class="muted">Select two analyses to compare</p></div>`);
+        if (!analysisIdA || !analysisIdB) {
+          return c.html(`<div class="detail-panel"><p class="muted">Select two analyses to compare</p></div>`);
+        }
+
+        const diff = diagnosticsStore.diffAnalyses(analysisIdA, analysisIdB);
+        const findingsA = diagnosticsStore.listFindings(analysisIdA);
+        const findingsB = diagnosticsStore.listFindings(analysisIdB);
+
+        return c.html(renderDiffView(diff, findingsA, findingsB, analysisIdA, analysisIdB));
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("[Diagnostics] Diff error:", errMsg);
+        return c.html(`<div class="card" style="padding:16px;color:var(--error)">Failed to load diff: ${escapeHtml(errMsg)}</div>`);
       }
-
-      const diff = diagnosticsStore.diffAnalyses(analysisIdA, analysisIdB);
-      const findingsA = diagnosticsStore.listFindings(analysisIdA);
-      const findingsB = diagnosticsStore.listFindings(analysisIdB);
-
-      return c.html(renderDiffView(diff, findingsA, findingsB, analysisIdA, analysisIdB));
     },
   };
 }

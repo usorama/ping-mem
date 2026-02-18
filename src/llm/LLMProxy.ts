@@ -39,16 +39,16 @@ export class LLMProxy {
     // Try Ollama first
     try {
       return await this.chatOllama(messages);
-    } catch {
-      // Ollama failed, try Gemini
+    } catch (err) {
+      console.warn("[LLMProxy] Ollama chat failed:", err instanceof Error ? err.message : err);
     }
 
     // Try Gemini fallback
     if (this.geminiApiKey) {
       try {
         return await this.chatGemini(messages);
-      } catch {
-        // Both failed
+      } catch (err) {
+        console.warn("[LLMProxy] Gemini chat failed:", err instanceof Error ? err.message : err);
       }
     }
 
@@ -73,9 +73,13 @@ export class LLMProxy {
         yield chunk;
       }
       if (yielded) return;
-    } catch {
-      // Ollama failed — if we already sent partial chunks, don't fall through to Gemini
-      if (yielded) return;
+    } catch (err) {
+      console.warn("[LLMProxy] Ollama stream failed:", err instanceof Error ? err.message : err);
+      // If we already sent partial chunks, signal completion and don't fall through to Gemini
+      if (yielded) {
+        yield { content: "", done: true, model: this.ollamaModel, provider: "ollama" as const };
+        return;
+      }
     }
 
     // Try Gemini fallback (non-streaming, return as single chunk)
@@ -89,8 +93,8 @@ export class LLMProxy {
           provider: "gemini" as const,
         };
         return;
-      } catch {
-        // Both failed
+      } catch (err) {
+        console.warn("[LLMProxy] Gemini fallback failed:", err instanceof Error ? err.message : err);
       }
     }
 
@@ -181,15 +185,24 @@ export class LLMProxy {
               message?: { content?: string };
               done?: boolean;
               model?: string;
+              error?: string;
             };
+            if (chunk.error) {
+              console.error("[LLMProxy] Ollama stream error:", chunk.error);
+              throw new Error(`Ollama: ${chunk.error}`);
+            }
             yield {
               content: chunk.message?.content ?? "",
               done: chunk.done ?? false,
               model: chunk.model ?? this.ollamaModel,
               provider: "ollama" as const,
             };
-          } catch {
-            // Skip malformed JSON lines
+          } catch (err) {
+            if (err instanceof SyntaxError) {
+              console.warn("[LLMProxy] Malformed NDJSON line:", line.slice(0, 100));
+            } else {
+              throw err;
+            }
           }
         }
       }
@@ -201,15 +214,24 @@ export class LLMProxy {
             message?: { content?: string };
             done?: boolean;
             model?: string;
+            error?: string;
           };
+          if (chunk.error) {
+            console.error("[LLMProxy] Ollama stream error (buffer):", chunk.error);
+            throw new Error(`Ollama: ${chunk.error}`);
+          }
           yield {
             content: chunk.message?.content ?? "",
             done: chunk.done ?? false,
             model: chunk.model ?? this.ollamaModel,
             provider: "ollama" as const,
           };
-        } catch {
-          // Skip
+        } catch (err) {
+          if (err instanceof SyntaxError) {
+            console.warn("[LLMProxy] Malformed NDJSON in buffer:", buffer.slice(0, 100));
+          } else {
+            throw err;
+          }
         }
       }
     } finally {

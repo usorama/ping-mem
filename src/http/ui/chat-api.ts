@@ -2,7 +2,7 @@
  * Chat API handler for ping-mem UI
  *
  * POST /ui/api/chat — accepts user message, enriches with context from
- * memory search + codebase search, sends to LLMProxy (Ollama → Gemini),
+ * memory search, sends to LLMProxy (Ollama → Gemini),
  * streams response back.
  */
 
@@ -46,7 +46,7 @@ export function registerChatRoutes(deps: UIDependencies) {
                OR json_extract(payload, '$.memory.value') LIKE $query)
           ORDER BY timestamp DESC
           LIMIT 5
-        `).all({ $query: `%${userMessage.slice(0, 50)}%` }) as Array<{
+        `).all({ $query: `%${userMessage.slice(0, 50).replace(/%/g, "\\%").replace(/_/g, "\\_")}%` }) as Array<{
           key: string;
           value: string;
         }>;
@@ -57,8 +57,8 @@ export function registerChatRoutes(deps: UIDependencies) {
             memRows.map((r) => `- ${r.key}: ${r.value}`).join("\n"),
           );
         }
-      } catch {
-        // Memory search failed, continue without
+      } catch (err) {
+        console.warn("[Chat] Memory search failed:", err instanceof Error ? err.message : err);
       }
 
       // Build messages
@@ -91,9 +91,10 @@ export function registerChatRoutes(deps: UIDependencies) {
             }
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
+            console.error("[Chat] Stream error:", errMsg);
             controller.enqueue(
               encoder.encode(
-                `data: ${JSON.stringify({ content: errMsg, done: true, model: "error", provider: "ollama" })}\n\n`,
+                `data: ${JSON.stringify({ content: "", done: true, model: "error", provider: "error", error: errMsg })}\n\n`,
               ),
             );
           }
