@@ -131,14 +131,14 @@ Plus a **LLM Chat** component (vanilla JS, 200-300 lines) for Q&A — deferred t
 - `MemoryManager.listAll(filters?, limit?, offset?)` — cross-session memory query
 
 **Success criteria:**
-- [ ] `/ui` renders dashboard with real stats (no JS required for initial render)
-- [ ] `/ui/memories` renders memory table, search works via HTMX (no full page reload)
-- [ ] Memory detail slides in via HTMX partial
-- [ ] Filter state preserved in URL
-- [ ] Page loads in <200ms (server-rendered, no JS framework)
-- [ ] Dark mode works via CSS `prefers-color-scheme`
-- [ ] `bun run typecheck` — 0 errors
-- [ ] `bun test` — all pass
+- [x] `/ui` renders dashboard with real stats (no JS required for initial render)
+- [x] `/ui/memories` renders memory table, search works via HTMX (no full page reload)
+- [x] Memory detail slides in via HTMX partial
+- [x] Filter state preserved in URL
+- [x] Page loads in <200ms (server-rendered, no JS framework)
+- [x] Dark mode works via CSS `prefers-color-scheme`
+- [x] `bun run typecheck` — 0 errors
+- [x] `bun test` — all pass
 
 **Files:**
 - New: 8 (layout.ts, components.ts, dashboard.ts, memories.ts, partials/memories.ts, routes.ts, styles.css, htmx.min.js)
@@ -184,15 +184,15 @@ Plus a **LLM Chat** component (vanilla JS, 200-300 lines) for Q&A — deferred t
 - `DiagnosticsStore.listRuns(projectId?, toolName?, limit?)` — query `analyses` table ordered by timestamp
 
 **Success criteria:**
-- [ ] `/ui/diagnostics` shows runs list, click loads findings
-- [ ] Chart.js bar chart renders severity counts
-- [ ] Diff view shows introduced/resolved correctly
-- [ ] LLM summary button works (existing OpenAI endpoint)
-- [ ] `/ui/ingestion` lists registered projects with health status
-- [ ] HTMX polling updates ingestion status every 5s
-- [ ] Reingest triggers successfully from button click
-- [ ] `bun run typecheck` — 0 errors
-- [ ] `bun test` — all pass
+- [x] `/ui/diagnostics` shows runs list, click loads findings
+- [x] Chart.js bar chart renders severity counts
+- [x] Diff view shows introduced/resolved correctly
+- [ ] LLM summary button works (existing OpenAI endpoint) — deferred to Phase 3 with chat
+- [x] `/ui/ingestion` lists registered projects with health status
+- [ ] HTMX polling updates ingestion status every 5s — deferred (reingest button works)
+- [x] Reingest triggers successfully from button click
+- [x] `bun run typecheck` — 0 errors
+- [x] `bun test` — all pass (1009 pass, 0 fail)
 
 **Files:**
 - New: 4 (diagnostics.ts, partials/diagnostics.ts, ingestion.ts, partials/ingestion.ts)

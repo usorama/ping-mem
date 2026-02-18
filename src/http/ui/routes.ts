@@ -9,10 +9,13 @@ import type { EventStore } from "../../storage/EventStore.js";
 import type { SessionManager } from "../../session/SessionManager.js";
 import type { DiagnosticsStore } from "../../diagnostics/DiagnosticsStore.js";
 import type { IngestionService } from "../../ingest/IngestionService.js";
-import { renderLayout } from "./layout.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 import { registerMemoryRoutes } from "./memories.js";
 import { registerMemoryPartialRoutes } from "./partials/memories.js";
+import { registerDiagnosticsRoutes } from "./diagnostics.js";
+import { registerDiagnosticsPartialRoutes } from "./partials/diagnostics.js";
+import { registerIngestionRoutes } from "./ingestion.js";
+import { registerIngestionPartialRoutes } from "./partials/ingestion.js";
 
 export interface UIDependencies {
   eventStore: EventStore;
@@ -33,20 +36,18 @@ export function registerUIRoutes(app: Hono, deps: UIDependencies): void {
   app.get("/ui/partials/memories", memoryPartials.search);
   app.get("/ui/partials/memory/:key", memoryPartials.detail);
 
-  // Placeholder routes for Phase 2 views
-  app.get("/ui/diagnostics", (c) => {
-    return c.html(renderLayout({
-      title: "Diagnostics",
-      content: `<div class="empty-state"><p>Coming in Phase 2</p></div>`,
-      activeRoute: "diagnostics",
-    }));
-  });
+  // Diagnostics
+  app.get("/ui/diagnostics", registerDiagnosticsRoutes(deps));
 
-  app.get("/ui/ingestion", (c) => {
-    return c.html(renderLayout({
-      title: "Ingestion Monitor",
-      content: `<div class="empty-state"><p>Coming in Phase 2</p></div>`,
-      activeRoute: "ingestion",
-    }));
-  });
+  // Diagnostics HTMX partials
+  const diagPartials = registerDiagnosticsPartialRoutes(deps);
+  app.get("/ui/partials/diagnostics/findings/:analysisId", diagPartials.findings);
+  app.get("/ui/partials/diagnostics/diff", diagPartials.diff);
+
+  // Ingestion Monitor
+  app.get("/ui/ingestion", registerIngestionRoutes(deps));
+
+  // Ingestion HTMX partials
+  const ingestionPartials = registerIngestionPartialRoutes(deps);
+  app.post("/ui/partials/ingestion/reingest", ingestionPartials.reingest);
 }

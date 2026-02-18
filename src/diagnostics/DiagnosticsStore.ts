@@ -416,6 +416,33 @@ export class DiagnosticsStore {
     return finding;
   }
 
+  /**
+   * List diagnostic runs, optionally filtered by project/tool, ordered by created_at DESC.
+   */
+  listRuns(options?: {
+    projectId?: string;
+    toolName?: string;
+    limit?: number;
+  }): DiagnosticRun[] {
+    const limit = options?.limit ?? 50;
+    let sql = "SELECT * FROM diagnostic_runs WHERE 1=1";
+    const params: Record<string, string | number> = { $limit: limit };
+
+    if (options?.projectId) {
+      sql += " AND project_id = $project_id";
+      params.$project_id = options.projectId;
+    }
+    if (options?.toolName) {
+      sql += " AND tool_name = $tool_name";
+      params.$tool_name = options.toolName;
+    }
+
+    sql += " ORDER BY created_at DESC LIMIT $limit";
+
+    const rows = this.db.prepare(sql).all(params) as DiagnosticRunRow[];
+    return rows.map((row) => this.rowToRun(row));
+  }
+
   getDatabase(): Database {
     return this.db;
   }
