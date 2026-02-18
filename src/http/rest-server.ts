@@ -1024,11 +1024,12 @@ export class RESTPingMemServer {
     // Serve static files from src/static/
     this.app.get("/static/*", async (c) => {
       const filePath = c.req.path.replace("/static/", "");
-      const staticDir = path.resolve(import.meta.dir, "../../static");
-      const fullPath = path.join(staticDir, filePath);
+      const staticDir = path.resolve(import.meta.dir, "../../src/static");
+      const fullPath = path.resolve(staticDir, filePath);
 
-      // Security: prevent path traversal
-      if (!fullPath.startsWith(staticDir)) {
+      // Security: prevent path traversal — canonicalize and compare with trailing separator
+      const staticDirNorm = path.resolve(staticDir) + path.sep;
+      if (!fullPath.startsWith(staticDirNorm) && fullPath !== path.resolve(staticDir)) {
         return c.text("Forbidden", 403);
       }
 

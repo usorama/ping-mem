@@ -50,7 +50,7 @@ export function registerIngestionRoutes(deps: UIDependencies) {
             ${available
               ? `<button class="btn btn-ghost btn-sm"
                   hx-post="/ui/partials/ingestion/reingest"
-                  hx-vals='${escapeHtml(JSON.stringify({ projectDir: p }))}'
+                  hx-vals="${escapeHtml(JSON.stringify({ projectDir: p }))}"
                   hx-target="#ingestion-status"
                   hx-swap="innerHTML"
                   hx-indicator="#reingest-indicator"

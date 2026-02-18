@@ -65,16 +65,17 @@ export class LLMProxy {
    */
   async *chatStream(messages: ChatMessage[]): AsyncGenerator<ChatStreamChunk> {
     // Try Ollama first
+    let yielded = false;
     try {
       const chunks = this.streamOllama(messages);
-      let yielded = false;
       for await (const chunk of chunks) {
         yielded = true;
         yield chunk;
       }
       if (yielded) return;
     } catch {
-      // Ollama failed
+      // Ollama failed — if we already sent partial chunks, don't fall through to Gemini
+      if (yielded) return;
     }
 
     // Try Gemini fallback (non-streaming, return as single chunk)
@@ -137,7 +138,7 @@ export class LLMProxy {
 
   private async *streamOllama(messages: ChatMessage[]): AsyncGenerator<ChatStreamChunk> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.ollamaTimeoutMs);
+    let chunkTimeout = setTimeout(() => controller.abort(), this.ollamaTimeoutMs);
 
     try {
       const response = await fetch(`${this.ollamaUrl}/api/chat`, {
@@ -165,8 +166,9 @@ export class LLMProxy {
         const { done, value } = await reader.read();
         if (done) break;
 
-        // Reset timeout on each chunk received
-        clearTimeout(timeout);
+        // Reset timeout on each chunk — prevents hanging if model stalls mid-stream
+        clearTimeout(chunkTimeout);
+        chunkTimeout = setTimeout(() => controller.abort(), this.ollamaTimeoutMs);
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
@@ -211,7 +213,7 @@ export class LLMProxy {
         }
       }
     } finally {
-      clearTimeout(timeout);
+      clearTimeout(chunkTimeout);
     }
   }
 
