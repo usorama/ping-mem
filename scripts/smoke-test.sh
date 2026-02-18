@@ -37,7 +37,7 @@ fi
 # Test 1: Health Check
 # ============================================================================
 
-echo -e "${YELLOW}[1/6] Testing health endpoint...${NC}"
+echo -e "${YELLOW}[1/8] Testing health endpoint...${NC}"
 
 HEALTH_RESPONSE=$(curl -sf "${AUTH_HEADER[@]}" "$API_URL/health" || echo "FAILED")
 if [[ "$HEALTH_RESPONSE" == "FAILED" ]]; then
@@ -53,7 +53,7 @@ echo ""
 # Test 2: Start Session
 # ============================================================================
 
-echo -e "${YELLOW}[2/6] Starting test session...${NC}"
+echo -e "${YELLOW}[2/8] Starting test session...${NC}"
 
 SESSION_RESPONSE=$(curl -sf -X POST "$API_URL/api/v1/session/start" \
   -H "Content-Type: application/json" \
@@ -78,7 +78,7 @@ echo ""
 # Test 3: Ingest Project
 # ============================================================================
 
-echo -e "${YELLOW}[3/6] Ingesting project (this may take a minute)...${NC}"
+echo -e "${YELLOW}[3/8] Ingesting project (this may take a minute)...${NC}"
 
 INGEST_RESPONSE=$(curl -sf -X POST "$API_URL/api/v1/codebase/ingest" \
   -H "Content-Type: application/json" \
@@ -99,7 +99,7 @@ echo ""
 # Test 4: Search Code
 # ============================================================================
 
-echo -e "${YELLOW}[4/6] Searching code...${NC}"
+echo -e "${YELLOW}[4/8] Searching code...${NC}"
 
 SEARCH_RESPONSE=$(curl -sf "$API_URL/api/v1/codebase/search?query=memory+manager&limit=5" \
   "${AUTH_HEADER[@]}" \
@@ -122,7 +122,7 @@ echo ""
 # Test 5: Save Context
 # ============================================================================
 
-echo -e "${YELLOW}[5/6] Saving context...${NC}"
+echo -e "${YELLOW}[5/8] Saving context...${NC}"
 
 SAVE_RESPONSE=$(curl -sf -X POST "$API_URL/api/v1/context" \
   -H "Content-Type: application/json" \
@@ -143,7 +143,7 @@ echo ""
 # Test 6: Retrieve Context
 # ============================================================================
 
-echo -e "${YELLOW}[6/6] Retrieving context...${NC}"
+echo -e "${YELLOW}[6/8] Retrieving context...${NC}"
 
 GET_RESPONSE=$(curl -sf "$API_URL/api/v1/context/smoke-test-decision" \
   "${AUTH_HEADER[@]}" \
@@ -158,6 +158,44 @@ if echo "$GET_RESPONSE" | grep -q "Smoke test completed successfully"; then
   echo -e "${GREEN}✓ Context retrieved successfully${NC}"
 else
   echo -e "${RED}✗ Context content mismatch${NC}"
+  exit 1
+fi
+
+echo ""
+
+# ============================================================================
+# Test 7: UI Dashboard
+# ============================================================================
+
+echo -e "${YELLOW}[7/8] Testing UI dashboard...${NC}"
+
+UI_RESPONSE=$(curl -sf "$API_URL/ui" "${AUTH_HEADER[@]}" || echo "FAILED")
+if [[ "$UI_RESPONSE" == "FAILED" ]]; then
+  echo -e "${RED}✗ UI dashboard failed${NC}"
+  exit 1
+fi
+
+if echo "$UI_RESPONSE" | grep -q "ping-mem"; then
+  echo -e "${GREEN}✓ UI dashboard renders${NC}"
+else
+  echo -e "${RED}✗ UI dashboard content missing${NC}"
+  exit 1
+fi
+echo ""
+
+# ============================================================================
+# Test 8: UI Static Assets
+# ============================================================================
+
+echo -e "${YELLOW}[8/8] Testing UI static assets...${NC}"
+
+CSS_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$API_URL/static/styles.css" "${AUTH_HEADER[@]}" || echo "000")
+HTMX_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "$API_URL/static/htmx.min.js" "${AUTH_HEADER[@]}" || echo "000")
+
+if [[ "$CSS_STATUS" == "200" && "$HTMX_STATUS" == "200" ]]; then
+  echo -e "${GREEN}✓ Static assets served (CSS: $CSS_STATUS, HTMX: $HTMX_STATUS)${NC}"
+else
+  echo -e "${RED}✗ Static assets failed (CSS: $CSS_STATUS, HTMX: $HTMX_STATUS)${NC}"
   exit 1
 fi
 

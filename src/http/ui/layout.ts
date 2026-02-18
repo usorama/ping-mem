@@ -39,6 +39,7 @@ export function renderLayout(options: LayoutOptions): string {
   <title>${escapeHtml(title)} - ping-mem</title>
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/chat.js" defer></script>
   <script>
     // Theme: check localStorage before paint to prevent flash
     (function() {
@@ -69,6 +70,8 @@ export function renderLayout(options: LayoutOptions): string {
           <span class="topbar-title">${escapeHtml(title)}</span>
         </div>
         <div class="topbar-actions">
+          <span id="health-dot" class="health-dot" title="Checking..."
+            hx-get="/ui/partials/health" hx-trigger="load, every 30s" hx-swap="outerHTML"></span>
           <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
             <span id="theme-icon">&#9789;</span>
           </button>

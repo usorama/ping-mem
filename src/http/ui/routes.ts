@@ -16,6 +16,8 @@ import { registerDiagnosticsRoutes } from "./diagnostics.js";
 import { registerDiagnosticsPartialRoutes } from "./partials/diagnostics.js";
 import { registerIngestionRoutes } from "./ingestion.js";
 import { registerIngestionPartialRoutes } from "./partials/ingestion.js";
+import { registerChatRoutes } from "./chat-api.js";
+import { registerHealthPartialRoute } from "./partials/health.js";
 
 export interface UIDependencies {
   eventStore: EventStore;
@@ -50,4 +52,11 @@ export function registerUIRoutes(app: Hono, deps: UIDependencies): void {
   // Ingestion HTMX partials
   const ingestionPartials = registerIngestionPartialRoutes(deps);
   app.post("/ui/partials/ingestion/reingest", ingestionPartials.reingest);
+
+  // Chat API
+  const chatRoutes = registerChatRoutes(deps);
+  app.post("/ui/api/chat", chatRoutes.chat);
+
+  // Health dot partial
+  app.get("/ui/partials/health", registerHealthPartialRoute(deps));
 }

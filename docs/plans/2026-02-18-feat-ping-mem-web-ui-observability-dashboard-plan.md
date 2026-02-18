@@ -249,20 +249,20 @@ Plus a **LLM Chat** component (vanilla JS, 200-300 lines) for Q&A — deferred t
    - File: `src/http/ui/__tests__/chat-api.test.ts`
 
 **Success criteria:**
-- [ ] Chat button opens panel, messages stream from Ollama
-- [ ] 8s Ollama timeout → automatic Gemini fallback
-- [ ] Both down → graceful error message in chat
-- [ ] Dark mode toggle works, preference persists
-- [ ] Toast notifications appear for actions (reingest, delete memory)
-- [ ] UI works identically on local and VPS
-- [ ] `bun run typecheck` — 0 errors
-- [ ] `bun test` — all pass
+- [x] Chat button opens panel, messages stream from Ollama
+- [x] 8s Ollama timeout → automatic Gemini fallback
+- [x] Both down → graceful error message in chat
+- [x] Dark mode toggle works, preference persists
+- [x] Toast notifications appear for actions (reingest, delete memory)
+- [ ] UI works identically on local and VPS — needs manual deploy verification
+- [x] `bun run typecheck` — 0 errors
+- [x] `bun test` — all pass (1021 pass, 0 fail)
 
 **Files:**
-- New: 4 (chat.js, chat-api.ts, LLMProxy.ts, llm/types.ts)
-- Modified: 3 (layout.ts, styles.css, docker-compose.prod.yml)
-- Tests: 2
-- **Total: ~9**
+- New: 6 (chat.js, chat-api.ts, LLMProxy.ts, llm/types.ts, partials/health.ts, LLMProxy.test.ts)
+- Modified: 3 (layout.ts, routes.ts, smoke-test.sh)
+- Tests: 2 (LLMProxy.test.ts, chat-api.test.ts)
+- **Total: ~11**
 
 ---
 
