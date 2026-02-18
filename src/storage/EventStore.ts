@@ -579,6 +579,19 @@ export class EventStore {
     return rows.map((row) => row.memory_key);
   }
 
+  // ========== Recent Events ==========
+
+  /**
+   * Get the most recent events across all sessions, ordered by timestamp DESC.
+   */
+  getRecentEvents(limit: number = 20): Event[] {
+    const stmt = this.db.prepare(
+      "SELECT * FROM events ORDER BY timestamp DESC LIMIT $limit"
+    );
+    const rows = stmt.all({ $limit: limit }) as EventRow[];
+    return rows.map((row) => this.rowToEvent(row));
+  }
+
   // ========== Utility Operations ==========
 
   /**

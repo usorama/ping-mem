@@ -48,6 +48,7 @@ import type {
   CheckpointRequest,
 } from "./types.js";
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
+import { registerUIRoutes } from "./ui/routes.js";
 
 // ============================================================================
 // REST Server Class
@@ -235,8 +236,8 @@ export class RESTPingMemServer {
 
         this.memoryManagers.set(session.id, memoryManager);
 
-        return c.json<RESTSuccessResponse<typeof session>>({
-          data: session,
+        return c.json({
+          data: { ...session, sessionId: session.id },
         });
       } catch (error) {
         return this.handleError(c, error);
@@ -1015,6 +1016,43 @@ export class RESTPingMemServer {
         return this.handleError(c, error);
       }
     });
+
+    // ============================================================================
+    // Static Files & UI Routes
+    // ============================================================================
+
+    // Serve static files from src/static/
+    this.app.get("/static/*", async (c) => {
+      const filePath = c.req.path.replace("/static/", "");
+      const staticDir = path.resolve(import.meta.dir, "../../static");
+      const fullPath = path.join(staticDir, filePath);
+
+      // Security: prevent path traversal
+      if (!fullPath.startsWith(staticDir)) {
+        return c.text("Forbidden", 403);
+      }
+
+      try {
+        const file = Bun.file(fullPath);
+        if (!(await file.exists())) {
+          return c.text("Not Found", 404);
+        }
+        const contentType = getContentType(filePath);
+        return new Response(file, {
+          headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=3600" },
+        });
+      } catch {
+        return c.text("Not Found", 404);
+      }
+    });
+
+    // Register UI routes
+    registerUIRoutes(this.app, {
+      eventStore: this.eventStore,
+      sessionManager: this.sessionManager,
+      diagnosticsStore: this.diagnosticsStore,
+      ingestionService: this.config.ingestionService,
+    });
   }
 
   /**
@@ -1198,6 +1236,19 @@ export class RESTPingMemServer {
 // ============================================================================
 // Utilities
 // ============================================================================
+
+function getContentType(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  const types: Record<string, string> = {
+    css: "text/css",
+    js: "application/javascript",
+    html: "text/html",
+    json: "application/json",
+    svg: "image/svg+xml",
+    png: "image/png",
+  };
+  return types[ext ?? ""] ?? "application/octet-stream";
+}
 
 /**
  * Create a default REST server configuration
