@@ -16,14 +16,14 @@ export interface ChatRequest {
 export interface ChatResponse {
   content: string;
   model: string;
-  provider: "ollama" | "gemini";
+  provider: "ollama" | "gemini" | "none";
 }
 
 export interface ChatStreamChunk {
   content: string;
   done: boolean;
   model: string;
-  provider: "ollama" | "gemini";
+  provider: "ollama" | "gemini" | "none";
 }
 
 export interface LLMProviderConfig {

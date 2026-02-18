@@ -12,10 +12,28 @@ import type { UIDependencies } from "./routes.js";
 
 export function registerDiagnosticsRoutes(deps: UIDependencies) {
   return async (c: Context) => {
+    try {
     const { diagnosticsStore } = deps;
 
     // Get recent runs
     const runs = diagnosticsStore.listRuns({ limit: 30 });
+
+    // Pre-fetch findings counts to avoid N+1 queries (one query per run)
+    const findingsCache = new Map<string, number>();
+    const severityCounts = { error: 0, warning: 0, note: 0 };
+
+    for (const run of runs) {
+      const findings = diagnosticsStore.listFindings(run.analysisId);
+      findingsCache.set(run.analysisId, findings.length);
+      // Aggregate severity for the first 10 runs
+      if (findingsCache.size <= 10) {
+        for (const f of findings) {
+          if (f.severity === "error") severityCounts.error++;
+          else if (f.severity === "warning") severityCounts.warning++;
+          else severityCounts.note++;
+        }
+      }
+    }
 
     // Build run list table
     let runsHtml: string;
@@ -23,7 +41,7 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
       runsHtml = `<div class="empty-state"><p>No diagnostic runs found. Run diagnostics:collect to ingest SARIF data.</p></div>`;
     } else {
       const rows = runs.map((run) => {
-        const findingsCount = diagnosticsStore.listFindings(run.analysisId).length;
+        const findingsCount = findingsCache.get(run.analysisId) ?? 0;
         return `<tr class="clickable"
           hx-get="/ui/partials/diagnostics/findings/${encodeURIComponent(run.analysisId)}"
           hx-target="#findings-panel"
@@ -51,17 +69,6 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
           <tbody>${rows}</tbody>
         </table>
       </div>`;
-    }
-
-    // Severity summary across all recent runs
-    let severityCounts = { error: 0, warning: 0, note: 0 };
-    for (const run of runs.slice(0, 10)) {
-      const findings = diagnosticsStore.listFindings(run.analysisId);
-      for (const f of findings) {
-        if (f.severity === "error") severityCounts.error++;
-        else if (f.severity === "warning") severityCounts.warning++;
-        else severityCounts.note++;
-      }
     }
 
     const chartData = JSON.stringify(severityCounts);
@@ -137,5 +144,14 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
       content,
       activeRoute: "diagnostics",
     }));
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[Diagnostics] Page render error:", errMsg);
+      return c.html(renderLayout({
+        title: "Diagnostics",
+        content: `<div class="card" style="padding:24px;color:var(--error)">Diagnostics error: ${escapeHtml(errMsg)}. Check server logs.</div>`,
+        activeRoute: "diagnostics",
+      }));
+    }
   };
 }

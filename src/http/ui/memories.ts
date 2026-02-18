@@ -7,7 +7,7 @@
  */
 
 import type { Context } from "hono";
-import { renderLayout } from "./layout.js";
+import { renderLayout, escapeHtml } from "./layout.js";
 import { loadingIndicator } from "./components.js";
 import { renderMemoryTable } from "./partials/memories.js";
 import type { UIDependencies } from "./routes.js";
@@ -17,11 +17,12 @@ const PRIORITIES = ["high", "normal", "low"];
 
 export function registerMemoryRoutes(deps: UIDependencies) {
   return async (c: Context) => {
+    try {
     const query = c.req.query("query") ?? "";
     const category = c.req.query("category") ?? "";
     const priority = c.req.query("priority") ?? "";
-    const limit = parseInt(c.req.query("limit") ?? "25");
-    const offset = parseInt(c.req.query("offset") ?? "0");
+    const limit = Math.max(1, parseInt(c.req.query("limit") ?? "25", 10) || 25);
+    const offset = Math.max(0, parseInt(c.req.query("offset") ?? "0", 10) || 0);
 
     // Initial load: render full page with results
     const tableHtml = renderMemoryTable(deps.eventStore, { query, category, priority, limit, offset });
@@ -39,7 +40,7 @@ export function registerMemoryRoutes(deps: UIDependencies) {
         <input
           type="search"
           name="query"
-          value="${escapeAttr(query)}"
+          value="${escapeHtml(query)}"
           placeholder="Search memories..."
           hx-get="/ui/partials/memories"
           hx-trigger="input changed delay:300ms, search"
@@ -84,9 +85,14 @@ export function registerMemoryRoutes(deps: UIDependencies) {
     });
 
     return c.html(html);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[Memories] Page render error:", errMsg);
+      return c.html(renderLayout({
+        title: "Memory Explorer",
+        content: `<div class="card" style="padding:24px;color:var(--error)">Memory Explorer error: ${escapeHtml(errMsg)}. Check server logs.</div>`,
+        activeRoute: "memories",
+      }));
+    }
   };
-}
-
-function escapeAttr(str: string): string {
-  return str.replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

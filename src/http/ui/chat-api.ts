@@ -23,7 +23,8 @@ export function registerChatRoutes(deps: UIDependencies) {
       try {
         const body = (await c.req.json()) as { message?: string };
         userMessage = body.message ?? "";
-      } catch {
+      } catch (err) {
+        console.warn("[Chat] Invalid request body:", err instanceof Error ? err.message : err);
         return c.json({ error: "Invalid request body" }, 400);
       }
 
@@ -58,7 +59,7 @@ export function registerChatRoutes(deps: UIDependencies) {
           );
         }
       } catch (err) {
-        console.warn("[Chat] Memory search failed:", err instanceof Error ? err.message : err);
+        console.error("[Chat] Memory search failed:", err instanceof Error ? err.message : err);
       }
 
       // Build messages

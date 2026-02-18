@@ -31,7 +31,8 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
       try {
         const body = await c.req.parseBody();
         projectDir = String(body["projectDir"] ?? "");
-      } catch {
+      } catch (err) {
+        console.warn("[Ingestion] Failed to parse reingest request body:", err instanceof Error ? err.message : err);
         return c.html(`<div class="card" style="margin-top:16px">
           <div style="padding:16px;color:var(--error)">Invalid request body</div>
         </div>`);
@@ -91,6 +92,7 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
         </div>`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        console.error("[Ingestion] Reingest failed for", projectDir, ":", message);
         return c.html(`<div class="card" style="margin-top:16px">
           <div style="padding:16px;color:var(--error)">
             ${badge("Error", "error")} Ingestion failed: ${escapeHtml(message)}

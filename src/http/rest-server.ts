@@ -1030,6 +1030,7 @@ export class RESTPingMemServer {
       // Security: prevent path traversal — canonicalize and compare with trailing separator
       const staticDirNorm = path.resolve(staticDir) + path.sep;
       if (!fullPath.startsWith(staticDirNorm) && fullPath !== path.resolve(staticDir)) {
+        console.warn("[Static] Path traversal attempt blocked:", filePath);
         return c.text("Forbidden", 403);
       }
 

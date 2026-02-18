@@ -15,6 +15,7 @@ import * as path from "path";
 
 export function registerIngestionRoutes(deps: UIDependencies) {
   return async (c: Context) => {
+    try {
     const { ingestionService } = deps;
     const available = !!ingestionService;
 
@@ -125,5 +126,14 @@ export function registerIngestionRoutes(deps: UIDependencies) {
       content,
       activeRoute: "ingestion",
     }));
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error("[Ingestion] Page render error:", errMsg);
+      return c.html(renderLayout({
+        title: "Ingestion Monitor",
+        content: `<div class="card" style="padding:24px;color:var(--error)">Ingestion error: ${escapeHtml(errMsg)}. Check server logs.</div>`,
+        activeRoute: "ingestion",
+      }));
+    }
   };
 }

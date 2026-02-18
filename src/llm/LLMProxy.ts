@@ -55,7 +55,7 @@ export class LLMProxy {
     return {
       content: "Unable to reach any LLM provider. Ensure Ollama is running locally or set GEMINI_API_KEY.",
       model: "none",
-      provider: "ollama",
+      provider: "none",
     };
   }
 
@@ -102,7 +102,7 @@ export class LLMProxy {
       content: "Unable to reach any LLM provider. Ensure Ollama is running locally or set GEMINI_API_KEY.",
       done: true,
       model: "none",
-      provider: "ollama" as const,
+      provider: "none" as const,
     };
   }
 
@@ -260,11 +260,18 @@ export class LLMProxy {
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent?key=${this.geminiApiKey}`;
 
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      // Sanitize: network errors may include the full URL with API key
+      const safeMsg = err instanceof Error ? err.message.replace(/key=[^&\s]+/g, "key=***") : "Network error";
+      throw new Error(`Gemini request failed: ${safeMsg}`);
+    }
 
     if (!response.ok) {
       throw new Error(`Gemini returned ${response.status}`);
