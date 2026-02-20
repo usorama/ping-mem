@@ -95,6 +95,8 @@ export enum RelationshipType {
   DERIVED_FROM = "DERIVED_FROM",
   /** Source blocks target (blocking dependency) */
   BLOCKS = "BLOCKS",
+  /** Source contradicts target (conflicting information) */
+  CONTRADICTS = "CONTRADICTS",
 }
 
 /**

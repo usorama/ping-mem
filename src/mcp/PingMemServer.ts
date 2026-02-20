@@ -21,6 +21,7 @@ import { MemoryManager, type MemoryManagerConfig } from "../memory/MemoryManager
 import { EventStore } from "../storage/EventStore.js";
 import { VectorIndex, createInMemoryVectorIndex } from "../search/VectorIndex.js";
 import { EntityExtractor } from "../graph/EntityExtractor.js";
+import { LLMEntityExtractor } from "../graph/LLMEntityExtractor.js";
 import type { GraphManager } from "../graph/GraphManager.js";
 import type { HybridSearchEngine, SearchWeights } from "../search/HybridSearchEngine.js";
 import type { LineageEngine } from "../graph/LineageEngine.js";
@@ -582,6 +583,8 @@ export interface PingMemServerConfig {
   graphManager?: GraphManager | undefined;
   /** Optional EntityExtractor instance (created automatically if graphManager provided) */
   entityExtractor?: EntityExtractor | undefined;
+  /** Optional LLM entity extractor for high-value memories */
+  llmEntityExtractor?: LLMEntityExtractor | undefined;
   /** Optional HybridSearchEngine for combined semantic/keyword/graph search */
   hybridSearchEngine?: HybridSearchEngine | undefined;
   /** Optional LineageEngine for entity lineage queries */
@@ -613,6 +616,7 @@ export class PingMemServer {
   private config: PingMemServerConfig;
   private graphManager: GraphManager | null = null;
   private entityExtractor: EntityExtractor | null = null;
+  private llmEntityExtractor: LLMEntityExtractor | null = null;
   private hybridSearchEngine: HybridSearchEngine | null = null;
   private lineageEngine: LineageEngine | null = null;
   private evolutionEngine: EvolutionEngine | null = null;
@@ -652,6 +656,7 @@ export class PingMemServer {
     if (config.graphManager) {
       this.graphManager = config.graphManager;
       this.entityExtractor = config.entityExtractor ?? new EntityExtractor();
+      this.llmEntityExtractor = config.llmEntityExtractor ?? null;
     }
 
     // Initialize optional engines
@@ -971,32 +976,78 @@ export class PingMemServer {
       );
     }
 
-    // Handle entity extraction if requested
-    const extractEntities = args.extractEntities === true;
+    // Handle entity extraction — selective routing between LLM and regex
+    const value = args.value as string;
+    const category = args.category as string | undefined;
+    const explicitExtract = args.extractEntities === true;
+
+    // Determine whether to use LLM extraction (high-value) or regex (default)
+    const useLlmExtraction =
+      (category !== undefined && ["decision", "error", "task"].includes(category)) ||
+      value.length > 200 ||
+      explicitExtract;
+
+    const shouldExtract = explicitExtract || useLlmExtraction;
     let entityIds: string[] | undefined;
 
-    if (extractEntities && this.entityExtractor && this.graphManager) {
-      const value = args.value as string;
-      const category = args.category as string | undefined;
+    if (shouldExtract && this.graphManager) {
+      if (useLlmExtraction && this.llmEntityExtractor) {
+        // LLM extraction for high-value memories
+        try {
+          const llmResult = await this.llmEntityExtractor.extract(value);
 
-      // Build extraction context with only defined properties (exactOptionalPropertyTypes)
-      const extractionContext: { key: string; value: string; category?: string } = {
-        key: args.key as string,
-        value,
-      };
-      if (category !== undefined) {
-        extractionContext.category = category;
-      }
+          if (llmResult.entities.length > 0) {
+            const createdEntities = await this.graphManager.batchCreateEntities(llmResult.entities);
+            entityIds = createdEntities.map((e) => e.id);
+          } else {
+            entityIds = [];
+          }
 
-      // Extract entities from context (uses key and category for prioritization)
-      const extractResult = this.entityExtractor.extractFromContext(extractionContext);
-
-      // Store extracted entities in the graph
-      if (extractResult.entities.length > 0) {
-        const createdEntities = await this.graphManager.batchCreateEntities(extractResult.entities);
-        entityIds = createdEntities.map((e) => e.id);
-      } else {
-        entityIds = [];
+          // Store relationships if any
+          if (llmResult.relationships.length > 0) {
+            for (const rel of llmResult.relationships) {
+              try {
+                await this.graphManager.createRelationship(rel);
+              } catch {
+                // Non-blocking: relationship storage failure shouldn't fail save
+              }
+            }
+          }
+        } catch {
+          // Fallback to regex extraction on LLM failure
+          if (this.entityExtractor) {
+            const extractionContext: { key: string; value: string; category?: string } = {
+              key: args.key as string,
+              value,
+            };
+            if (category !== undefined) {
+              extractionContext.category = category;
+            }
+            const extractResult = this.entityExtractor.extractFromContext(extractionContext);
+            if (extractResult.entities.length > 0) {
+              const createdEntities = await this.graphManager.batchCreateEntities(extractResult.entities);
+              entityIds = createdEntities.map((e) => e.id);
+            } else {
+              entityIds = [];
+            }
+          }
+        }
+      } else if (this.entityExtractor) {
+        // Regex extraction for standard memories
+        const extractionContext: { key: string; value: string; category?: string } = {
+          key: args.key as string,
+          value,
+        };
+        if (category !== undefined) {
+          extractionContext.category = category;
+        }
+        const extractResult = this.entityExtractor.extractFromContext(extractionContext);
+        if (extractResult.entities.length > 0) {
+          const createdEntities = await this.graphManager.batchCreateEntities(extractResult.entities);
+          entityIds = createdEntities.map((e) => e.id);
+        } else {
+          entityIds = [];
+        }
       }
     }
 
@@ -1006,8 +1057,8 @@ export class PingMemServer {
       key: args.key,
     };
 
-    // Include entityIds in response when extraction was requested
-    if (extractEntities) {
+    // Include entityIds in response when extraction was performed
+    if (shouldExtract) {
       result.entityIds = entityIds ?? [];
     }
 
