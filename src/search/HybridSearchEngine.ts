@@ -13,6 +13,8 @@ import type { QdrantClientWrapper } from "./QdrantClient.js";
 import type { VectorIndex, VectorSearchResult } from "./VectorIndex.js";
 import type { GraphManager } from "../graph/GraphManager.js";
 import type { MemoryId, SessionId } from "../types/index.js";
+import type { BM25Store } from "./BM25Store.js";
+import type { MemoryLookup } from "./MemoryLookup.js";
 
 // ============================================================================
 // Error Classes
@@ -119,6 +121,8 @@ export interface HybridSearchOptions {
   graphEntityId?: string;
   /** Maximum graph traversal depth (default: 1) */
   graphDepth?: number;
+  /** Skip temporal boost for this query */
+  skipTemporalBoost?: boolean;
 }
 
 /**
@@ -154,6 +158,17 @@ export interface HybridSearchEngineConfig {
     /** b parameter (document length normalization, default: 0.75) */
     b?: number;
   };
+  /** Temporal boost configuration (post-retrieval recency boost) */
+  temporalBoost?: {
+    /** Boost factor (default: 0.3 = max 30% boost for today's memories) */
+    factor?: number;
+    /** Decay half-life in days (default: 30) */
+    decayDays?: number;
+  };
+  /** Optional BM25 persistence store for surviving restarts */
+  bm25Store?: BM25Store;
+  /** Memory lookup for resolving graph entity names to memory content (optional) */
+  memoryLookup?: MemoryLookup;
 }
 
 /**
@@ -169,6 +184,9 @@ interface ResolvedConfig {
     k1: number;
     b: number;
   };
+  temporalBoost: { factor: number; decayDays: number };
+  bm25Store: BM25Store | undefined;
+  memoryLookup: MemoryLookup | undefined;
 }
 
 // ============================================================================
@@ -439,6 +457,12 @@ export class HybridSearchEngine {
         k1: config.bm25?.k1 ?? DEFAULT_BM25_K1,
         b: config.bm25?.b ?? DEFAULT_BM25_B,
       },
+      temporalBoost: {
+        factor: config.temporalBoost?.factor ?? 0.3,
+        decayDays: config.temporalBoost?.decayDays ?? 30,
+      },
+      bm25Store: config.bm25Store,
+      memoryLookup: config.memoryLookup,
     };
 
     this.bm25Index = new BM25Index(this.config.bm25.k1, this.config.bm25.b);
@@ -466,6 +490,11 @@ export class HybridSearchEngine {
       indexedAt,
       options?.metadata
     );
+
+    // Persist to BM25Store if configured
+    if (this.config.bm25Store) {
+      this.config.bm25Store.addDocument(memoryId, sessionId, content, indexedAt, options?.metadata);
+    }
 
     // Generate and store embedding for semantic search
     try {
@@ -530,6 +559,20 @@ export class HybridSearchEngine {
   }
 
   /**
+   * Add a document directly to the BM25 keyword index (no embedding required).
+   * Useful for testing and keyword-only workflows.
+   */
+  addDocument(
+    memoryId: MemoryId,
+    sessionId: SessionId,
+    content: string,
+    indexedAt: Date,
+    metadata?: Record<string, unknown>
+  ): void {
+    this.bm25Index.addDocument(memoryId, sessionId, content, indexedAt, metadata);
+  }
+
+  /**
    * Perform hybrid search combining multiple search modes
    */
   async search(
@@ -589,7 +632,14 @@ export class HybridSearchEngine {
     await Promise.all(searchPromises);
 
     // Apply reciprocal rank fusion
-    const fusedResults = this.reciprocalRankFusion(resultsByMode, weights);
+    let fusedResults = this.reciprocalRankFusion(resultsByMode, weights);
+
+    // Apply temporal boost unless explicitly skipped
+    if (!options.skipTemporalBoost) {
+      fusedResults = this.applyTemporalBoost(fusedResults);
+      // Re-sort after boost
+      fusedResults.sort((a, b) => b.hybridScore - a.hybridScore);
+    }
 
     // Filter by threshold and limit
     return fusedResults
@@ -684,7 +734,8 @@ export class HybridSearchEngine {
   }
 
   /**
-   * Perform graph-based search using entity relationships
+   * Perform graph-based search using entity relationships.
+   * Collects entity names from relationships and looks up memories via MemoryLookup.
    */
   private async graphSearch(
     entityId: string,
@@ -695,26 +746,32 @@ export class HybridSearchEngine {
     }
 
     try {
-      // Get related entities from graph
       const relationships = await this.config.graphManager.findRelationshipsByEntity(entityId);
       const limit = (options.limit ?? 10) * 2;
 
-      // Collect related entity IDs with hop distance
-      const relatedEntityIds = new Set<string>();
+      // Collect entity names from relationships
+      const entityNames = new Set<string>();
       for (const rel of relationships) {
-        if (rel.sourceId !== entityId) relatedEntityIds.add(rel.sourceId);
-        if (rel.targetId !== entityId) relatedEntityIds.add(rel.targetId);
+        const sourceName = rel.properties?.sourceName ?? rel.sourceId;
+        const targetName = rel.properties?.targetName ?? rel.targetId;
+        if (rel.sourceId !== entityId) entityNames.add(String(sourceName));
+        if (rel.targetId !== entityId) entityNames.add(String(targetName));
       }
 
-      // Fetch content for related entities
-      // For now, we simulate this by returning empty results if no semantic search
-      // In a full implementation, this would query the memory store
-      const results: VectorSearchResult[] = [];
+      if (entityNames.size === 0 || !this.config.memoryLookup) {
+        return [];
+      }
 
-      // Note: In a full implementation, you would fetch the actual memory content
-      // for related entities. For now, we return empty to avoid circular dependencies.
+      // Lookup memories by entity names
+      const results = await this.config.memoryLookup.lookupByEntityNames(
+        Array.from(entityNames)
+      );
 
-      return results.slice(0, limit);
+      // Score by hop distance (all direct relationships = hop 1)
+      return results.slice(0, limit).map((result) => ({
+        ...result,
+        similarity: 1.0 / (1 + 1), // hop distance 1 for direct relationships
+      }));
     } catch (error) {
       throw new SearchModeError(
         `Graph search failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -742,6 +799,24 @@ export class HybridSearchEngine {
     });
 
     return ranked;
+  }
+
+  /**
+   * Apply temporal post-retrieval boost to RRF results.
+   * Formula: boostedScore = rrfScore * (1 + factor * exp(-ageDays / decayDays))
+   */
+  private applyTemporalBoost(results: HybridSearchResult[]): HybridSearchResult[] {
+    const { factor, decayDays } = this.config.temporalBoost;
+    const now = Date.now();
+
+    return results.map((result) => {
+      const ageDays = (now - result.indexedAt.getTime()) / (1000 * 60 * 60 * 24);
+      const boost = factor * Math.exp(-ageDays / decayDays);
+      return {
+        ...result,
+        hybridScore: result.hybridScore * (1 + boost),
+      };
+    });
   }
 
   /**
@@ -893,6 +968,22 @@ export class HybridSearchEngine {
    */
   clear(): void {
     this.bm25Index.clear();
+  }
+
+  /**
+   * Load BM25 documents from persistent store into the in-memory index.
+   * Call this on startup to restore the BM25 index without rebuilding from scratch.
+   */
+  loadFromStore(): number {
+    if (!this.config.bm25Store) {
+      return 0;
+    }
+
+    const docs = this.config.bm25Store.loadAll();
+    for (const doc of docs) {
+      this.bm25Index.addDocument(doc.memoryId, doc.sessionId, doc.content, doc.indexedAt);
+    }
+    return docs.length;
   }
 }
 

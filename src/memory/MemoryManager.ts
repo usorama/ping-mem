@@ -23,6 +23,7 @@ import type {
   PingMemError,
   MemoryNotFoundError,
 } from "../types/index.js";
+import type { RelevanceEngine } from "./RelevanceEngine.js";
 import * as crypto from "crypto";
 
 // ============================================================================
@@ -45,6 +46,8 @@ export interface MemoryManagerConfig {
   defaultPriority?: MemoryPriority;
   /** Default privacy scope */
   defaultPrivacy?: MemoryPrivacy;
+  /** Optional relevance engine for automatic tracking (auto-calls ensureTracking/trackAccess) */
+  relevanceEngine?: RelevanceEngine;
 }
 
 /**
@@ -142,6 +145,7 @@ export class MemoryManager {
   private memories: Map<string, Memory>;
   // Index by ID for fast lookups
   private memoriesById: Map<MemoryId, Memory>;
+  private relevanceEngine: RelevanceEngine | null;
 
   constructor(config: MemoryManagerConfig) {
     if (!config.sessionId) {
@@ -156,6 +160,7 @@ export class MemoryManager {
     this.defaultPrivacy = config.defaultPrivacy ?? "session";
     this.memories = new Map();
     this.memoriesById = new Map();
+    this.relevanceEngine = config.relevanceEngine ?? null;
   }
 
   /**
@@ -366,6 +371,15 @@ export class MemoryManager {
       channel: memory.channel,
     });
 
+    // Auto-track relevance if engine is available
+    if (this.relevanceEngine) {
+      try {
+        this.relevanceEngine.ensureTracking(memoryId, memory.priority, memory.category);
+      } catch {
+        // Non-blocking: relevance tracking failure should not prevent save
+      }
+    }
+
     // Store in vector index if embedding provided
     if (this.vectorIndex && options.embedding) {
       const vectorData: Parameters<typeof this.vectorIndex.storeVector>[0] = {
@@ -525,7 +539,16 @@ export class MemoryManager {
    * Get a memory by key
    */
   get(key: string): Memory | null {
-    return this.memories.get(key) ?? null;
+    const memory = this.memories.get(key) ?? null;
+    // Auto-track access for relevance
+    if (memory && this.relevanceEngine) {
+      try {
+        this.relevanceEngine.trackAccess(memory.id);
+      } catch {
+        // Non-blocking
+      }
+    }
+    return memory;
   }
 
   /**
