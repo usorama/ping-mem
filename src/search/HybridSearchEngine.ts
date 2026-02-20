@@ -15,6 +15,8 @@ import type { GraphManager } from "../graph/GraphManager.js";
 import type { MemoryId, SessionId } from "../types/index.js";
 import type { BM25Store } from "./BM25Store.js";
 import type { MemoryLookup } from "./MemoryLookup.js";
+import type { Reranker } from "./Reranker.js";
+import { SEARCH_PROFILES, detectProfile } from "./SearchProfiles.js";
 
 // ============================================================================
 // Error Classes
@@ -57,7 +59,7 @@ export class SearchModeError extends HybridSearchError {
 /**
  * Search modes available in hybrid search
  */
-export type SearchMode = "semantic" | "keyword" | "graph";
+export type SearchMode = "semantic" | "keyword" | "graph" | "code" | "causal";
 
 /**
  * Weight configuration for different search modes
@@ -69,6 +71,10 @@ export interface SearchWeights {
   keyword: number;
   /** Weight for graph-based search (default: 0.2) */
   graph: number;
+  /** Weight for code-specific search (optional, used by code_search profile) */
+  code?: number;
+  /** Weight for causal search (optional, used by decision_recall/error_investigation profiles) */
+  causal?: number;
 }
 
 /**
@@ -98,6 +104,8 @@ export interface HybridSearchResult extends VectorSearchResult {
     semantic?: number;
     keyword?: number;
     graph?: number;
+    code?: number;
+    causal?: number;
   };
 }
 
@@ -123,6 +131,10 @@ export interface HybridSearchOptions {
   graphDepth?: number;
   /** Skip temporal boost for this query */
   skipTemporalBoost?: boolean;
+  /** Apply neural re-ranking via Reranker (default: false) */
+  rerank?: boolean;
+  /** Search profile name (overrides weights; auto-detected from query if not set) */
+  profile?: string;
 }
 
 /**
@@ -169,6 +181,8 @@ export interface HybridSearchEngineConfig {
   bm25Store?: BM25Store;
   /** Memory lookup for resolving graph entity names to memory content (optional) */
   memoryLookup?: MemoryLookup;
+  /** Optional Reranker for neural re-ranking of results */
+  reranker?: Reranker;
 }
 
 /**
@@ -187,6 +201,7 @@ interface ResolvedConfig {
   temporalBoost: { factor: number; decayDays: number };
   bm25Store: BM25Store | undefined;
   memoryLookup: MemoryLookup | undefined;
+  reranker: Reranker | undefined;
 }
 
 // ============================================================================
@@ -463,6 +478,7 @@ export class HybridSearchEngine {
       },
       bm25Store: config.bm25Store,
       memoryLookup: config.memoryLookup,
+      reranker: config.reranker,
     };
 
     this.bm25Index = new BM25Index(this.config.bm25.k1, this.config.bm25.b);
@@ -581,7 +597,27 @@ export class HybridSearchEngine {
   ): Promise<HybridSearchResult[]> {
     const limit = options.limit ?? 10;
     const threshold = options.threshold ?? 0.0;
-    const weights = { ...this.config.weights, ...options.weights };
+
+    // Resolve weights from profile (explicit profile > explicit weights > auto-detect > config defaults)
+    let resolvedWeights: SearchWeights;
+    if (options.weights) {
+      // Explicit weights take highest priority
+      resolvedWeights = { ...this.config.weights, ...options.weights };
+    } else if (options.profile) {
+      // Explicit profile name
+      const profile = SEARCH_PROFILES.get(options.profile);
+      resolvedWeights = profile
+        ? { ...this.config.weights, ...profile.weights }
+        : { ...this.config.weights };
+    } else {
+      // Auto-detect profile from query
+      const detectedProfileName = detectProfile(query);
+      const profile = SEARCH_PROFILES.get(detectedProfileName);
+      resolvedWeights = profile
+        ? { ...this.config.weights, ...profile.weights }
+        : { ...this.config.weights };
+    }
+    const weights = resolvedWeights;
     const modes = options.modes ?? this.getAvailableModes();
 
     // Collect results from each mode with their ranks
@@ -629,6 +665,15 @@ export class HybridSearchEngine {
       );
     }
 
+    // Code and causal modes are no-ops for now (providers will be wired later).
+    // They participate in RRF with empty result sets, so their weights have no effect yet.
+    if (modes.includes("code")) {
+      resultsByMode.set("code", new Map());
+    }
+    if (modes.includes("causal")) {
+      resultsByMode.set("causal", new Map());
+    }
+
     await Promise.all(searchPromises);
 
     // Apply reciprocal rank fusion
@@ -639,6 +684,17 @@ export class HybridSearchEngine {
       fusedResults = this.applyTemporalBoost(fusedResults);
       // Re-sort after boost
       fusedResults.sort((a, b) => b.hybridScore - a.hybridScore);
+    }
+
+    // Optional re-ranking via Cohere Rerank API
+    if (options.rerank && this.config.reranker && fusedResults.length > 0) {
+      const documents = fusedResults.map((r) => r.content);
+      const reranked = await this.config.reranker.rerank(query, documents);
+      const reorderedResults = reranked.map((rr) => ({
+        ...fusedResults[rr.index]!,
+        hybridScore: rr.relevanceScore,
+      }));
+      fusedResults = reorderedResults;
     }
 
     // Filter by threshold and limit
@@ -851,7 +907,7 @@ export class HybridSearchEngine {
       const modeScores = new Map<SearchMode, number>();
 
       for (const [mode, results] of resultsByMode) {
-        const weight = weights[mode];
+        const weight = weights[mode] ?? 0;
         const ranked = results.get(memoryId);
 
         if (ranked) {
@@ -886,10 +942,12 @@ export class HybridSearchEngine {
       const normalizedScore = Math.min(1, rrfData.score * RRF_K);
 
       // Build modeScores with only defined values (exactOptionalPropertyTypes compliance)
-      const modeScoresObj: { semantic?: number; keyword?: number; graph?: number } = {};
+      const modeScoresObj: { semantic?: number; keyword?: number; graph?: number; code?: number; causal?: number } = {};
       const semanticScore = rrfData.modeScores.get("semantic");
       const keywordScore = rrfData.modeScores.get("keyword");
       const graphScore = rrfData.modeScores.get("graph");
+      const codeScore = rrfData.modeScores.get("code");
+      const causalScore = rrfData.modeScores.get("causal");
 
       if (semanticScore !== undefined) {
         modeScoresObj.semantic = semanticScore;
@@ -899,6 +957,12 @@ export class HybridSearchEngine {
       }
       if (graphScore !== undefined) {
         modeScoresObj.graph = graphScore;
+      }
+      if (codeScore !== undefined) {
+        modeScoresObj.code = codeScore;
+      }
+      if (causalScore !== undefined) {
+        modeScoresObj.causal = causalScore;
       }
 
       // Build hybrid result with only defined optional properties
