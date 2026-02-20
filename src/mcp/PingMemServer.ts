@@ -26,6 +26,8 @@ import type { GraphManager } from "../graph/GraphManager.js";
 import type { HybridSearchEngine, SearchWeights } from "../search/HybridSearchEngine.js";
 import type { LineageEngine } from "../graph/LineageEngine.js";
 import type { EvolutionEngine } from "../graph/EvolutionEngine.js";
+import type { CausalGraphManager } from "../graph/CausalGraphManager.js";
+import type { CausalDiscoveryAgent } from "../graph/CausalDiscoveryAgent.js";
 import type {
   SessionId,
   SessionStatus,
@@ -566,6 +568,56 @@ export const TOOLS = [
       },
     },
   },
+  {
+    name: "search_causes",
+    description: "Find what causes a given entity or concept. Returns entities that have CAUSES relationships pointing to the query target.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: { type: "string", description: "Entity name or concept to find causes for" },
+        entityId: { type: "string", description: "Specific entity ID to find causes for (alternative to query)" },
+        limit: { type: "number", description: "Maximum results (default: 10)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "search_effects",
+    description: "Find what a given entity or concept causes/affects. Returns entities that are effects of the query source.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: { type: "string", description: "Entity name or concept to find effects for" },
+        entityId: { type: "string", description: "Specific entity ID to find effects for (alternative to query)" },
+        limit: { type: "number", description: "Maximum results (default: 10)" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "get_causal_chain",
+    description: "Find the causal chain between two entities. Returns the shortest path of CAUSES relationships.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        startEntityId: { type: "string", description: "Starting entity ID" },
+        endEntityId: { type: "string", description: "Ending entity ID" },
+      },
+      required: ["startEntityId", "endEntityId"],
+    },
+  },
+  {
+    name: "trigger_causal_discovery",
+    description: "Trigger LLM-based causal relationship discovery on provided text. Extracts cause-effect pairs and optionally persists them.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        text: { type: "string", description: "Text to analyze for causal relationships" },
+        persist: { type: "boolean", description: "Whether to persist discovered links to the graph (default: false)" },
+      },
+      required: ["text"],
+    },
+  },
 ];
 
 // ============================================================================
@@ -597,6 +649,10 @@ export interface PingMemServerConfig {
   diagnosticsStore?: DiagnosticsStore | undefined;
   /** Optional diagnostics database path (for automatic DiagnosticsStore creation) */
   diagnosticsDbPath?: string | undefined;
+  /** Optional CausalGraphManager for causal relationship queries */
+  causalGraphManager?: CausalGraphManager | undefined;
+  /** Optional CausalDiscoveryAgent for LLM-based causal extraction */
+  causalDiscoveryAgent?: CausalDiscoveryAgent | undefined;
 }
 
 // ============================================================================
@@ -624,6 +680,8 @@ export class PingMemServer {
   private diagnosticsStore: DiagnosticsStore | null = null;
   private summaryGenerator: SummaryGenerator | null = null;
   private relevanceEngine: RelevanceEngine | null = null;
+  private causalGraphManager: CausalGraphManager | null = null;
+  private causalDiscoveryAgent: CausalDiscoveryAgent | null = null;
 
   constructor(config: PingMemServerConfig = {}) {
     this.config = {
@@ -677,6 +735,14 @@ export class PingMemServer {
       new DiagnosticsStore(
         config.diagnosticsDbPath ? { dbPath: config.diagnosticsDbPath } : undefined
       );
+
+    // Initialize causal components if provided
+    if (config.causalGraphManager) {
+      this.causalGraphManager = config.causalGraphManager;
+    }
+    if (config.causalDiscoveryAgent) {
+      this.causalDiscoveryAgent = config.causalDiscoveryAgent;
+    }
 
     // Initialize LLM summary generator only when explicitly enabled
     const openaiKey = process.env.OPENAI_API_KEY;
@@ -827,6 +893,18 @@ export class PingMemServer {
 
       case "memory_consolidate":
         return this.handleMemoryConsolidate(args);
+
+      case "search_causes":
+        return this.handleSearchCauses(args);
+
+      case "search_effects":
+        return this.handleSearchEffects(args);
+
+      case "get_causal_chain":
+        return this.handleGetCausalChain(args);
+
+      case "trigger_causal_discovery":
+        return this.handleTriggerCausalDiscovery(args);
 
       default:
         throw new Error(`Unknown tool: ${name}`);
@@ -2617,6 +2695,71 @@ export class PingMemServer {
 
     const result = this.relevanceEngine.consolidate(options);
     return { result };
+  }
+
+  // ============================================================================
+  // Causal Tool Handlers
+  // ============================================================================
+
+  private async handleSearchCauses(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.causalGraphManager) {
+      return { error: "Causal graph not configured", causes: [] };
+    }
+    const query = args.query as string;
+    const entityId = args.entityId as string | undefined;
+    const limit = (args.limit as number) ?? 10;
+
+    // If entityId provided, use directly; otherwise need entity resolution
+    // For now, if no entityId, return message to provide one
+    if (!entityId) {
+      return { error: "entityId required (entity name resolution not yet implemented)", query, causes: [] };
+    }
+
+    const causes = await this.causalGraphManager.getCausesOf(entityId, { limit });
+    return { query, causes };
+  }
+
+  private async handleSearchEffects(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.causalGraphManager) {
+      return { error: "Causal graph not configured", effects: [] };
+    }
+    const query = args.query as string;
+    const entityId = args.entityId as string | undefined;
+    const limit = (args.limit as number) ?? 10;
+
+    if (!entityId) {
+      return { error: "entityId required (entity name resolution not yet implemented)", query, effects: [] };
+    }
+
+    const effects = await this.causalGraphManager.getEffectsOf(entityId, { limit });
+    return { query, effects };
+  }
+
+  private async handleGetCausalChain(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.causalGraphManager) {
+      return { error: "Causal graph not configured", chain: [] };
+    }
+    const startEntityId = args.startEntityId as string;
+    const endEntityId = args.endEntityId as string;
+
+    const chain = await this.causalGraphManager.getCausalChain(startEntityId, endEntityId);
+    return { startEntityId, endEntityId, chain };
+  }
+
+  private async handleTriggerCausalDiscovery(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.causalDiscoveryAgent) {
+      return { error: "Causal discovery agent not configured", discovered: 0 };
+    }
+    const text = args.text as string;
+    const persist = (args.persist as boolean) ?? false;
+
+    if (persist) {
+      const count = await this.causalDiscoveryAgent.discoverAndPersist(text);
+      return { discovered: count, persisted: true };
+    }
+
+    const links = await this.causalDiscoveryAgent.discover(text);
+    return { discovered: links.length, links, persisted: false };
   }
 
   // ============================================================================

@@ -135,6 +135,8 @@ export interface HybridSearchOptions {
   rerank?: boolean;
   /** Search profile name (overrides weights; auto-detected from query if not set) */
   profile?: string;
+  /** Causal direction hint for search ("cause" boosts cause-side, "effect" boosts effect-side) */
+  causalDirection?: "cause" | "effect";
 }
 
 /**
@@ -617,6 +619,34 @@ export class HybridSearchEngine {
         ? { ...this.config.weights, ...profile.weights }
         : { ...this.config.weights };
     }
+    // Auto-detect causal direction from query
+    let causalDirection = options.causalDirection;
+    if (!causalDirection) {
+      const lowerQuery = query.toLowerCase();
+      if (/\b(why|what caused|reason|because|due to)\b/.test(lowerQuery)) {
+        causalDirection = "cause";
+      } else if (/\b(what if|consequence|result|effect|impact|leads to)\b/.test(lowerQuery)) {
+        causalDirection = "effect";
+      }
+    }
+
+    // Boost causal weight when direction is detected and causal mode has weight
+    if (causalDirection && resolvedWeights.causal) {
+      resolvedWeights = { ...resolvedWeights, causal: resolvedWeights.causal * 1.5 };
+      // Normalize weights to sum to ~1
+      const total = Object.values(resolvedWeights).reduce((sum, w) => sum + (w ?? 0), 0);
+      if (total > 0) {
+        const scale = 1.0 / total;
+        resolvedWeights = {
+          semantic: resolvedWeights.semantic * scale,
+          keyword: resolvedWeights.keyword * scale,
+          graph: resolvedWeights.graph * scale,
+        };
+        if (resolvedWeights.code !== undefined) resolvedWeights.code = resolvedWeights.code * scale;
+        if (resolvedWeights.causal !== undefined) resolvedWeights.causal = resolvedWeights.causal * scale;
+      }
+    }
+
     const weights = resolvedWeights;
     const modes = options.modes ?? this.getAvailableModes();
 
