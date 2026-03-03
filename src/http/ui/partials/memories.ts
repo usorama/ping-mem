@@ -216,7 +216,7 @@ function renderMemoryDetail(memory: MemoryRow): string {
   return `<div class="detail-panel">
     <div class="flex justify-between items-center" style="margin-bottom:16px">
       <h3>Memory Detail</h3>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('detail-panel').innerHTML=''">Close</button>
+      <button class="btn btn-ghost btn-sm" id="detail-close-btn">Close</button>
     </div>
     <div class="detail-row">
       <span class="detail-label">Key</span>

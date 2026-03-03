@@ -197,8 +197,6 @@ export class SSEPingMemServer {
       res.setHeader("Access-Control-Allow-Origin", requestOrigin);
       res.setHeader("Vary", "Origin");
       res.setHeader("Access-Control-Allow-Credentials", "true");
-    } else if (origins.length === 1 && origins[0] !== undefined) {
-      res.setHeader("Access-Control-Allow-Origin", origins[0]);
     }
 
     res.setHeader("Access-Control-Allow-Methods", (corsConfig.methods ?? ["GET", "POST", "OPTIONS"]).join(", "));

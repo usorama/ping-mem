@@ -69,13 +69,13 @@ export function renderLayout(options: LayoutOptions): string {
     <div class="main">
       <header class="topbar">
         <div class="flex items-center gap-4">
-          <button class="hamburger" onclick="document.getElementById('sidebar').classList.toggle('open')" aria-label="Menu">&#9776;</button>
+          <button class="hamburger" id="hamburger-btn" aria-label="Menu">&#9776;</button>
           <span class="topbar-title">${escapeHtml(title)}</span>
         </div>
         <div class="topbar-actions">
           <span id="health-dot" class="health-dot" title="Checking..."
             hx-get="/ui/partials/health" hx-trigger="load, every 30s" hx-swap="outerHTML"></span>
-          <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
+          <button class="theme-toggle" id="theme-toggle-btn" title="Toggle theme" aria-label="Toggle theme">
             <span id="theme-icon">&#9789;</span>
           </button>
         </div>
@@ -118,6 +118,20 @@ export function renderLayout(options: LayoutOptions): string {
     // Listen for HTMX toast events
     document.body.addEventListener('showToast', function(e) {
       showToast(e.detail.value || e.detail);
+    });
+
+    // Bind button handlers (avoids inline onclick which CSP blocks)
+    document.getElementById('hamburger-btn').addEventListener('click', function() {
+      document.getElementById('sidebar').classList.toggle('open');
+    });
+    document.getElementById('theme-toggle-btn').addEventListener('click', toggleTheme);
+
+    // Event delegation for dynamically loaded HTMX partials
+    document.addEventListener('click', function(e) {
+      if (e.target && e.target.id === 'detail-close-btn') {
+        var panel = document.getElementById('detail-panel');
+        if (panel) panel.innerHTML = '';
+      }
     });
   </script>
 </body>

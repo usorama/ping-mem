@@ -1,8 +1,0 @@
-
-## 2026-02-14 18:27 - US-002: Create CHANGELOG.md from git history
-- Created CHANGELOG.md with Keep a Changelog format, version 1.0.0
-- Sections: Added (13 items), Fixed (7 items), Changed (1 item)
-- Created src/__tests__/changelog.test.ts with 4 tests
-- Files changed: CHANGELOG.md, src/__tests__/changelog.test.ts
-- **Learnings:** Merged main into launch-readiness to get US-001 changes
----

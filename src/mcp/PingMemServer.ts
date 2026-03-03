@@ -2744,7 +2744,10 @@ export class PingMemServer {
     if (!this.causalDiscoveryAgent) {
       return { error: "Causal discovery agent not configured", discovered: 0 };
     }
-    const text = args.text as string;
+    const text = args.text as string | undefined;
+    if (!text || typeof text !== "string") {
+      return { error: "text is required and must be a string", discovered: 0 };
+    }
     if (text.length > 50_000) {
       return { error: "Text exceeds maximum length of 50000 characters", discovered: 0 };
     }
