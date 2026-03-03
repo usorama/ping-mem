@@ -176,7 +176,7 @@ export function detectProfile(query: string): string {
   }
 
   // Check for temporal keywords (includes multi-word like "last week" — check via includes fallback)
-  if (matchesKeyword(TEMPORAL_KEYWORDS) || TEMPORAL_KEYWORDS.has("last week") && lowerQuery.includes("last week")) {
+  if (matchesKeyword(TEMPORAL_KEYWORDS) || lowerQuery.includes("last week")) {
     return "temporal";
   }
 

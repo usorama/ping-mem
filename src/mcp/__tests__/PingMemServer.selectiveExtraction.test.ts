@@ -20,12 +20,16 @@ describe("Selective Extraction Routing Logic", () => {
     expect(shouldUseLlmExtraction("task", 50, false)).toBe(true);
   });
 
-  it("should route note category < 200 chars to regex", () => {
+  it("should route note category < 500 chars to regex", () => {
     expect(shouldUseLlmExtraction("note", 50, false)).toBe(false);
   });
 
-  it("should route long content (> 200 chars) to LLM regardless of category", () => {
-    expect(shouldUseLlmExtraction("note", 250, false)).toBe(true);
+  it("should route medium content (250 chars) to regex when no special category", () => {
+    expect(shouldUseLlmExtraction("note", 250, false)).toBe(false);
+  });
+
+  it("should route long content (> 500 chars) to LLM regardless of category", () => {
+    expect(shouldUseLlmExtraction("note", 550, false)).toBe(true);
   });
 
   it("should route explicit extractEntities to LLM", () => {

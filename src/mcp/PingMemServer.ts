@@ -2699,7 +2699,7 @@ export class PingMemServer {
     if (!this.causalGraphManager) {
       return { error: "Causal graph not configured", causes: [] };
     }
-    const query = args.query as string;
+    const query = (args.query as string | undefined) ?? "";
     const entityId = args.entityId as string | undefined;
     const limit = (args.limit as number) ?? 10;
 
@@ -2717,7 +2717,7 @@ export class PingMemServer {
     if (!this.causalGraphManager) {
       return { error: "Causal graph not configured", effects: [] };
     }
-    const query = args.query as string;
+    const query = (args.query as string | undefined) ?? "";
     const entityId = args.entityId as string | undefined;
     const limit = (args.limit as number) ?? 10;
 

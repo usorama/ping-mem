@@ -1080,7 +1080,12 @@ export class HybridSearchEngine {
 
     const docs = this.config.bm25Store.loadAll();
     for (const doc of docs) {
-      const meta = doc.metadata ? JSON.parse(doc.metadata) as Record<string, unknown> : undefined;
+      let meta: Record<string, unknown> | undefined;
+      try {
+        meta = doc.metadata ? JSON.parse(doc.metadata) as Record<string, unknown> : undefined;
+      } catch (e) {
+        console.warn("[HybridSearch] Corrupt BM25 metadata for", doc.memoryId, e instanceof Error ? e.message : e);
+      }
       this.bm25Index.addDocument(doc.memoryId, doc.sessionId, doc.content, doc.indexedAt, meta);
     }
     return docs.length;

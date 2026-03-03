@@ -92,7 +92,7 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
       }
 
       const resolvedDir = path.resolve(projectDir);
-      if (allowedProjects.length > 0 && !allowedProjects.includes(resolvedDir)) {
+      if (allowedProjects.length === 0 || !allowedProjects.includes(resolvedDir)) {
         return c.html(`<div class="card" style="margin-top:16px">
           <div style="padding:16px;color:var(--error)">
             ${badge("Forbidden", "error")} Project not in registered projects list

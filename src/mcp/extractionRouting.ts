@@ -22,7 +22,7 @@ export function shouldUseLlmExtraction(
 ): boolean {
   return (
     (category !== undefined && ["decision", "error", "task"].includes(category)) ||
-    contentLength > 200 ||
+    contentLength > 500 ||
     explicitExtract
   );
 }
