@@ -149,11 +149,13 @@ export class CausalDiscoveryAgent {
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
+        console.warn("[CausalDiscoveryAgent] LLM returned empty content in discover()");
         return [];
       }
 
       const parsed = this.parseResponse(content);
       if (!parsed) {
+        console.warn("[CausalDiscoveryAgent] Failed to parse LLM response in discover()");
         return [];
       }
 
@@ -223,7 +225,8 @@ export class CausalDiscoveryAgent {
       );
 
       return { causal_links: validLinks };
-    } catch {
+    } catch (error) {
+      console.warn("[CausalDiscoveryAgent] parseResponse JSON parse failed:", error instanceof Error ? error.message : String(error));
       return null;
     }
   }

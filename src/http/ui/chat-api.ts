@@ -18,9 +18,13 @@ import type { UIDependencies } from "./routes.js";
 const rateLimits = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT = 30; // requests per minute
 const RATE_WINDOW = 60_000;
+const MAX_MAP_SIZE = 10_000;
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
+  if (rateLimits.size > MAX_MAP_SIZE) {
+    rateLimits.clear();
+  }
   const entry = rateLimits.get(ip);
   if (!entry || now > entry.resetAt) {
     rateLimits.set(ip, { count: 1, resetAt: now + RATE_WINDOW });

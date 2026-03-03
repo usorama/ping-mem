@@ -19,9 +19,13 @@ import type { UIDependencies } from "../routes.js";
 const reingestRateLimits = new Map<string, { count: number; resetAt: number }>();
 const REINGEST_RATE_LIMIT = 5; // requests per minute
 const REINGEST_RATE_WINDOW = 60_000;
+const MAX_MAP_SIZE = 10_000;
 
 function checkReingestRateLimit(ip: string): boolean {
   const now = Date.now();
+  if (reingestRateLimits.size > MAX_MAP_SIZE) {
+    reingestRateLimits.clear();
+  }
   const entry = reingestRateLimits.get(ip);
   if (!entry || now > entry.resetAt) {
     reingestRateLimits.set(ip, { count: 1, resetAt: now + REINGEST_RATE_WINDOW });
@@ -77,7 +81,15 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
             .filter(Boolean)
             .map(l => path.resolve(l));
         }
-      } catch { /* ignore read errors */ }
+      } catch (err) {
+        // Fail CLOSED: if we cannot read the allowlist, deny all requests
+        console.warn("[Ingestion] Failed to read registered-projects.txt:", err instanceof Error ? err.message : err);
+        return c.html(`<div class="card" style="margin-top:16px">
+          <div style="padding:16px;color:var(--error)">
+            ${badge("Forbidden", "error")} Unable to verify project allowlist. Access denied.
+          </div>
+        </div>`, 403);
+      }
 
       const resolvedDir = path.resolve(projectDir);
       if (allowedProjects.length > 0 && !allowedProjects.includes(resolvedDir)) {

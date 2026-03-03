@@ -192,7 +192,7 @@ describe("Diagnostics UI", () => {
       expect(html).toContain("TOTAL RUNS");
       expect(html).toContain("ERRORS");
       expect(html).toContain("WARNINGS");
-      expect(html).toContain("chart.js");
+      expect(html).toContain("/static/chart.umd.min.js");
     });
 
     test("diagnostics page shows runs table when data exists", async () => {

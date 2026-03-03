@@ -1060,10 +1060,13 @@ export class PingMemServer {
     const category = args.category as string | undefined;
     const explicitExtract = args.extractEntities === true;
 
-    // Determine whether to use LLM extraction (high-value) or regex (default)
-    const useLlmExtraction = shouldUseLlmExtraction(category, value.length, explicitExtract);
+    // Determine whether to use LLM extraction (high-value categories / long content)
+    // Note: explicitExtract is NOT passed here so that it only triggers extraction
+    // (via shouldExtract) without forcing the LLM path — allowing regex-only extraction
+    // when the content doesn't warrant LLM.
+    const useLlmExtraction = shouldUseLlmExtraction(category, value.length, false);
 
-    const shouldExtract = explicitExtract || useLlmExtraction;
+    const shouldExtract = useLlmExtraction || explicitExtract;
     let entityIds: string[] | undefined;
 
     if (shouldExtract && this.graphManager) {
@@ -1745,10 +1748,11 @@ export class PingMemServer {
       health.status = "degraded";
     }
 
-    // Check GraphManager (Neo4j)
+    // Check GraphManager (Neo4j) — actual connectivity check
     if (this.graphManager) {
       try {
-        // Simple health check - just verify we can access it
+        // Real connectivity check: attempt a lightweight query against Neo4j
+        await this.graphManager.getEntity("__health_check_nonexistent__");
         (health.components as Record<string, unknown>).neo4j = {
           status: "healthy",
           configured: true,
@@ -1768,21 +1772,12 @@ export class PingMemServer {
       };
     }
 
-    // Check IngestionService (Qdrant)
+    // Check IngestionService (Qdrant) — mark as configured (no direct ping available)
     if (this.ingestionService) {
-      try {
-        (health.components as Record<string, unknown>).qdrant = {
-          status: "healthy",
-          configured: true,
-        };
-      } catch (error) {
-        (health.components as Record<string, unknown>).qdrant = {
-          status: "unhealthy",
-          configured: true,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-        health.status = "degraded";
-      }
+      (health.components as Record<string, unknown>).qdrant = {
+        status: "configured",
+        configured: true,
+      };
     } else {
       (health.components as Record<string, unknown>).qdrant = {
         status: "not_configured",
@@ -2750,6 +2745,9 @@ export class PingMemServer {
       return { error: "Causal discovery agent not configured", discovered: 0 };
     }
     const text = args.text as string;
+    if (text.length > 50_000) {
+      return { error: "Text exceeds maximum length of 50000 characters", discovered: 0 };
+    }
     const persist = (args.persist as boolean) ?? false;
 
     if (persist) {

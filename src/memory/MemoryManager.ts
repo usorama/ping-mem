@@ -910,8 +910,9 @@ export class MemoryManager {
           }
           scored.push({ memory: reconstructed, score });
         }
-      } catch {
-        continue; // Skip malformed events
+      } catch (error) {
+        console.warn("[MemoryManager] findRelatedAcrossSessions: skipping malformed event:", error instanceof Error ? error.message : String(error));
+        continue;
       }
     }
 

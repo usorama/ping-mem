@@ -81,8 +81,7 @@ export class SSEPingMemServer {
     this.setupHandlers();
 
     // Connect server to transport
-    // Note: Type assertion needed due to optional onclose/onerror in StreamableHTTPServerTransport
-    this.server.connect(this.transport as any);
+    this.server.connect(this.transport as Parameters<typeof this.server.connect>[0]);
   }
 
   /**

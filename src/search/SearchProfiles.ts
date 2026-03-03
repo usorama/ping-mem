@@ -151,33 +151,33 @@ const TEMPORAL_KEYWORDS = new Set([
  */
 export function detectProfile(query: string): string {
   const lowerQuery = query.toLowerCase();
+  // Split into word tokens, stripping punctuation so "today?" becomes "today"
+  const queryTokens = new Set(
+    lowerQuery.split(/\s+/).map((t) => t.replace(/[^\w]/g, "")).filter((t) => t.length > 0)
+  );
+
+  // Helper: check if any keyword matches a query token exactly
+  const matchesKeyword = (keywords: Set<string>): boolean =>
+    Array.from(keywords).some((k) => queryTokens.has(k));
 
   // Check for code keywords
-  for (const keyword of CODE_KEYWORDS) {
-    if (lowerQuery.includes(keyword)) {
-      return "code_search";
-    }
+  if (matchesKeyword(CODE_KEYWORDS)) {
+    return "code_search";
   }
 
   // Check for decision keywords
-  for (const keyword of DECISION_KEYWORDS) {
-    if (lowerQuery.includes(keyword)) {
-      return "decision_recall";
-    }
+  if (matchesKeyword(DECISION_KEYWORDS)) {
+    return "decision_recall";
   }
 
   // Check for error keywords
-  for (const keyword of ERROR_KEYWORDS) {
-    if (lowerQuery.includes(keyword)) {
-      return "error_investigation";
-    }
+  if (matchesKeyword(ERROR_KEYWORDS)) {
+    return "error_investigation";
   }
 
-  // Check for temporal keywords
-  for (const keyword of TEMPORAL_KEYWORDS) {
-    if (lowerQuery.includes(keyword)) {
-      return "temporal";
-    }
+  // Check for temporal keywords (includes multi-word like "last week" — check via includes fallback)
+  if (matchesKeyword(TEMPORAL_KEYWORDS) || TEMPORAL_KEYWORDS.has("last week") && lowerQuery.includes("last week")) {
+    return "temporal";
   }
 
   return "general";

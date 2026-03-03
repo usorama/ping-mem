@@ -110,7 +110,7 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
 
       <div id="findings-panel"></div>
 
-      <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+      <script src="/static/chart.umd.min.js"></script>
       <script>
         (function() {
           var data = ${chartData};

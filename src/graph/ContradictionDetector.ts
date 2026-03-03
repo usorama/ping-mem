@@ -72,6 +72,7 @@ export class ContradictionDetector {
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
+        console.warn("[ContradictionDetector] LLM returned empty content for entity:", entityName);
         return { isContradiction: false, conflict: "", confidence: 0 };
       }
 

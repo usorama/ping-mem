@@ -152,6 +152,18 @@ export class RESTPingMemServer {
     // Logger
     this.app.use("*", logger());
 
+    // Security headers — applied to all responses
+    this.app.use("*", async (c, next) => {
+      await next();
+      c.header("X-Content-Type-Options", "nosniff");
+      c.header("X-Frame-Options", "DENY");
+      c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+      c.header(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'",
+      );
+    });
+
     // API Key authentication (if configured)
     // Auth is required only when: (apiKeyManager has seed key) OR (explicit apiKey is set non-empty)
     const authRequired = this.config.apiKeyManager
@@ -176,8 +188,7 @@ export class RESTPingMemServer {
         return next();
       };
       this.app.use("/api/*", authMiddleware);
-      this.app.use("/ui/api/*", authMiddleware);
-      this.app.use("/ui/partials/ingestion/reingest", authMiddleware);
+      this.app.use("/ui/*", authMiddleware);
     }
   }
 
@@ -366,8 +377,9 @@ export class RESTPingMemServer {
               setTimeout(() => resolve([]), 200)
             );
             relatedMemories = await Promise.race([recallPromise, timeout]);
-          } catch {
+          } catch (error) {
             // Best-effort: don't block save
+            console.warn("[rest-server] Proactive recall failed:", error instanceof Error ? error.message : String(error));
           }
         }
 

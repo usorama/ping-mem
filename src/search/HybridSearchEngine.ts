@@ -569,8 +569,9 @@ export class HybridSearchEngine {
       } else if (this.config.localVectorIndex) {
         removed = (await this.config.localVectorIndex.deleteVector(memoryId)) || removed;
       }
-    } catch {
-      // Ignore deletion errors - document may not exist in vector index
+    } catch (error) {
+      // Document may not exist in vector index — log for diagnostics
+      console.warn("[HybridSearchEngine] removeDocument vector deletion failed:", error instanceof Error ? error.message : String(error));
     }
 
     return removed;
@@ -1079,7 +1080,8 @@ export class HybridSearchEngine {
 
     const docs = this.config.bm25Store.loadAll();
     for (const doc of docs) {
-      this.bm25Index.addDocument(doc.memoryId, doc.sessionId, doc.content, doc.indexedAt);
+      const meta = doc.metadata ? JSON.parse(doc.metadata) as Record<string, unknown> : undefined;
+      this.bm25Index.addDocument(doc.memoryId, doc.sessionId, doc.content, doc.indexedAt, meta);
     }
     return docs.length;
   }

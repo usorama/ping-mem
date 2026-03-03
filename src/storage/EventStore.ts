@@ -439,7 +439,8 @@ export class EventStore {
         if (metadata.projectDir === projectDir) {
           matching.push(row.session_id as SessionId);
         }
-      } catch {
+      } catch (error) {
+        console.warn("[EventStore] findSessionIdsByProjectDir: failed to parse metadata for session", row.session_id, error instanceof Error ? error.message : String(error));
         continue;
       }
     }
@@ -612,7 +613,8 @@ export class EventStore {
     try {
       this.db.prepare("SELECT 1").get();
       return true;
-    } catch {
+    } catch (error) {
+      console.warn("[EventStore] ping failed:", error instanceof Error ? error.message : String(error));
       return false;
     }
   }
