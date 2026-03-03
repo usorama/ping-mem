@@ -10,6 +10,7 @@ import type { Context } from "hono";
 import { LLMProxy } from "../../llm/LLMProxy.js";
 import type { ChatMessage } from "../../llm/types.js";
 import type { UIDependencies } from "./routes.js";
+import { getClientIp } from "./layout.js";
 
 // ============================================================================
 // Rate Limiting
@@ -44,8 +45,8 @@ export function registerChatRoutes(deps: UIDependencies) {
   return {
     /** POST /ui/api/chat — streaming chat completion */
     chat: async (c: Context) => {
-      // Rate limit
-      const ip = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
+      // Rate limit — uses getClientIp which only trusts forwarded headers when TRUST_PROXY is set
+      const ip = getClientIp(c);
       if (!checkRateLimit(ip)) {
         return c.json({ error: "Rate limit exceeded. Try again later." }, 429);
       }

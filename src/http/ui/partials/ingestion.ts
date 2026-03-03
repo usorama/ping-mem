@@ -8,7 +8,7 @@ import type { Context } from "hono";
 import * as os from "os";
 import * as path from "path";
 import * as fs from "fs";
-import { escapeHtml } from "../layout.js";
+import { escapeHtml, getClientIp } from "../layout.js";
 import { badge } from "../components.js";
 import type { UIDependencies } from "../routes.js";
 
@@ -101,7 +101,8 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
       }
 
       // Rate limit reingest requests (5 per minute per IP)
-      const reingestIp = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
+      // Uses getClientIp which only trusts forwarded headers when TRUST_PROXY is set
+      const reingestIp = getClientIp(c);
       if (!checkReingestRateLimit(reingestIp)) {
         return c.html(`<div class="card" style="margin-top:16px">
           <div style="padding:16px;color:var(--error)">

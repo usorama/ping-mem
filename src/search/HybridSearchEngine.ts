@@ -632,19 +632,19 @@ export class HybridSearchEngine {
     }
 
     // Boost causal weight when direction is detected and causal mode has weight
+    // Mutate in-place to preserve all existing properties (e.g. code, causal, future keys)
     if (causalDirection && resolvedWeights.causal) {
       const boostedCausal = resolvedWeights.causal * 1.5;
-      const oldCode = resolvedWeights.code;
-      const total = resolvedWeights.semantic + resolvedWeights.keyword + resolvedWeights.graph + boostedCausal + (oldCode ?? 0);
+      // Compute total using boosted causal instead of original
+      const total = resolvedWeights.semantic + resolvedWeights.keyword + resolvedWeights.graph
+        + boostedCausal + (resolvedWeights.code ?? 0);
       if (total > 0) {
         const scale = 1.0 / total;
-        resolvedWeights = {
-          semantic: resolvedWeights.semantic * scale,
-          keyword: resolvedWeights.keyword * scale,
-          graph: resolvedWeights.graph * scale,
-        };
-        if (oldCode !== undefined) {
-          resolvedWeights.code = oldCode * scale;
+        // Scale all existing properties in-place
+        for (const key of Object.keys(resolvedWeights) as Array<keyof SearchWeights>) {
+          if (key !== "causal" && resolvedWeights[key] !== undefined) {
+            (resolvedWeights as unknown as Record<string, number>)[key] = resolvedWeights[key]! * scale;
+          }
         }
         resolvedWeights.causal = boostedCausal * scale;
       }

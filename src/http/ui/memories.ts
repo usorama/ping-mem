@@ -7,7 +7,7 @@
  */
 
 import type { Context } from "hono";
-import { renderLayout, escapeHtml } from "./layout.js";
+import { renderLayout, escapeHtml, getCspNonce } from "./layout.js";
 import { loadingIndicator } from "./components.js";
 import { renderMemoryTable } from "./partials/memories.js";
 import type { UIDependencies } from "./routes.js";
@@ -79,20 +79,24 @@ export function registerMemoryRoutes(deps: UIDependencies) {
       <div id="detail-panel"></div>
     `;
 
+    const nonce = getCspNonce(c);
     const html = renderLayout({
       title: "Memory Explorer",
       content,
       activeRoute: "memories",
+      nonce,
     });
 
     return c.html(html);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[Memories] Page render error:", errMsg);
+      const nonce = getCspNonce(c);
       return c.html(renderLayout({
         title: "Memory Explorer",
         content: `<div class="card" style="padding:24px;color:var(--error)">Memory Explorer error: ${escapeHtml(errMsg)}. Check server logs.</div>`,
         activeRoute: "memories",
+        nonce,
       }));
     }
   };

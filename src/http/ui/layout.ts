@@ -11,6 +11,8 @@ interface LayoutOptions {
   title: string;
   content: string;
   activeRoute: UIRoute;
+  /** CSP nonce for inline scripts (required for nonce-based CSP) */
+  nonce?: string | undefined;
 }
 
 const NAV_ITEMS: Array<{ route: UIRoute; path: string; icon: string; label: string }> = [
@@ -21,7 +23,8 @@ const NAV_ITEMS: Array<{ route: UIRoute; path: string; icon: string; label: stri
 ];
 
 export function renderLayout(options: LayoutOptions): string {
-  const { title, content, activeRoute } = options;
+  const { title, content, activeRoute, nonce } = options;
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : "";
 
   const navLinks = NAV_ITEMS.map(
     (item) =>
@@ -38,9 +41,9 @@ export function renderLayout(options: LayoutOptions): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)} - ping-mem</title>
   <link rel="stylesheet" href="/static/styles.css">
-  <script src="/static/htmx.min.js" defer></script>
-  <script src="/static/chat.js" defer></script>
-  <script>
+  <script src="/static/htmx.min.js" defer${nonceAttr}></script>
+  <script src="/static/chat.js" defer${nonceAttr}></script>
+  <script${nonceAttr}>
     // Theme: check localStorage before paint to prevent flash
     (function() {
       var t = localStorage.getItem('ping-mem-theme');
@@ -86,7 +89,7 @@ export function renderLayout(options: LayoutOptions): string {
 
   <div class="toast-container" id="toast-container"></div>
 
-  <script>
+  <script${nonceAttr}>
     function toggleTheme() {
       var html = document.documentElement;
       var current = html.getAttribute('data-theme');
@@ -150,4 +153,41 @@ export function timeAgo(date: Date | string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+/**
+ * Safely retrieve the CSP nonce from a Hono context.
+ * Returns undefined if context doesn't have the get() method (e.g. in test mocks).
+ */
+export function getCspNonce(c: { get?: (key: string) => unknown }): string | undefined {
+  if (typeof c.get === "function") {
+    return c.get("cspNonce") as string | undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Get client IP address from a Hono context.
+ *
+ * When TRUST_PROXY env var is set to "1" or "true", uses X-Forwarded-For
+ * or X-Real-IP headers (suitable when behind a trusted reverse proxy like
+ * nginx, Cloudflare, etc.).
+ *
+ * When TRUST_PROXY is not set, falls back to "unknown" since forwarded
+ * headers can be trivially spoofed by clients.
+ */
+export function getClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy === "1" || trustProxy === "true") {
+    // Behind a trusted proxy — use forwarded headers
+    const forwarded = c.req.header("x-forwarded-for");
+    if (forwarded) {
+      // X-Forwarded-For can be comma-separated; first entry is the original client
+      const first = forwarded.split(",")[0];
+      return first ? first.trim() : "unknown";
+    }
+    return c.req.header("x-real-ip") ?? "unknown";
+  }
+  // No trusted proxy — do not trust forwarded headers as they are spoofable
+  return "unknown";
 }

@@ -153,26 +153,39 @@ export class RESTPingMemServer {
     this.app.use("*", logger());
 
     // Security headers — applied to all responses
+    // Uses nonce-based CSP to avoid 'unsafe-inline' for scripts
     this.app.use("*", async (c, next) => {
+      const nonce = crypto.randomUUID();
+      // Store nonce on context for UI renderers to add to inline <script> tags
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Hono's c.set requires typed Env generics; casting is acceptable for internal-only middleware variables
+      (c as any).set("cspNonce", nonce);
       await next();
       c.header("X-Content-Type-Options", "nosniff");
       c.header("X-Frame-Options", "DENY");
       c.header("Referrer-Policy", "strict-origin-when-cross-origin");
       c.header(
         "Content-Security-Policy",
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'`,
       );
     });
 
     // API Key authentication (if configured)
     // Auth is required only when: (apiKeyManager has seed key) OR (explicit apiKey is set non-empty)
+    // Supports both X-API-Key header and Authorization: Bearer <token> header
     const authRequired = this.config.apiKeyManager
       ? this.config.apiKeyManager.hasSeedKey()
       : (this.config.apiKey && this.config.apiKey.trim().length > 0);
 
     if (authRequired) {
       const authMiddleware = async (c: Parameters<Parameters<typeof this.app.use>[1]>[0], next: () => Promise<void>) => {
-        const apiKey = c.req.header("x-api-key");
+        // Check X-API-Key header first, then fall back to Authorization: Bearer
+        let apiKey = c.req.header("x-api-key");
+        if (!apiKey) {
+          const authHeader = c.req.header("authorization");
+          if (authHeader?.startsWith("Bearer ")) {
+            apiKey = authHeader.slice(7);
+          }
+        }
         const isValid = this.config.apiKeyManager
           ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
           : apiKey === this.config.apiKey;
@@ -180,7 +193,7 @@ export class RESTPingMemServer {
           return c.json(
             {
               error: "Unauthorized",
-              message: "Invalid API key",
+              message: "Invalid or missing API key. Use X-API-Key header or Authorization: Bearer <token>.",
             },
             401
           );

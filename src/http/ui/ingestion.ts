@@ -6,7 +6,7 @@
  */
 
 import type { Context } from "hono";
-import { renderLayout, escapeHtml } from "./layout.js";
+import { renderLayout, escapeHtml, getCspNonce } from "./layout.js";
 import { loadingIndicator } from "./components.js";
 import type { UIDependencies } from "./routes.js";
 import * as fs from "fs";
@@ -121,18 +121,22 @@ export function registerIngestionRoutes(deps: UIDependencies) {
       </div>` : ""}
     `;
 
+    const nonce = getCspNonce(c);
     return c.html(renderLayout({
       title: "Ingestion Monitor",
       content,
       activeRoute: "ingestion",
+      nonce,
     }));
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[Ingestion] Page render error:", errMsg);
+      const nonce = getCspNonce(c);
       return c.html(renderLayout({
         title: "Ingestion Monitor",
         content: `<div class="card" style="padding:24px;color:var(--error)">Ingestion error: ${escapeHtml(errMsg)}. Check server logs.</div>`,
         activeRoute: "ingestion",
+        nonce,
       }));
     }
   };

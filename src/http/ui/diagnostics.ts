@@ -6,7 +6,7 @@
  */
 
 import type { Context } from "hono";
-import { renderLayout, escapeHtml } from "./layout.js";
+import { renderLayout, escapeHtml, getCspNonce } from "./layout.js";
 import { loadingIndicator } from "./components.js";
 import type { UIDependencies } from "./routes.js";
 
@@ -72,6 +72,8 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
     }
 
     const chartData = JSON.stringify(severityCounts);
+    const nonce = getCspNonce(c);
+    const nonceAttr = nonce ? ` nonce="${nonce}"` : "";
 
     const content = `
       <div class="stats-grid">
@@ -110,8 +112,8 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
 
       <div id="findings-panel"></div>
 
-      <script src="/static/chart.umd.min.js"></script>
-      <script>
+      <script src="/static/chart.umd.min.js"${nonceAttr}></script>
+      <script${nonceAttr}>
         (function() {
           var data = ${chartData};
           var ctx = document.getElementById('severity-chart');
@@ -143,14 +145,17 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
       title: "Diagnostics",
       content,
       activeRoute: "diagnostics",
+      nonce,
     }));
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[Diagnostics] Page render error:", errMsg);
+      const nonce = getCspNonce(c);
       return c.html(renderLayout({
         title: "Diagnostics",
         content: `<div class="card" style="padding:24px;color:var(--error)">Diagnostics error: ${escapeHtml(errMsg)}. Check server logs.</div>`,
         activeRoute: "diagnostics",
+        nonce,
       }));
     }
   };

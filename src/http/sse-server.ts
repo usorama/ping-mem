@@ -138,18 +138,26 @@ export class SSEPingMemServer {
 
     // Validate API key if configured
     // Auth is required only when: (apiKeyManager has seed key) OR (explicit apiKey is set non-empty)
+    // Supports both X-API-Key header and Authorization: Bearer <token> header
     const authRequired = this.config.apiKeyManager
       ? this.config.apiKeyManager.hasSeedKey()
       : (this.config.apiKey && this.config.apiKey.trim().length > 0);
 
     if (authRequired) {
-      const apiKey = req.headers["x-api-key"] as string | undefined;
+      // Check X-API-Key header first, then fall back to Authorization: Bearer
+      let apiKey = req.headers["x-api-key"] as string | undefined;
+      if (!apiKey) {
+        const authHeader = req.headers["authorization"] as string | undefined;
+        if (authHeader?.startsWith("Bearer ")) {
+          apiKey = authHeader.slice(7);
+        }
+      }
       const isValid = this.config.apiKeyManager
         ? this.config.apiKeyManager.isValid(apiKey)
         : apiKey === this.config.apiKey;
       if (!isValid) {
         res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid API key" }));
+        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid or missing API key. Use X-API-Key header or Authorization: Bearer <token>." }));
         return;
       }
     }
@@ -196,7 +204,7 @@ export class SSEPingMemServer {
     res.setHeader("Access-Control-Allow-Methods", (corsConfig.methods ?? ["GET", "POST", "OPTIONS"]).join(", "));
     res.setHeader(
       "Access-Control-Allow-Headers",
-      (corsConfig.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"]).join(", ")
+      (corsConfig.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID", "Authorization"]).join(", ")
     );
   }
 
