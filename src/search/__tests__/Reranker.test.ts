@@ -140,7 +140,7 @@ describe("Reranker", () => {
       expect(body.top_n).toBe(2); // min(topK=5, documents.length=2)
     });
 
-    it("should fall back to original order on API error (500)", async () => {
+    it("should return null on API error (500)", async () => {
       const mockFetch = mock(() =>
         Promise.resolve(
           new Response("Internal Server Error", { status: 500 })
@@ -153,18 +153,11 @@ describe("Reranker", () => {
 
       const results = await reranker.rerank("query", documents);
 
-      // Fallback: original order with descending scores
-      expect(results).toHaveLength(3);
-      expect(results[0]!.index).toBe(0);
-      expect(results[1]!.index).toBe(1);
-      expect(results[2]!.index).toBe(2);
-
-      // Scores should be descending
-      expect(results[0]!.relevanceScore).toBeGreaterThan(results[1]!.relevanceScore);
-      expect(results[1]!.relevanceScore).toBeGreaterThan(results[2]!.relevanceScore);
+      // Should return null instead of fabricating scores
+      expect(results).toBeNull();
     });
 
-    it("should fall back to original order on network error", async () => {
+    it("should return null on network error", async () => {
       const mockFetch = mock(() =>
         Promise.reject(new Error("Network error"))
       );
@@ -175,10 +168,8 @@ describe("Reranker", () => {
 
       const results = await reranker.rerank("query", documents);
 
-      // Fallback: original order
-      expect(results).toHaveLength(2);
-      expect(results[0]!.index).toBe(0);
-      expect(results[1]!.index).toBe(1);
+      // Should return null instead of fabricating scores
+      expect(results).toBeNull();
     });
 
     it("should respect topK parameter capped by document count", async () => {
@@ -262,7 +253,7 @@ describe("Reranker", () => {
       await reranker.rerank("query", ["doc"]);
 
       expect(warnings.length).toBeGreaterThanOrEqual(1);
-      expect(warnings.some((w) => w.includes("Cohere Rerank API error"))).toBe(true);
+      expect(warnings.some((w) => w.includes("Cohere Rerank API error") || w.includes("[Reranker]"))).toBe(true);
 
       console.warn = originalWarn;
     });

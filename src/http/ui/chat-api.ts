@@ -11,7 +11,28 @@ import { LLMProxy } from "../../llm/LLMProxy.js";
 import type { ChatMessage } from "../../llm/types.js";
 import type { UIDependencies } from "./routes.js";
 
+// ============================================================================
+// Rate Limiting
+// ============================================================================
+
+const rateLimits = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT = 30; // requests per minute
+const RATE_WINDOW = 60_000;
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimits.set(ip, { count: 1, resetAt: now + RATE_WINDOW });
+    return true;
+  }
+  entry.count++;
+  return entry.count <= RATE_LIMIT;
+}
+
 const SYSTEM_PROMPT = `You are ping-mem's assistant. You help developers understand their codebase, memories, and diagnostics data stored in ping-mem. Answer concisely based on the provided context. If you don't have enough context, say so.`;
+
+const MAX_MESSAGE_LENGTH = 4096;
 
 export function registerChatRoutes(deps: UIDependencies) {
   const llm = new LLMProxy();
@@ -19,6 +40,12 @@ export function registerChatRoutes(deps: UIDependencies) {
   return {
     /** POST /ui/api/chat — streaming chat completion */
     chat: async (c: Context) => {
+      // Rate limit
+      const ip = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
+      if (!checkRateLimit(ip)) {
+        return c.json({ error: "Rate limit exceeded. Try again later." }, 429);
+      }
+
       let userMessage: string;
       try {
         const body = (await c.req.json()) as { message?: string };
@@ -32,6 +59,10 @@ export function registerChatRoutes(deps: UIDependencies) {
         return c.json({ error: "Message is required" }, 400);
       }
 
+      if (userMessage.length > MAX_MESSAGE_LENGTH) {
+        return c.json({ error: `Message exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters` }, 400);
+      }
+
       // Build context from ping-mem data
       const contextParts: string[] = [];
 
@@ -43,8 +74,8 @@ export function registerChatRoutes(deps: UIDependencies) {
                  json_extract(payload, '$.memory.value') as value
           FROM events
           WHERE event_type = 'MEMORY_SAVED'
-          AND (json_extract(payload, '$.key') LIKE $query
-               OR json_extract(payload, '$.memory.value') LIKE $query)
+          AND (json_extract(payload, '$.key') LIKE $query ESCAPE '\'
+               OR json_extract(payload, '$.memory.value') LIKE $query ESCAPE '\')
           ORDER BY timestamp DESC
           LIMIT 5
         `).all({ $query: `%${userMessage.slice(0, 50).replace(/%/g, "\\%").replace(/_/g, "\\_")}%` }) as Array<{

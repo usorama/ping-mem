@@ -69,4 +69,28 @@ describe("ContradictionDetector", () => {
     expect(result.isContradiction).toBe(false);
     expect(result.confidence).toBe(0);
   });
+
+  it("should handle malformed JSON from LLM (missing fields)", async () => {
+    const malformedOpenAI = {
+      chat: {
+        completions: {
+          create: mock(async () => ({
+            choices: [{
+              message: {
+                content: JSON.stringify({ isContradiction: true }),
+                // Missing confidence and conflict fields
+              },
+            }],
+          })),
+        },
+      },
+    };
+
+    const detector = new ContradictionDetector({ openai: malformedOpenAI as any });
+    const result = await detector.detect("EntityA", "old context", "new context");
+
+    // confidence defaults to 0 via ?? operator, which is below threshold (0.7), so no contradiction
+    expect(result.isContradiction).toBe(false);
+    expect(result.confidence).toBe(0);
+  });
 });

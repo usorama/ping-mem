@@ -375,8 +375,8 @@ export class MemoryManager {
     if (this.relevanceEngine) {
       try {
         this.relevanceEngine.ensureTracking(memoryId, memory.priority, memory.category);
-      } catch {
-        // Non-blocking: relevance tracking failure should not prevent save
+      } catch (error) {
+        console.warn("[MemoryManager] Relevance tracking failed:", error instanceof Error ? error.message : String(error));
       }
     }
 
@@ -544,8 +544,8 @@ export class MemoryManager {
     if (memory && this.relevanceEngine) {
       try {
         this.relevanceEngine.trackAccess(memory.id);
-      } catch {
-        // Non-blocking
+      } catch (error) {
+        console.warn("[MemoryManager] Relevance tracking failed:", error instanceof Error ? error.message : String(error));
       }
     }
     return memory;

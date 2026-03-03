@@ -128,7 +128,7 @@ export class SSEPingMemServer {
     parsedBody?: unknown
   ): Promise<void> {
     // Add CORS headers
-    this.addCorsHeaders(res);
+    this.addCorsHeaders(req, res);
 
     // Handle preflight OPTIONS request
     if (req.method === "OPTIONS") {
@@ -175,23 +175,30 @@ export class SSEPingMemServer {
   /**
    * Add CORS headers to response
    */
-  private addCorsHeaders(res: ServerResponse): void {
+  private addCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
     const envOrigin = process.env.PING_MEM_CORS_ORIGIN;
     const defaultOrigin = envOrigin ? envOrigin.split(",").map(s => s.trim()) : [];
-    const cors = this.config.cors ?? { origin: defaultOrigin };
-    const resolvedOrigin = cors.origin ?? defaultOrigin;
+    const corsConfig = this.config.cors ?? { origin: defaultOrigin };
+    const resolvedOrigin = corsConfig.origin ?? defaultOrigin;
     const origins = Array.isArray(resolvedOrigin) ? resolvedOrigin : [resolvedOrigin];
 
     // Only set CORS headers if origins are configured
-    if (origins.length > 0 && origins[0] !== "") {
-      res.setHeader("Access-Control-Allow-Origin", origins.join(", "));
-      res.setHeader("Access-Control-Allow-Methods", (cors.methods ?? ["GET", "POST", "OPTIONS"]).join(", "));
-      res.setHeader(
-        "Access-Control-Allow-Headers",
-        (cors.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"]).join(", ")
-      );
+    if (origins.length === 0 || origins[0] === "") return;
+
+    const requestOrigin = req.headers.origin;
+    if (requestOrigin && origins.includes(requestOrigin)) {
+      res.setHeader("Access-Control-Allow-Origin", requestOrigin);
+      res.setHeader("Vary", "Origin");
       res.setHeader("Access-Control-Allow-Credentials", "true");
+    } else if (origins.length === 1 && origins[0] !== undefined) {
+      res.setHeader("Access-Control-Allow-Origin", origins[0]);
     }
+
+    res.setHeader("Access-Control-Allow-Methods", (corsConfig.methods ?? ["GET", "POST", "OPTIONS"]).join(", "));
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      (corsConfig.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"]).join(", ")
+    );
   }
 
   /**

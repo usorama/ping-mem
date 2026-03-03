@@ -93,8 +93,8 @@ export class ContradictionDetector {
       }
 
       return { isContradiction: false, conflict: "", confidence };
-    } catch {
-      // Non-blocking: return no contradiction on failure
+    } catch (error) {
+      console.warn("[ContradictionDetector] Detection failed:", error instanceof Error ? error.message : String(error));
       return { isContradiction: false, conflict: "", confidence: 0 };
     }
   }

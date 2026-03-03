@@ -3,7 +3,7 @@
  * Verifies that CORS is no longer wildcard by default.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import { describe, it, expect, afterEach } from "bun:test";
 import { createDefaultRESTConfig } from "../rest-server.js";
 import { createDefaultSSEConfig } from "../sse-server.js";
 

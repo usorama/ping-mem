@@ -193,7 +193,8 @@ export class LLMEntityExtractor {
   async extract(text: string): Promise<LLMExtractionResult> {
     try {
       return await this.extractWithLLM(text);
-    } catch (_error) {
+    } catch (error) {
+      console.warn("[LLMEntityExtractor] LLM extraction failed, falling back to regex:", error instanceof Error ? error.message : String(error));
       return this.handleFallback(text);
     }
   }

@@ -43,4 +43,21 @@ describe("BM25Store", () => {
     const docs = store.loadAll();
     expect(docs.length).toBe(0);
   });
+
+  it("should replace document on duplicate memoryId (upsert)", () => {
+    store.addDocument("mem-1", "s1", "original content", new Date());
+    store.addDocument("mem-1", "s1", "updated content", new Date());
+    const docs = store.loadAll();
+    expect(docs.length).toBe(1);
+    expect(docs[0].content).toBe("updated content");
+  });
+
+  it("should handle metadata round-trip", () => {
+    const metadata = { tag: "test", count: 42 };
+    store.addDocument("mem-meta", "s1", "content with metadata", new Date(), metadata);
+    const docs = store.loadAll();
+    expect(docs.length).toBe(1);
+    // metadata comes back as JSON string from SQLite
+    expect(docs[0].metadata).toBe(JSON.stringify(metadata));
+  });
 });

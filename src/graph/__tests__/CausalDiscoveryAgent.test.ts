@@ -255,10 +255,10 @@ describe("CausalDiscoveryAgent", () => {
   });
 
   // ==========================================================================
-  // discoverAndPersist
+  // discoverCount
   // ==========================================================================
 
-  describe("discoverAndPersist", () => {
+  describe("discoverCount", () => {
     it("should return count of discovered links", async () => {
       const mockOpenAI = createMockOpenAI(standardResponse);
       const agent = new CausalDiscoveryAgent({
@@ -268,7 +268,7 @@ describe("CausalDiscoveryAgent", () => {
         graphManager: createMockGraphManager() as unknown as GraphManager,
       });
 
-      const count = await agent.discoverAndPersist(
+      const count = await agent.discoverCount(
         "The database migration caused auth failure which led to login errors.",
       );
 
@@ -285,7 +285,7 @@ describe("CausalDiscoveryAgent", () => {
         graphManager: createMockGraphManager() as unknown as GraphManager,
       });
 
-      const count = await agent.discoverAndPersist("Some text");
+      const count = await agent.discoverCount("Some text");
 
       expect(count).toBe(0);
     });

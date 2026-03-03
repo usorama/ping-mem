@@ -27,6 +27,9 @@ export function percentile(sorted: number[], p: number): number {
 }
 
 export function computeStats(name: string, latencies: number[]): BenchResult {
+  if (latencies.length === 0) {
+    return { name, mean: 0, p50: 0, p95: 0, p99: 0, min: 0, max: 0, count: 0, opsPerSec: 0 };
+  }
   const sorted = [...latencies].sort((a, b) => a - b);
   const sum = sorted.reduce((a, b) => a + b, 0);
   const mean = sum / sorted.length;

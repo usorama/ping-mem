@@ -21,7 +21,8 @@ export function registerMemoryRoutes(deps: UIDependencies) {
     const query = c.req.query("query") ?? "";
     const category = c.req.query("category") ?? "";
     const priority = c.req.query("priority") ?? "";
-    const limit = Math.max(1, parseInt(c.req.query("limit") ?? "25", 10) || 25);
+    const MAX_LIMIT = 500;
+    const limit = Math.min(Math.max(1, parseInt(c.req.query("limit") ?? "25", 10) || 25), MAX_LIMIT);
     const offset = Math.max(0, parseInt(c.req.query("offset") ?? "0", 10) || 0);
 
     // Initial load: render full page with results

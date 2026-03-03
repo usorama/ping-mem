@@ -632,9 +632,9 @@ export class HybridSearchEngine {
 
     // Boost causal weight when direction is detected and causal mode has weight
     if (causalDirection && resolvedWeights.causal) {
-      resolvedWeights = { ...resolvedWeights, causal: resolvedWeights.causal * 1.5 };
-      // Normalize weights to sum to ~1
-      const total = Object.values(resolvedWeights).reduce((sum, w) => sum + (w ?? 0), 0);
+      const boostedCausal = resolvedWeights.causal * 1.5;
+      const oldCode = resolvedWeights.code;
+      const total = resolvedWeights.semantic + resolvedWeights.keyword + resolvedWeights.graph + boostedCausal + (oldCode ?? 0);
       if (total > 0) {
         const scale = 1.0 / total;
         resolvedWeights = {
@@ -642,8 +642,10 @@ export class HybridSearchEngine {
           keyword: resolvedWeights.keyword * scale,
           graph: resolvedWeights.graph * scale,
         };
-        if (resolvedWeights.code !== undefined) resolvedWeights.code = resolvedWeights.code * scale;
-        if (resolvedWeights.causal !== undefined) resolvedWeights.causal = resolvedWeights.causal * scale;
+        if (oldCode !== undefined) {
+          resolvedWeights.code = oldCode * scale;
+        }
+        resolvedWeights.causal = boostedCausal * scale;
       }
     }
 
@@ -716,15 +718,17 @@ export class HybridSearchEngine {
       fusedResults.sort((a, b) => b.hybridScore - a.hybridScore);
     }
 
-    // Optional re-ranking via Cohere Rerank API
+    // Optional re-ranking via Cohere Rerank API (skip if reranker returns null on failure)
     if (options.rerank && this.config.reranker && fusedResults.length > 0) {
       const documents = fusedResults.map((r) => r.content);
       const reranked = await this.config.reranker.rerank(query, documents);
-      const reorderedResults = reranked.map((rr) => ({
-        ...fusedResults[rr.index]!,
-        hybridScore: rr.relevanceScore,
-      }));
-      fusedResults = reorderedResults;
+      if (reranked !== null) {
+        const reorderedResults = reranked.map((rr) => ({
+          ...fusedResults[rr.index]!,
+          hybridScore: rr.relevanceScore,
+        }));
+        fusedResults = reorderedResults;
+      }
     }
 
     // Filter by threshold and limit

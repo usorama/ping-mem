@@ -244,50 +244,61 @@ export class LLMProxy {
       throw new Error("No Gemini API key configured");
     }
 
-    // Convert messages to Gemini format
-    const systemMsg = messages.find((m) => m.role === "system");
-    const chatMessages = messages.filter((m) => m.role !== "system");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
 
-    const contents = chatMessages.map((m) => ({
-      role: m.role === "assistant" ? "model" : "user",
-      parts: [{ text: m.content }],
-    }));
-
-    const body: Record<string, unknown> = { contents };
-    if (systemMsg) {
-      body.systemInstruction = { parts: [{ text: systemMsg.content }] };
-    }
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent?key=${this.geminiApiKey}`;
-
-    let response: Response;
     try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    } catch (err) {
-      // Sanitize: network errors may include the full URL with API key
-      const safeMsg = err instanceof Error ? err.message.replace(/key=[^&\s]+/g, "key=***") : "Network error";
-      throw new Error(`Gemini request failed: ${safeMsg}`);
+      // Convert messages to Gemini format
+      const systemMsg = messages.find((m) => m.role === "system");
+      const chatMessages = messages.filter((m) => m.role !== "system");
+
+      const contents = chatMessages.map((m) => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }],
+      }));
+
+      const body: Record<string, unknown> = { contents };
+      if (systemMsg) {
+        body.systemInstruction = { parts: [{ text: systemMsg.content }] };
+      }
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent`;
+
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": this.geminiApiKey,
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch (err) {
+        // Sanitize: network errors may include sensitive details (defense-in-depth)
+        const safeMsg = err instanceof Error ? err.message.replace(/key=[^&\s]+/g, "key=***") : "Network error";
+        throw new Error(`Gemini request failed: ${safeMsg}`);
+      }
+
+      if (!response.ok) {
+        throw new Error(`Gemini returned ${response.status}`);
+      }
+
+      const data = (await response.json()) as {
+        candidates?: Array<{
+          content?: { parts?: Array<{ text?: string }> };
+        }>;
+      };
+
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+      return {
+        content: text,
+        model: this.geminiModel,
+        provider: "gemini",
+      };
+    } finally {
+      clearTimeout(timeout);
     }
-
-    if (!response.ok) {
-      throw new Error(`Gemini returned ${response.status}`);
-    }
-
-    const data = (await response.json()) as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
-      }>;
-    };
-
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    return {
-      content: text,
-      model: this.geminiModel,
-      provider: "gemini",
-    };
   }
 }

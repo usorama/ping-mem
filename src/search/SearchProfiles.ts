@@ -102,9 +102,9 @@ const CODE_KEYWORDS = new Set([
   "class",
   "import",
   "variable",
-  "bug",
-  "error",
-  "fix",
+  "module",
+  "type",
+  "interface",
 ]);
 
 const DECISION_KEYWORDS = new Set([

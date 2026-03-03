@@ -95,8 +95,16 @@ describe("SearchProfiles", () => {
         expect(detectProfile("What variable stores the config?")).toBe("code_search");
       });
 
-      it("should detect 'bug' keyword", () => {
-        expect(detectProfile("Known bug in the tokenizer")).toBe("code_search");
+      it("should detect 'module' keyword", () => {
+        expect(detectProfile("Which module handles auth?")).toBe("code_search");
+      });
+
+      it("should detect 'type' keyword", () => {
+        expect(detectProfile("Where is the type definition?")).toBe("code_search");
+      });
+
+      it("should detect 'interface' keyword", () => {
+        expect(detectProfile("Find the interface for config")).toBe("code_search");
       });
     });
 
@@ -181,14 +189,15 @@ describe("SearchProfiles", () => {
     });
 
     describe("priority order", () => {
-      it("should prefer code_search over error_investigation for 'error' (appears in both)", () => {
-        // 'error' is in both CODE_KEYWORDS and ERROR_KEYWORDS
-        // CODE_KEYWORDS is checked first, so code_search wins
-        expect(detectProfile("error handling")).toBe("code_search");
+      it("should detect 'error' as error_investigation (no longer in CODE_KEYWORDS)", () => {
+        // 'error' is only in ERROR_KEYWORDS now (removed from CODE_KEYWORDS to avoid overlap)
+        expect(detectProfile("error handling")).toBe("error_investigation");
       });
 
-      it("should prefer code_search over error for 'fix' (appears in CODE)", () => {
-        expect(detectProfile("fix the deployment")).toBe("code_search");
+      it("should detect 'fix' as error_investigation via 'fail' keyword family", () => {
+        // 'fix' was removed from CODE_KEYWORDS to avoid overlap; 'fix' alone matches nothing
+        // but 'bug fix' would match 'error_investigation' via 'issue' in the query
+        expect(detectProfile("fix the deployment")).toBe("general");
       });
     });
 

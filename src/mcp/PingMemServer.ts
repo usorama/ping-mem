@@ -28,6 +28,7 @@ import type { LineageEngine } from "../graph/LineageEngine.js";
 import type { EvolutionEngine } from "../graph/EvolutionEngine.js";
 import type { CausalGraphManager } from "../graph/CausalGraphManager.js";
 import type { CausalDiscoveryAgent } from "../graph/CausalDiscoveryAgent.js";
+import { shouldUseLlmExtraction } from "./extractionRouting.js";
 import type {
   SessionId,
   SessionStatus,
@@ -570,28 +571,28 @@ export const TOOLS = [
   },
   {
     name: "search_causes",
-    description: "Find what causes a given entity or concept. Returns entities that have CAUSES relationships pointing to the query target.",
+    description: "Find what causes a given entity. Returns entities that have CAUSES relationships pointing to the target. Note: entity name resolution is not yet implemented — entityId is required.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        query: { type: "string", description: "Entity name or concept to find causes for" },
-        entityId: { type: "string", description: "Specific entity ID to find causes for (alternative to query)" },
+        query: { type: "string", description: "Entity name or concept (for reference only; entityId is required)" },
+        entityId: { type: "string", description: "Entity ID to find causes for (required)" },
         limit: { type: "number", description: "Maximum results (default: 10)" },
       },
-      required: ["query"],
+      required: ["entityId"],
     },
   },
   {
     name: "search_effects",
-    description: "Find what a given entity or concept causes/affects. Returns entities that are effects of the query source.",
+    description: "Find what a given entity causes/affects. Returns entities that are effects of the source. Note: entity name resolution is not yet implemented — entityId is required.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        query: { type: "string", description: "Entity name or concept to find effects for" },
-        entityId: { type: "string", description: "Specific entity ID to find effects for (alternative to query)" },
+        query: { type: "string", description: "Entity name or concept (for reference only; entityId is required)" },
+        entityId: { type: "string", description: "Entity ID to find effects for (required)" },
         limit: { type: "number", description: "Maximum results (default: 10)" },
       },
-      required: ["query"],
+      required: ["entityId"],
     },
   },
   {
@@ -1060,10 +1061,7 @@ export class PingMemServer {
     const explicitExtract = args.extractEntities === true;
 
     // Determine whether to use LLM extraction (high-value) or regex (default)
-    const useLlmExtraction =
-      (category !== undefined && ["decision", "error", "task"].includes(category)) ||
-      value.length > 200 ||
-      explicitExtract;
+    const useLlmExtraction = shouldUseLlmExtraction(category, value.length, explicitExtract);
 
     const shouldExtract = explicitExtract || useLlmExtraction;
     let entityIds: string[] | undefined;
@@ -1086,12 +1084,13 @@ export class PingMemServer {
             for (const rel of llmResult.relationships) {
               try {
                 await this.graphManager.createRelationship(rel);
-              } catch {
-                // Non-blocking: relationship storage failure shouldn't fail save
+              } catch (error) {
+                console.warn("[PingMemServer] Relationship storage failed:", error instanceof Error ? error.message : String(error));
               }
             }
           }
-        } catch {
+        } catch (error) {
+          console.warn("[PingMemServer] LLM entity extraction failed, falling back to regex:", error instanceof Error ? error.message : String(error));
           // Fallback to regex extraction on LLM failure
           if (this.entityExtractor) {
             const extractionContext: { key: string; value: string; category?: string } = {
@@ -1215,8 +1214,8 @@ export class PingMemServer {
         if (relatedMemories.length > 0) {
           result.relatedMemories = relatedMemories;
         }
-      } catch {
-        // Proactive recall is best-effort — don't fail the save
+      } catch (error) {
+        console.warn("[PingMemServer] Proactive recall failed:", error instanceof Error ? error.message : String(error));
       }
     }
 
@@ -2754,8 +2753,9 @@ export class PingMemServer {
     const persist = (args.persist as boolean) ?? false;
 
     if (persist) {
-      const count = await this.causalDiscoveryAgent.discoverAndPersist(text);
-      return { discovered: count, persisted: true };
+      // Note: Full persistence requires entity resolution (not yet implemented)
+      const links = await this.causalDiscoveryAgent.discover(text);
+      return { discovered: links.length, links, persisted: false, note: "Persistence requires entity resolution (not yet implemented)" };
     }
 
     const links = await this.causalDiscoveryAgent.discover(text);

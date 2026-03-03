@@ -5,9 +5,31 @@
  */
 
 import type { Context } from "hono";
+import * as os from "os";
+import * as path from "path";
+import * as fs from "fs";
 import { escapeHtml } from "../layout.js";
 import { badge } from "../components.js";
 import type { UIDependencies } from "../routes.js";
+
+// ============================================================================
+// Rate Limiting
+// ============================================================================
+
+const reingestRateLimits = new Map<string, { count: number; resetAt: number }>();
+const REINGEST_RATE_LIMIT = 5; // requests per minute
+const REINGEST_RATE_WINDOW = 60_000;
+
+function checkReingestRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = reingestRateLimits.get(ip);
+  if (!entry || now > entry.resetAt) {
+    reingestRateLimits.set(ip, { count: 1, resetAt: now + REINGEST_RATE_WINDOW });
+    return true;
+  }
+  entry.count++;
+  return entry.count <= REINGEST_RATE_LIMIT;
+}
 
 // ============================================================================
 // Route Handlers
@@ -41,6 +63,38 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
       if (!projectDir) {
         return c.html(`<div class="card" style="margin-top:16px">
           <div style="padding:16px;color:var(--error)">Missing projectDir</div>
+        </div>`);
+      }
+
+      // Validate projectDir against registered projects
+      const registeredPath = path.join(os.homedir(), ".ping-mem", "registered-projects.txt");
+      let allowedProjects: string[] = [];
+      try {
+        if (fs.existsSync(registeredPath)) {
+          allowedProjects = fs.readFileSync(registeredPath, "utf-8")
+            .split("\n")
+            .map(l => l.trim())
+            .filter(Boolean)
+            .map(l => path.resolve(l));
+        }
+      } catch { /* ignore read errors */ }
+
+      const resolvedDir = path.resolve(projectDir);
+      if (allowedProjects.length > 0 && !allowedProjects.includes(resolvedDir)) {
+        return c.html(`<div class="card" style="margin-top:16px">
+          <div style="padding:16px;color:var(--error)">
+            ${badge("Forbidden", "error")} Project not in registered projects list
+          </div>
+        </div>`);
+      }
+
+      // Rate limit reingest requests (5 per minute per IP)
+      const reingestIp = c.req.header("x-forwarded-for") ?? c.req.header("x-real-ip") ?? "unknown";
+      if (!checkReingestRateLimit(reingestIp)) {
+        return c.html(`<div class="card" style="margin-top:16px">
+          <div style="padding:16px;color:var(--error)">
+            ${badge("Rate Limited", "error")} Too many reingest requests. Try again later.
+          </div>
         </div>`);
       }
 

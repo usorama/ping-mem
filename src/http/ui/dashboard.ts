@@ -99,6 +99,7 @@ export function registerDashboardRoutes(deps: UIDependencies) {
 }
 
 function summarizePayload(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
   const p = payload as Record<string, unknown>;
   if (typeof p.key === "string") return p.key;
   if (typeof p.name === "string") return p.name;

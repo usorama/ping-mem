@@ -1,23 +1,13 @@
 /**
- * Tests for selective extraction routing in PingMemServer.handleSave
+ * Tests for selective extraction routing in PingMemServer.handleSave.
+ *
+ * Imports the actual production function from extractionRouting.ts
+ * rather than testing a local copy.
  */
 import { describe, it, expect } from "bun:test";
+import { shouldUseLlmExtraction } from "../extractionRouting.js";
 
 describe("Selective Extraction Routing Logic", () => {
-  // Test the routing logic in isolation (without full PingMemServer instantiation)
-
-  function shouldUseLlmExtraction(
-    category: string | undefined,
-    contentLength: number,
-    explicitExtract: boolean
-  ): boolean {
-    return (
-      (category !== undefined && ["decision", "error", "task"].includes(category)) ||
-      contentLength > 200 ||
-      explicitExtract
-    );
-  }
-
   it("should route decision category to LLM", () => {
     expect(shouldUseLlmExtraction("decision", 50, false)).toBe(true);
   });

@@ -78,12 +78,14 @@ export class Reranker {
   }
 
   /**
-   * Re-rank results using Cohere Rerank API
+   * Re-rank results using Cohere Rerank API.
+   * Returns null on failure instead of fabricating scores.
+   *
    * @param query - Original search query
    * @param documents - Array of document texts to re-rank
-   * @returns Re-ranked indices with relevance scores, sorted by relevance descending
+   * @returns Re-ranked indices with relevance scores sorted by relevance descending, or null on failure
    */
-  async rerank(query: string, documents: string[]): Promise<RerankResult[]> {
+  async rerank(query: string, documents: string[]): Promise<RerankResult[] | null> {
     if (documents.length === 0) {
       return [];
     }
@@ -106,9 +108,9 @@ export class Reranker {
       if (!response.ok) {
         const errorText = await response.text();
         console.warn(
-          `Cohere Rerank API error (${response.status}): ${errorText}`
+          `[Reranker] Cohere Rerank API error (${response.status}): ${errorText}`
         );
-        return this.fallbackOrder(documents.length);
+        return null;
       }
 
       const data = (await response.json()) as CohereRerankResponse;
@@ -121,24 +123,9 @@ export class Reranker {
         .sort((a, b) => b.relevanceScore - a.relevanceScore);
     } catch (error) {
       console.warn(
-        `Cohere Rerank API call failed: ${error instanceof Error ? error.message : String(error)}`
+        `[Reranker] Cohere Rerank API call failed: ${error instanceof Error ? error.message : String(error)}`
       );
-      return this.fallbackOrder(documents.length);
+      return null;
     }
-  }
-
-  /**
-   * Generate fallback ordering (original order with descending scores)
-   * Used when the API call fails to ensure graceful degradation.
-   */
-  private fallbackOrder(count: number): RerankResult[] {
-    const results: RerankResult[] = [];
-    for (let i = 0; i < count; i++) {
-      results.push({
-        index: i,
-        relevanceScore: (count - i) / count,
-      });
-    }
-    return results;
   }
 }

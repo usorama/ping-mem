@@ -166,24 +166,24 @@ export class CausalDiscoveryAgent {
           confidence: link.confidence,
           evidence: link.evidence,
         }));
-    } catch {
-      // LLM failure - return empty gracefully
+    } catch (error) {
+      console.warn("[CausalDiscoveryAgent] Discovery failed:", error instanceof Error ? error.message : String(error));
       return [];
     }
   }
 
   /**
-   * Discover and persist causal links from text.
+   * Discover causal links from text and return count.
    *
    * Calls discover() to extract causal links via LLM, then returns
-   * the count of discovered links. Actual persistence requires entity
-   * resolution (mapping names to IDs), which is a simplified pass-through
-   * in this version.
+   * the count of discovered links. Does not persist — actual persistence
+   * requires entity resolution (mapping names to IDs), which is not yet
+   * implemented.
    *
    * @param text - Text to analyze for causal relationships
    * @returns Count of discovered causal links
    */
-  async discoverAndPersist(text: string): Promise<number> {
+  async discoverCount(text: string): Promise<number> {
     const links = await this.discover(text);
     return links.length;
   }

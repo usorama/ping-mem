@@ -138,13 +138,14 @@ export class RESTPingMemServer {
     const envOrigin = process.env.PING_MEM_CORS_ORIGIN;
     const defaultOrigin = envOrigin ? envOrigin.split(",").map(s => s.trim()) : [];
     const corsConfig = this.config.cors ?? { origin: defaultOrigin };
+    const hasSpecificOrigins = defaultOrigin.length > 0;
     this.app.use(
       "*",
       cors({
         origin: corsConfig.origin ?? defaultOrigin,
         allowMethods: corsConfig.methods ?? ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allowHeaders: corsConfig.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"],
-        credentials: true,
+        credentials: hasSpecificOrigins,
       })
     );
 
@@ -158,7 +159,7 @@ export class RESTPingMemServer {
       : (this.config.apiKey && this.config.apiKey.trim().length > 0);
 
     if (authRequired) {
-      this.app.use("/api/*", async (c, next) => {
+      const authMiddleware = async (c: Parameters<Parameters<typeof this.app.use>[1]>[0], next: () => Promise<void>) => {
         const apiKey = c.req.header("x-api-key");
         const isValid = this.config.apiKeyManager
           ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
@@ -173,7 +174,10 @@ export class RESTPingMemServer {
           );
         }
         return next();
-      });
+      };
+      this.app.use("/api/*", authMiddleware);
+      this.app.use("/ui/api/*", authMiddleware);
+      this.app.use("/ui/partials/ingestion/reingest", authMiddleware);
     }
   }
 

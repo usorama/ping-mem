@@ -41,6 +41,7 @@ describe("Chat API", () => {
     const mockContext = {
       req: {
         json: async () => ({ message: "" }),
+        header: (_name: string) => undefined,
       },
       json: (data: unknown, status: number) =>
         new Response(JSON.stringify(data), {
@@ -70,6 +71,7 @@ describe("Chat API", () => {
         json: async () => {
           throw new Error("Invalid JSON");
         },
+        header: (_name: string) => undefined,
       },
       json: (data: unknown, status: number) =>
         new Response(JSON.stringify(data), {
@@ -108,6 +110,7 @@ describe("Chat API", () => {
     const mockContext = {
       req: {
         json: async () => ({ message: "What is ping-mem?" }),
+        header: (_name: string) => undefined,
       },
       json: (data: unknown, status: number) =>
         new Response(JSON.stringify(data), {
