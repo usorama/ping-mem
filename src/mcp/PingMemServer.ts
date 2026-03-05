@@ -251,9 +251,11 @@ export class PingMemServer {
     args: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
     for (const mod of this.modules) {
-      const result = mod.handle(name, args);
-      if (result !== undefined) {
-        return result;
+      if (mod.tools.some(t => t.name === name)) {
+        const result = mod.handle(name, args);
+        if (result !== undefined) {
+          return result;
+        }
       }
     }
     throw new Error(`Unknown tool: ${name}`);

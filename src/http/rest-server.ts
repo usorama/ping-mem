@@ -223,7 +223,13 @@ export class RESTPingMemServer {
         : (this.config.apiKey && this.config.apiKey.trim().length > 0);
 
       if (authRequired) {
-        const apiKey = c.req.header("x-api-key");
+        let apiKey = c.req.header("x-api-key");
+        if (!apiKey) {
+          const authHeader = c.req.header("authorization");
+          if (authHeader?.startsWith("Bearer ")) {
+            apiKey = authHeader.slice(7);
+          }
+        }
         const isValid = this.config.apiKeyManager
           ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
           : apiKey === this.config.apiKey;
@@ -449,7 +455,15 @@ export class RESTPingMemServer {
         let rawSarif: string | undefined;
 
         if (body.sarif !== undefined) {
-          const sarifPayload = typeof body.sarif === "string" ? JSON.parse(body.sarif) : body.sarif;
+          let sarifPayload: unknown;
+          try {
+            sarifPayload = typeof body.sarif === "string" ? JSON.parse(body.sarif) : body.sarif;
+          } catch {
+            return c.json<RESTErrorResponse>(
+              { error: "Bad Request", message: "Invalid JSON in sarif field" },
+              400
+            );
+          }
           const parsed = parseSarif(sarifPayload);
           findings = parsed.findings;
           toolName = toolName ?? parsed.toolName;
@@ -1221,9 +1235,17 @@ export class RESTPingMemServer {
    * Read request body as string
    */
   private async readRequestBody(req: IncomingMessage): Promise<string> {
+    const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
     return new Promise((resolve, reject) => {
       let data = "";
-      req.on("data", (chunk) => {
+      let size = 0;
+      req.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > MAX_BODY_BYTES) {
+          req.destroy();
+          reject(new Error("Request body too large"));
+          return;
+        }
         data += chunk;
       });
       req.on("end", () => {
