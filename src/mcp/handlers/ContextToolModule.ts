@@ -25,7 +25,7 @@ import type {
 // Tool Schemas
 // ============================================================================
 
-const CONTEXT_TOOLS: ToolDefinition[] = [
+export const CONTEXT_TOOLS: ToolDefinition[] = [
   {
     name: "context_session_start",
     description: "Start a new memory session with optional configuration. If projectDir is provided with autoIngest=true, automatically ingests the project codebase.",

@@ -25,7 +25,7 @@ import * as os from "os";
 // Tool Schemas
 // ============================================================================
 
-const CODEBASE_TOOLS: ToolDefinition[] = [
+export const CODEBASE_TOOLS: ToolDefinition[] = [
   {
     name: "codebase_ingest",
     description: "Ingest a project codebase: scan files, extract chunks, index git history, persist to graph+vectors. Deterministic and reproducible.",

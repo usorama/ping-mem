@@ -22,7 +22,7 @@ import type { FindingInput } from "../../diagnostics/types.js";
 // Tool Schemas
 // ============================================================================
 
-const DIAGNOSTICS_TOOLS: ToolDefinition[] = [
+export const DIAGNOSTICS_TOOLS: ToolDefinition[] = [
   {
     name: "diagnostics_ingest",
     description: "Ingest diagnostics results (SARIF 2.1.0 or normalized findings).",

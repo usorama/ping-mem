@@ -14,7 +14,7 @@ import type { SessionState } from "./shared.js";
 // Tool Schemas
 // ============================================================================
 
-const CAUSAL_TOOLS: ToolDefinition[] = [
+export const CAUSAL_TOOLS: ToolDefinition[] = [
   {
     name: "search_causes",
     description: "Find what causes a given entity. Returns entities that have CAUSES relationships pointing to the target. Note: entity name resolution is not yet implemented — entityId is required.",

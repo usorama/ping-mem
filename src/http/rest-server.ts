@@ -9,7 +9,8 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import * as path from "path";
@@ -1058,7 +1059,8 @@ export class RESTPingMemServer {
     // Serve static files from src/static/
     this.app.get("/static/*", async (c) => {
       const filePath = c.req.path.replace("/static/", "");
-      const staticDir = path.resolve(import.meta.dir, "../../src/static");
+      const staticDir = process.env.PING_MEM_STATIC_DIR
+        ?? path.resolve(process.cwd(), "src/static");
       const fullPath = path.resolve(staticDir, filePath);
 
       // Security: prevent path traversal — canonicalize and compare with trailing separator
@@ -1095,7 +1097,7 @@ export class RESTPingMemServer {
   /**
    * Handle errors and return consistent error responses
    */
-  private handleError(c: any, error: unknown): Response {
+  private handleError(c: Context<AppEnv>, error: unknown): Response {
     console.error("[REST Server] Error:", error);
 
     const message = error instanceof Error ? error.message : "Unknown error";
@@ -1106,7 +1108,7 @@ export class RESTPingMemServer {
         error: this.getErrorName(statusCode),
         message,
       },
-      statusCode
+      statusCode as ContentfulStatusCode
     );
   }
 

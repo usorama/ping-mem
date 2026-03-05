@@ -49,6 +49,13 @@ import {
   MemoryToolModule,
   CausalToolModule,
 } from "./handlers/index.js";
+import { CONTEXT_TOOLS } from "./handlers/ContextToolModule.js";
+import { GRAPH_TOOLS } from "./handlers/GraphToolModule.js";
+import { WORKLOG_TOOLS } from "./handlers/WorklogToolModule.js";
+import { DIAGNOSTICS_TOOLS } from "./handlers/DiagnosticsToolModule.js";
+import { CODEBASE_TOOLS } from "./handlers/CodebaseToolModule.js";
+import { MEMORY_TOOLS } from "./handlers/MemoryToolModule.js";
+import { CAUSAL_TOOLS } from "./handlers/CausalToolModule.js";
 
 // ============================================================================
 // Server Configuration
@@ -89,26 +96,15 @@ export interface PingMemServerConfig {
 // Aggregated TOOLS array — collected from all modules
 // ============================================================================
 
-// Build the TOOLS array eagerly so that external consumers
-// (sse-server.ts, causalTools.test.ts) can import it at module load time
-// without instantiating a PingMemServer.
-
-const _contextModule = new ContextToolModule({} as SessionState);
-const _graphModule = new GraphToolModule({} as SessionState);
-const _worklogModule = new WorklogToolModule({} as SessionState);
-const _diagnosticsModule = new DiagnosticsToolModule({} as SessionState);
-const _codebaseModule = new CodebaseToolModule({} as SessionState);
-const _memoryModule = new MemoryToolModule({} as SessionState);
-const _causalModule = new CausalToolModule({} as SessionState);
-
+// Aggregated tool definitions from all modules — static arrays, no instantiation needed
 export const TOOLS: ToolDefinition[] = [
-  ..._contextModule.tools,
-  ..._graphModule.tools,
-  ..._worklogModule.tools,
-  ..._diagnosticsModule.tools,
-  ..._codebaseModule.tools,
-  ..._memoryModule.tools,
-  ..._causalModule.tools,
+  ...CONTEXT_TOOLS,
+  ...GRAPH_TOOLS,
+  ...WORKLOG_TOOLS,
+  ...DIAGNOSTICS_TOOLS,
+  ...CODEBASE_TOOLS,
+  ...MEMORY_TOOLS,
+  ...CAUSAL_TOOLS,
 ];
 
 // ============================================================================

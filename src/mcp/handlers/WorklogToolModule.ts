@@ -17,7 +17,7 @@ import type {
 // Tool Schemas
 // ============================================================================
 
-const WORKLOG_TOOLS: ToolDefinition[] = [
+export const WORKLOG_TOOLS: ToolDefinition[] = [
   {
     name: "worklog_record",
     description: "Record a deterministic worklog event (tool, diagnostics, git, task)",

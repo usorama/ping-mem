@@ -20,7 +20,7 @@ import type { SearchWeights } from "../../search/HybridSearchEngine.js";
 // Tool Schemas
 // ============================================================================
 
-const GRAPH_TOOLS: ToolDefinition[] = [
+export const GRAPH_TOOLS: ToolDefinition[] = [
   {
     name: "context_query_relationships",
     description: "Query relationships for an entity",

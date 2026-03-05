@@ -641,11 +641,10 @@ export class HybridSearchEngine {
       if (total > 0) {
         const scale = 1.0 / total;
         // Scale all existing properties in-place
-        for (const key of Object.keys(resolvedWeights) as Array<keyof SearchWeights>) {
-          if (key !== "causal" && resolvedWeights[key] !== undefined) {
-            (resolvedWeights as unknown as Record<string, number>)[key] = resolvedWeights[key]! * scale;
-          }
-        }
+        resolvedWeights.semantic *= scale;
+        resolvedWeights.keyword *= scale;
+        resolvedWeights.graph *= scale;
+        if (resolvedWeights.code !== undefined) resolvedWeights.code *= scale;
         resolvedWeights.causal = boostedCausal * scale;
       }
     }

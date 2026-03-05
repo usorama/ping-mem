@@ -13,7 +13,7 @@ import type { SessionState } from "./shared.js";
 // Tool Schemas
 // ============================================================================
 
-const MEMORY_TOOLS: ToolDefinition[] = [
+export const MEMORY_TOOLS: ToolDefinition[] = [
   {
     name: "memory_stats",
     description: "Show relevance decay distribution, stale count, total tracked memories, and average relevance score",

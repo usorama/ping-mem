@@ -190,6 +190,9 @@ export function getCspNonce(c: { get?: (key: string) => unknown }): string | und
  * When TRUST_PROXY is not set, falls back to "unknown" since forwarded
  * headers can be trivially spoofed by clients.
  */
+// Cache conninfo getter for Bun runtime (lazy-loaded, avoids import issues in tests)
+let _getConnInfo: ((c: unknown) => { remote: { address?: string } }) | null | false = null;
+
 export function getClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
   const trustProxy = process.env.TRUST_PROXY;
   if (trustProxy === "1" || trustProxy === "true") {
@@ -202,6 +205,22 @@ export function getClientIp(c: { req: { header: (name: string) => string | undef
     }
     return c.req.header("x-real-ip") ?? "unknown";
   }
-  // No trusted proxy — do not trust forwarded headers as they are spoofable
+  // No trusted proxy — use Bun's socket-level IP via conninfo (not spoofable)
+  if (_getConnInfo === null) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy-load to avoid test/non-Bun failures
+      _getConnInfo = require("hono/bun").getConnInfo;
+    } catch {
+      _getConnInfo = false; // Mark as unavailable so we don't retry
+    }
+  }
+  if (_getConnInfo) {
+    try {
+      const info = _getConnInfo(c);
+      if (info?.remote?.address) return info.remote.address;
+    } catch {
+      // conninfo call failed (e.g., test mock without Bun server)
+    }
+  }
   return "unknown";
 }
