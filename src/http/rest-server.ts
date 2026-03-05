@@ -60,8 +60,14 @@ import { registerUIRoutes } from "./ui/routes.js";
  * Provides HTTP endpoints for memory operations without requiring
  * full MCP protocol implementation.
  */
+export type AppEnv = {
+  Variables: {
+    cspNonce: string;
+  };
+};
+
 export class RESTPingMemServer {
-  private app: Hono;
+  private app: Hono<AppEnv>;
   private config: HTTPServerConfig & PingMemServerConfig;
 
   // Core components (same as PingMemServer)
@@ -121,7 +127,7 @@ export class RESTPingMemServer {
     }
 
     // Initialize Hono app
-    this.app = new Hono();
+    this.app = new Hono<AppEnv>();
 
     // Set up middleware
     this.setupMiddleware();
@@ -157,8 +163,7 @@ export class RESTPingMemServer {
     this.app.use("*", async (c, next) => {
       const nonce = crypto.randomUUID();
       // Store nonce on context for UI renderers to add to inline <script> tags
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Hono's c.set requires typed Env generics; casting is acceptable for internal-only middleware variables
-      (c as any).set("cspNonce", nonce);
+      c.set("cspNonce", nonce);
       await next();
       c.header("X-Content-Type-Options", "nosniff");
       c.header("X-Frame-Options", "DENY");
@@ -1246,7 +1251,7 @@ export class RESTPingMemServer {
   /**
    * Get the Hono app instance (for advanced use cases)
    */
-  getApp(): Hono {
+  getApp(): Hono<AppEnv> {
     return this.app;
   }
 

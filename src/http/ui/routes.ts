@@ -9,6 +9,7 @@ import type { EventStore } from "../../storage/EventStore.js";
 import type { SessionManager } from "../../session/SessionManager.js";
 import type { DiagnosticsStore } from "../../diagnostics/DiagnosticsStore.js";
 import type { IngestionService } from "../../ingest/IngestionService.js";
+import type { AppEnv } from "../rest-server.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 import { registerMemoryRoutes } from "./memories.js";
 import { registerMemoryPartialRoutes } from "./partials/memories.js";
@@ -26,7 +27,7 @@ export interface UIDependencies {
   ingestionService?: IngestionService | undefined;
 }
 
-export function registerUIRoutes(app: Hono, deps: UIDependencies): void {
+export function registerUIRoutes(app: Hono<AppEnv>, deps: UIDependencies): void {
   // Dashboard
   app.get("/ui", registerDashboardRoutes(deps));
 

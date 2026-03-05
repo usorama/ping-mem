@@ -297,24 +297,23 @@ export class CausalGraphManager {
   private async resolveCausalLinks(
     relationships: Relationship[],
   ): Promise<CausalLink[]> {
-    const links: CausalLink[] = [];
-
-    for (const rel of relationships) {
-      const causeEntity = await this.graphManager.getEntity(rel.sourceId);
-      const effectEntity = await this.graphManager.getEntity(rel.targetId);
-
-      links.push({
-        causeId: rel.sourceId,
-        causeName: causeEntity?.name ?? rel.sourceId,
-        effectId: rel.targetId,
-        effectName: effectEntity?.name ?? rel.targetId,
-        confidence: this.getConfidence(rel),
-        evidence: (rel.properties.evidence as string) ?? "",
-        relationship: rel,
-      });
+    if (relationships.length === 0) {
+      return [];
     }
 
-    return links;
+    // Batch-fetch all entity names in a single query (avoids N+1)
+    const allIds = relationships.flatMap((rel) => [rel.sourceId, rel.targetId]);
+    const entityMap = await this.graphManager.getEntitiesByIds(allIds);
+
+    return relationships.map((rel) => ({
+      causeId: rel.sourceId,
+      causeName: entityMap.get(rel.sourceId)?.name ?? rel.sourceId,
+      effectId: rel.targetId,
+      effectName: entityMap.get(rel.targetId)?.name ?? rel.targetId,
+      confidence: this.getConfidence(rel),
+      evidence: (rel.properties.evidence as string) ?? "",
+      relationship: rel,
+    }));
   }
 
   /**
@@ -325,29 +324,33 @@ export class CausalGraphManager {
     endEntityId: string,
     parentMap: Map<string, { parentId: string; relationship: Relationship }>,
   ): Promise<CausalLink[]> {
-    const chain: CausalLink[] = [];
+    // First pass: collect all chain entries and IDs
+    const orderedEntries: Array<{ parentId: string; currentId: string; relationship: Relationship }> = [];
     let currentId = endEntityId;
 
     while (currentId !== startEntityId) {
       const entry = parentMap.get(currentId);
       if (!entry) break;
-
-      const causeEntity = await this.graphManager.getEntity(entry.parentId);
-      const effectEntity = await this.graphManager.getEntity(currentId);
-
-      chain.unshift({
-        causeId: entry.parentId,
-        causeName: causeEntity?.name ?? entry.parentId,
-        effectId: currentId,
-        effectName: effectEntity?.name ?? currentId,
-        confidence: this.getConfidence(entry.relationship),
-        evidence: (entry.relationship.properties.evidence as string) ?? "",
-        relationship: entry.relationship,
-      });
-
+      orderedEntries.unshift({ parentId: entry.parentId, currentId, relationship: entry.relationship });
       currentId = entry.parentId;
     }
 
-    return chain;
+    if (orderedEntries.length === 0) {
+      return [];
+    }
+
+    // Batch-fetch all entity names in a single query (avoids N+1)
+    const allIds = orderedEntries.flatMap((e) => [e.parentId, e.currentId]);
+    const entityMap = await this.graphManager.getEntitiesByIds(allIds);
+
+    return orderedEntries.map(({ parentId, currentId: effId, relationship }) => ({
+      causeId: parentId,
+      causeName: entityMap.get(parentId)?.name ?? parentId,
+      effectId: effId,
+      effectName: entityMap.get(effId)?.name ?? effId,
+      confidence: this.getConfidence(relationship),
+      evidence: (relationship.properties.evidence as string) ?? "",
+      relationship,
+    }));
   }
 }

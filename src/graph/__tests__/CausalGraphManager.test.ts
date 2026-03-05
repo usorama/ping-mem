@@ -54,11 +54,13 @@ function makeRelationship(
 function createMockGraphManager(): {
   createRelationship: ReturnType<typeof mock>;
   getEntity: ReturnType<typeof mock>;
+  getEntitiesByIds: ReturnType<typeof mock>;
   findRelationshipsByEntity: ReturnType<typeof mock>;
 } & Record<string, unknown> {
-  return {
+  const gm = {
     createRelationship: mock(() => Promise.resolve(null)),
     getEntity: mock(() => Promise.resolve(null)),
+    getEntitiesByIds: mock(() => Promise.resolve(new Map())),
     findRelationshipsByEntity: mock(() => Promise.resolve([])),
     createEntity: mock(() => Promise.resolve(null)),
     updateEntity: mock(() => Promise.resolve(null)),
@@ -69,6 +71,16 @@ function createMockGraphManager(): {
     mergeEntity: mock(() => Promise.resolve(null)),
     batchCreateEntities: mock(() => Promise.resolve([])),
   };
+  // Wire getEntitiesByIds to delegate to getEntity so test setups via getEntity.mockImplementation work
+  gm.getEntitiesByIds.mockImplementation(async (ids: string[]) => {
+    const map = new Map<string, Entity>();
+    for (const id of ids) {
+      const entity = await gm.getEntity(id);
+      if (entity) map.set(id, entity);
+    }
+    return map;
+  });
+  return gm;
 }
 
 // ============================================================================

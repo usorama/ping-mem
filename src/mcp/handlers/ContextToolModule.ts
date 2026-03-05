@@ -1,0 +1,731 @@
+/**
+ * Context tool handlers — session lifecycle and memory CRUD.
+ *
+ * Tools: context_session_start, context_session_end, context_save,
+ * context_get, context_search, context_delete, context_checkpoint,
+ * context_status, context_session_list
+ *
+ * @module mcp/handlers/ContextToolModule
+ */
+
+import type { ToolDefinition, ToolModule } from "../types.js";
+import type { SessionState } from "./shared.js";
+import { getActiveMemoryManager } from "./shared.js";
+import { MemoryManager, type MemoryManagerConfig } from "../../memory/MemoryManager.js";
+import { shouldUseLlmExtraction } from "../extractionRouting.js";
+import type {
+  SessionId,
+  SessionStatus,
+  MemoryCategory,
+  MemoryPriority,
+  MemoryQuery,
+} from "../../types/index.js";
+
+// ============================================================================
+// Tool Schemas
+// ============================================================================
+
+const CONTEXT_TOOLS: ToolDefinition[] = [
+  {
+    name: "context_session_start",
+    description: "Start a new memory session with optional configuration. If projectDir is provided with autoIngest=true, automatically ingests the project codebase.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        name: { type: "string", description: "Session name" },
+        projectDir: { type: "string", description: "Project directory for context isolation and automatic code ingestion" },
+        continueFrom: { type: "string", description: "Session ID to continue from" },
+        defaultChannel: { type: "string", description: "Default channel for memories" },
+        autoIngest: { type: "boolean", description: "Automatically ingest project codebase when projectDir is provided (default: false)" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "context_session_end",
+    description: "End the current session",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        reason: { type: "string", description: "Reason for ending session" },
+      },
+    },
+  },
+  {
+    name: "context_save",
+    description: "Save a memory item with key-value pair, optionally extracting entities for knowledge graph",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        key: { type: "string", description: "Unique key for the memory" },
+        value: { type: "string", description: "Memory content" },
+        category: {
+          type: "string",
+          enum: ["task", "decision", "progress", "note", "error", "warning", "fact", "observation"],
+          description: "Memory category",
+        },
+        priority: {
+          type: "string",
+          enum: ["high", "normal", "low"],
+          description: "Priority level",
+        },
+        channel: { type: "string", description: "Channel for organization" },
+        metadata: { type: "object", description: "Custom metadata" },
+        extractEntities: {
+          type: "boolean",
+          description: "When true, extract entities from value and store in knowledge graph",
+        },
+        skipProactiveRecall: {
+          type: "boolean",
+          description: "When true, skip proactive recall of related memories on save (default: false)",
+        },
+      },
+      required: ["key", "value"],
+    },
+  },
+  {
+    name: "context_get",
+    description: "Retrieve memories by key or query parameters",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        key: { type: "string", description: "Exact key to retrieve" },
+        keyPattern: { type: "string", description: "Wildcard pattern for keys" },
+        category: { type: "string", description: "Filter by category" },
+        channel: { type: "string", description: "Filter by channel" },
+        limit: { type: "number", description: "Maximum results" },
+        offset: { type: "number", description: "Pagination offset" },
+      },
+    },
+  },
+  {
+    name: "context_search",
+    description: "Semantic search for relevant memories",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: { type: "string", description: "Search query" },
+        minSimilarity: { type: "number", description: "Minimum similarity score (0-1)" },
+        category: { type: "string", description: "Filter by category" },
+        channel: { type: "string", description: "Filter by channel" },
+        limit: { type: "number", description: "Maximum results" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "context_delete",
+    description: "Delete a memory by key",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        key: { type: "string", description: "Key of memory to delete" },
+      },
+      required: ["key"],
+    },
+  },
+  {
+    name: "context_checkpoint",
+    description: "Create a checkpoint of current session state",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        name: { type: "string", description: "Checkpoint name" },
+        description: { type: "string", description: "Checkpoint description" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "context_status",
+    description: "Get current session status and statistics",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+    },
+  },
+  {
+    name: "context_session_list",
+    description: "List recent sessions",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        limit: { type: "number", description: "Maximum sessions to return" },
+      },
+    },
+  },
+];
+
+// ============================================================================
+// Module
+// ============================================================================
+
+export class ContextToolModule implements ToolModule {
+  readonly tools: ToolDefinition[] = CONTEXT_TOOLS;
+  private readonly state: SessionState;
+
+  constructor(state: SessionState) {
+    this.state = state;
+  }
+
+  handle(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<Record<string, unknown>> | undefined {
+    switch (name) {
+      case "context_session_start":
+        return this.handleSessionStart(args);
+      case "context_session_end":
+        return this.handleSessionEnd(args);
+      case "context_save":
+        return this.handleSave(args);
+      case "context_get":
+        return this.handleGet(args);
+      case "context_search":
+        return this.handleSearch(args);
+      case "context_delete":
+        return this.handleDelete(args);
+      case "context_checkpoint":
+        return this.handleCheckpoint(args);
+      case "context_status":
+        return this.handleStatus();
+      case "context_session_list":
+        return this.handleSessionList(args);
+      default:
+        return undefined;
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Handlers (moved verbatim from PingMemServer)
+  // --------------------------------------------------------------------------
+
+  private async handleSessionStart(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    // Build session config with only defined properties (exactOptionalPropertyTypes)
+    const sessionConfig: Parameters<typeof this.state.sessionManager.startSession>[0] = {
+      name: args.name as string,
+    };
+    if (args.projectDir !== undefined) {
+      sessionConfig.projectDir = args.projectDir as string;
+    }
+    if (args.continueFrom !== undefined) {
+      sessionConfig.continueFrom = args.continueFrom as SessionId;
+    }
+    if (args.defaultChannel !== undefined) {
+      sessionConfig.defaultChannel = args.defaultChannel as string;
+    }
+
+    const session = await this.state.sessionManager.startSession(sessionConfig);
+
+    this.state.currentSessionId = session.id;
+
+    // Create memory manager config with only defined properties (exactOptionalPropertyTypes)
+    const memoryManagerConfig: MemoryManagerConfig = {
+      sessionId: session.id,
+      eventStore: this.state.eventStore,
+    };
+    if (this.state.vectorIndex !== null) {
+      memoryManagerConfig.vectorIndex = this.state.vectorIndex;
+    }
+    if (session.defaultChannel !== undefined) {
+      memoryManagerConfig.defaultChannel = session.defaultChannel;
+    }
+
+    const memoryManager = new MemoryManager(memoryManagerConfig);
+
+    // Hydrate memory state from event store
+    await memoryManager.hydrate();
+
+    this.state.memoryManagers.set(session.id, memoryManager);
+
+    // Auto-ingest project if requested
+    let ingestResult: Record<string, unknown> | undefined;
+    if (args.projectDir !== undefined && args.autoIngest === true && this.state.ingestionService) {
+      try {
+        const projectDir = args.projectDir as string;
+        const forceReingest = args.forceReingest as boolean ?? false;
+
+        const ingestOpts: import("../../ingest/IngestionService.js").IngestProjectOptions = {
+          projectDir,
+          forceReingest,
+        };
+        if (typeof args.maxCommits === "number") {
+          ingestOpts.maxCommits = args.maxCommits;
+        }
+
+        const result = await this.state.ingestionService.ingestProject(ingestOpts);
+
+        ingestResult = result ? (result as unknown as Record<string, unknown>) : { ingested: false, reason: "No changes detected" };
+      } catch (error) {
+        // Don't fail session start if ingestion fails, but log the error
+        const errorMessage = error instanceof Error ? error.message : "Unknown ingestion error";
+        console.error(`[AutoIngest] Failed to ingest project at ${args.projectDir}:`, errorMessage);
+        if (error instanceof Error && error.stack) {
+          console.error(`[AutoIngest] Stack trace:`, error.stack);
+        }
+        ingestResult = {
+          ingestError: errorMessage,
+        };
+      }
+    }
+
+    return {
+      success: true,
+      sessionId: session.id,
+      name: session.name,
+      status: session.status,
+      startedAt: session.startedAt.toISOString(),
+      ...(ingestResult && { ingestResult }),
+    };
+  }
+
+  private async handleSessionEnd(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.state.currentSessionId) {
+      throw new Error("No active session");
+    }
+
+    const session = await this.state.sessionManager.endSession(
+      this.state.currentSessionId,
+      args.reason as string | undefined
+    );
+
+    const previousSessionId = this.state.currentSessionId;
+    this.state.currentSessionId = null;
+
+    return {
+      success: true,
+      sessionId: previousSessionId,
+      status: session.status,
+      endedAt: session.endedAt?.toISOString(),
+    };
+  }
+
+  private async handleSave(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const memoryManager = getActiveMemoryManager(this.state);
+
+    // Build save options with only defined properties (exactOptionalPropertyTypes)
+    const saveOptions: Parameters<typeof memoryManager.save>[2] = {};
+    if (args.category !== undefined) {
+      saveOptions.category = args.category as MemoryCategory;
+    }
+    if (args.priority !== undefined) {
+      saveOptions.priority = args.priority as MemoryPriority;
+    }
+    if (args.channel !== undefined) {
+      saveOptions.channel = args.channel as string;
+    }
+    if (args.metadata !== undefined) {
+      saveOptions.metadata = args.metadata as Record<string, unknown>;
+    }
+
+    const savedMemory = await memoryManager.save(args.key as string, args.value as string, saveOptions);
+
+    // Track relevance for the new memory
+    if (this.state.relevanceEngine) {
+      this.state.relevanceEngine.ensureTracking(
+        savedMemory.id,
+        savedMemory.priority,
+        savedMemory.category
+      );
+    }
+
+    // Handle entity extraction — selective routing between LLM and regex
+    const value = args.value as string;
+    const category = args.category as string | undefined;
+    const explicitExtract = args.extractEntities === true;
+
+    // Determine whether to use LLM extraction (high-value categories / long content)
+    const useLlmExtraction = shouldUseLlmExtraction(category, value.length, false);
+
+    const shouldExtract = useLlmExtraction || explicitExtract;
+    let entityIds: string[] | undefined;
+
+    if (shouldExtract && this.state.graphManager) {
+      if (useLlmExtraction && this.state.llmEntityExtractor) {
+        // LLM extraction for high-value memories
+        try {
+          const llmResult = await this.state.llmEntityExtractor.extract(value);
+
+          if (llmResult.entities.length > 0) {
+            const createdEntities = await this.state.graphManager.batchCreateEntities(llmResult.entities);
+            entityIds = createdEntities.map((e) => e.id);
+          } else {
+            entityIds = [];
+          }
+
+          // Store relationships if any
+          if (llmResult.relationships.length > 0) {
+            for (const rel of llmResult.relationships) {
+              try {
+                await this.state.graphManager.createRelationship(rel);
+              } catch (error) {
+                console.warn("[PingMemServer] Relationship storage failed:", error instanceof Error ? error.message : String(error));
+              }
+            }
+          }
+        } catch (error) {
+          console.warn("[PingMemServer] LLM entity extraction failed, falling back to regex:", error instanceof Error ? error.message : String(error));
+          // Fallback to regex extraction on LLM failure
+          if (this.state.entityExtractor) {
+            const extractionContext: { key: string; value: string; category?: string } = {
+              key: args.key as string,
+              value,
+            };
+            if (category !== undefined) {
+              extractionContext.category = category;
+            }
+            const extractResult = this.state.entityExtractor.extractFromContext(extractionContext);
+            if (extractResult.entities.length > 0) {
+              const createdEntities = await this.state.graphManager.batchCreateEntities(extractResult.entities);
+              entityIds = createdEntities.map((e) => e.id);
+            } else {
+              entityIds = [];
+            }
+          }
+        }
+      } else if (this.state.entityExtractor) {
+        // Regex extraction for standard memories
+        const extractionContext: { key: string; value: string; category?: string } = {
+          key: args.key as string,
+          value,
+        };
+        if (category !== undefined) {
+          extractionContext.category = category;
+        }
+        const extractResult = this.state.entityExtractor.extractFromContext(extractionContext);
+        if (extractResult.entities.length > 0) {
+          const createdEntities = await this.state.graphManager.batchCreateEntities(extractResult.entities);
+          entityIds = createdEntities.map((e) => e.id);
+        } else {
+          entityIds = [];
+        }
+      }
+    }
+
+    const result: Record<string, unknown> = {
+      success: true,
+      memoryId: savedMemory.id,
+      key: args.key,
+    };
+
+    // Include entityIds in response when extraction was performed
+    if (shouldExtract) {
+      result.entityIds = entityIds ?? [];
+    }
+
+    // Proactive recall: surface related memories (unless explicitly skipped)
+    // Combines same-session (in-memory) and cross-session (SQLite) results
+    if (args.skipProactiveRecall !== true) {
+      try {
+        const timeoutMs = 200;
+        const recallPromise = new Promise<Array<Record<string, unknown>>>((resolve) => {
+          const excludeKeys = [args.key as string];
+          const searchLimit = 5;
+
+          // 1. Same-session results (in-memory Map)
+          const sameSessionOpts: Parameters<typeof memoryManager.findRelated>[1] = {
+            excludeKeys,
+            limit: searchLimit,
+          };
+          if (this.state.currentSessionId) {
+            sameSessionOpts.excludeSessionId = this.state.currentSessionId;
+          }
+          const sameSession = memoryManager.findRelated(args.value as string, sameSessionOpts);
+
+          // 2. Cross-session results (SQLite query across all sessions)
+          const crossSessionOpts: Parameters<typeof memoryManager.findRelatedAcrossSessions>[1] = {
+            excludeKeys,
+            limit: searchLimit,
+          };
+          if (this.state.currentSessionId) {
+            crossSessionOpts.excludeSessionId = this.state.currentSessionId;
+          }
+          const crossSession = memoryManager.findRelatedAcrossSessions(
+            args.value as string,
+            crossSessionOpts
+          );
+
+          // 3. Merge and deduplicate by key (higher score wins)
+          const byKey = new Map<string, { memory: { id: string; key: string; value: string; sessionId: string; category?: string; priority: string; createdAt: Date }; score: number }>();
+          for (const r of [...sameSession, ...crossSession]) {
+            const existing = byKey.get(r.memory.key);
+            if (!existing || r.score > existing.score) {
+              byKey.set(r.memory.key, r);
+            }
+          }
+
+          // 4. Sort by score descending and take top N
+          const merged = Array.from(byKey.values())
+            .sort((a, b) => b.score - a.score)
+            .slice(0, searchLimit);
+
+          // 5. Filter by relevance score from RelevanceEngine
+          const withRelevance = merged
+            .filter((r) => {
+              if (!this.state.relevanceEngine) return r.score > 0.3;
+              const tracking = this.state.relevanceEngine.getRelevanceScore(r.memory.id);
+              return tracking >= 0.5;
+            })
+            .map((r) => ({
+              key: r.memory.key,
+              value: r.memory.value.length > 200
+                ? r.memory.value.substring(0, 200) + "..."
+                : r.memory.value,
+              category: r.memory.category ?? "note",
+              relevance: r.score,
+              sessionId: r.memory.sessionId,
+              createdAt: r.memory.createdAt.toISOString(),
+            }));
+
+          resolve(withRelevance);
+        });
+
+        const timeout = new Promise<Array<Record<string, unknown>>>((resolve) => {
+          setTimeout(() => resolve([]), timeoutMs);
+        });
+
+        const relatedMemories = await Promise.race([recallPromise, timeout]);
+        if (relatedMemories.length > 0) {
+          result.relatedMemories = relatedMemories;
+        }
+      } catch (error) {
+        console.warn("[PingMemServer] Proactive recall failed:", error instanceof Error ? error.message : String(error));
+      }
+    }
+
+    return result;
+  }
+
+  private async handleGet(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const memoryManager = getActiveMemoryManager(this.state);
+
+    // If exact key provided, use direct get
+    if (args.key && !args.keyPattern && !args.category && !args.channel) {
+      const memory = await memoryManager.get(args.key as string);
+      if (!memory) {
+        return { found: false, key: args.key };
+      }
+      // Track access for relevance scoring
+      if (this.state.relevanceEngine) {
+        this.state.relevanceEngine.trackAccess(memory.id);
+      }
+      return {
+        found: true,
+        memory: serializeMemory(memory),
+      };
+    }
+
+    // Otherwise use query - build with only defined properties (exactOptionalPropertyTypes)
+    const query: MemoryQuery = {};
+    if (args.key !== undefined) {
+      query.key = args.key as string;
+    }
+    if (args.keyPattern !== undefined) {
+      query.keyPattern = args.keyPattern as string;
+    }
+    if (args.category !== undefined) {
+      query.category = args.category as MemoryCategory;
+    }
+    if (args.channel !== undefined) {
+      query.channel = args.channel as string;
+    }
+    if (args.limit !== undefined) {
+      query.limit = args.limit as number;
+    }
+    if (args.offset !== undefined) {
+      query.offset = args.offset as number;
+    }
+
+    const results = await memoryManager.recall(query);
+
+    // Track access for all returned memories
+    if (this.state.relevanceEngine) {
+      for (const r of results) {
+        this.state.relevanceEngine.trackAccess(r.memory.id);
+      }
+    }
+
+    return {
+      count: results.length,
+      memories: results.map((r) => ({
+        ...serializeMemory(r.memory),
+        score: r.score,
+      })),
+    };
+  }
+
+  private async handleSearch(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const memoryManager = getActiveMemoryManager(this.state);
+
+    // Build query with only defined properties (exactOptionalPropertyTypes)
+    const query: MemoryQuery = {
+      semanticQuery: args.query as string,
+    };
+    if (args.minSimilarity !== undefined) {
+      query.minSimilarity = args.minSimilarity as number;
+    }
+    if (args.category !== undefined) {
+      query.category = args.category as MemoryCategory;
+    }
+    if (args.channel !== undefined) {
+      query.channel = args.channel as string;
+    }
+    if (args.limit !== undefined) {
+      query.limit = args.limit as number;
+    }
+
+    const results = await memoryManager.recall(query);
+
+    return {
+      count: results.length,
+      results: results.map((r) => ({
+        ...serializeMemory(r.memory),
+        score: r.score,
+      })),
+    };
+  }
+
+  private async handleDelete(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const memoryManager = getActiveMemoryManager(this.state);
+
+    const deleted = await memoryManager.delete(args.key as string);
+
+    return {
+      success: deleted,
+      key: args.key,
+    };
+  }
+
+  private async handleCheckpoint(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.state.currentSessionId) {
+      throw new Error("No active session");
+    }
+
+    const memoryManager = getActiveMemoryManager(this.state);
+
+    // Create checkpoint by saving a special memory
+    const checkpointKey = `checkpoint:${args.name as string}`;
+    const stats = await memoryManager.getStats();
+
+    const memoryId = await memoryManager.save(
+      checkpointKey,
+      JSON.stringify({
+        name: args.name,
+        description: args.description,
+        timestamp: new Date().toISOString(),
+        stats,
+      }),
+      {
+        category: "progress",
+        priority: "high",
+        metadata: {
+          isCheckpoint: true,
+          checkpointName: args.name,
+        },
+      }
+    );
+
+    return {
+      success: true,
+      checkpointId: memoryId,
+      name: args.name,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  private async handleStatus(): Promise<Record<string, unknown>> {
+    if (!this.state.currentSessionId) {
+      return {
+        hasActiveSession: false,
+        message: "No active session. Use context_session_start to begin.",
+      };
+    }
+
+    const session = await this.state.sessionManager.getSession(this.state.currentSessionId);
+    if (!session) {
+      return {
+        hasActiveSession: false,
+        message: "Session not found",
+      };
+    }
+
+    const memoryManager = this.state.memoryManagers.get(this.state.currentSessionId);
+    const stats = memoryManager ? await memoryManager.getStats() : null;
+
+    return {
+      hasActiveSession: true,
+      session: {
+        id: session.id,
+        name: session.name,
+        status: session.status,
+        startedAt: session.startedAt.toISOString(),
+        memoryCount: session.memoryCount,
+        eventCount: session.eventCount,
+        lastActivityAt: session.lastActivityAt.toISOString(),
+      },
+      stats,
+    };
+  }
+
+  private async handleSessionList(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const limit = (args.limit as number) ?? 10;
+
+    // Build filter with only defined properties (exactOptionalPropertyTypes)
+    const filter: { status?: SessionStatus; projectDir?: string } = {};
+    if (args.status !== undefined) {
+      filter.status = args.status as SessionStatus;
+    }
+    if (args.projectDir !== undefined) {
+      filter.projectDir = args.projectDir as string;
+    }
+
+    // listSessions takes optional filter, apply limit manually
+    const allSessions = this.state.sessionManager.listSessions(
+      Object.keys(filter).length > 0 ? filter : undefined
+    );
+    const sessions = allSessions.slice(0, limit);
+
+    return {
+      count: sessions.length,
+      sessions: sessions.map((s) => ({
+        id: s.id,
+        name: s.name,
+        status: s.status,
+        startedAt: s.startedAt.toISOString(),
+        endedAt: s.endedAt?.toISOString(),
+        memoryCount: s.memoryCount,
+      })),
+    };
+  }
+}
+
+// ============================================================================
+// Helper — exported for use by other modules if needed
+// ============================================================================
+
+export function serializeMemory(memory: {
+  id: string;
+  key: string;
+  value: string;
+  sessionId: string;
+  category?: string;
+  priority: string;
+  privacy: string;
+  channel?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  metadata: Record<string, unknown>;
+}): Record<string, unknown> {
+  return {
+    id: memory.id,
+    key: memory.key,
+    value: memory.value,
+    category: memory.category,
+    priority: memory.priority,
+    privacy: memory.privacy,
+    channel: memory.channel,
+    createdAt: memory.createdAt.toISOString(),
+    updatedAt: memory.updatedAt.toISOString(),
+    metadata: memory.metadata,
+  };
+}
