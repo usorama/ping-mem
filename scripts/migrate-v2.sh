@@ -16,6 +16,11 @@ if [ -f "$DB_PATH" ]; then
   fi
 fi
 
+# Resolve symlinks and validate canonical path
+if command -v realpath &>/dev/null; then
+  DB_PATH=$(realpath "$DB_PATH" 2>/dev/null || echo "$DB_PATH")
+fi
+
 echo "Running ping-mem v2 migrations on: $DB_PATH"
 
 # Check if database exists

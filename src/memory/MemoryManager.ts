@@ -396,18 +396,40 @@ export class MemoryManager {
         throw new MemoryKeyExistsError(key);
       }
 
-      // Quota check: enforce byte and count limits before storing
+      // Quota fast-fail check: read current usage to reject obviously over-quota requests early.
+      // The actual enforcement happens atomically after event creation (see atomic UPDATE below).
+      // hasQuotaRow tracks whether the agent is registered — unregistered agents bypass quotas.
+      let hasQuotaRow = false;
       if (effectiveAgentId) {
         const db = this.eventStore.getDatabase();
         const quotaRow = db
           .prepare(
-            "SELECT current_bytes, current_count, quota_bytes, quota_count FROM agent_quotas WHERE agent_id = $agent_id"
+            "SELECT current_bytes, current_count, quota_bytes, quota_count FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
           )
-          .get({ $agent_id: effectiveAgentId }) as
+          .get({ $agent_id: effectiveAgentId, $now: new Date().toISOString() }) as
           | { current_bytes: number; current_count: number; quota_bytes: number; quota_count: number }
           | undefined;
 
+        // If no quota row found and an agent was specified, the agent is expired or unregistered
+        if (!quotaRow) {
+          // Check if the agent exists but is expired (vs never registered — which has no quota row)
+          const expiredRow = db
+            .prepare(
+              "SELECT agent_id FROM agent_quotas WHERE agent_id = $agent_id"
+            )
+            .get({ $agent_id: effectiveAgentId }) as { agent_id: string } | undefined;
+          if (expiredRow) {
+            throw new MemoryManagerError(
+              `Agent "${effectiveAgentId}" registration has expired`,
+              "AGENT_EXPIRED",
+              { agentId: effectiveAgentId }
+            );
+          }
+          // Agent is not registered — no quota enforcement
+        }
+
         if (quotaRow) {
+          hasQuotaRow = true;
           const valueBytes = new TextEncoder().encode(value).byteLength;
           if (quotaRow.current_bytes + valueBytes > quotaRow.quota_bytes) {
             throw new QuotaExhaustedError(
@@ -512,14 +534,38 @@ export class MemoryManager {
         channel: memory.channel,
       });
 
-      // Update agent quota usage AFTER event creation for consistency
-      // (if event fails, quota isn't consumed)
-      if (effectiveAgentId) {
+      // Atomic quota increment with WHERE guard to prevent TOCTOU race.
+      // The WHERE clause ensures the update only succeeds if limits are not exceeded.
+      // If result.changes === 0, another concurrent save pushed us over quota.
+      // Only run when the agent has a registered quota row (unregistered agents bypass quotas).
+      if (effectiveAgentId && hasQuotaRow) {
         const db = this.eventStore.getDatabase();
         const valueBytes = new TextEncoder().encode(value).byteLength;
-        db.prepare(
-          "UPDATE agent_quotas SET current_bytes = current_bytes + $bytes, current_count = current_count + 1 WHERE agent_id = $agent_id"
+        const result = db.prepare(
+          `UPDATE agent_quotas
+           SET current_bytes = current_bytes + $bytes, current_count = current_count + 1
+           WHERE agent_id = $agent_id
+             AND current_bytes + $bytes <= quota_bytes
+             AND current_count + 1 <= quota_count`
         ).run({ $bytes: valueBytes, $agent_id: effectiveAgentId });
+
+        if (result.changes === 0) {
+          // Quota exceeded between fast-fail check and here — rollback in-memory state
+          this.memories.delete(key);
+          this.memoriesById.delete(memoryId);
+          // Re-read actual limits for the error message
+          const row = db.prepare(
+            "SELECT current_bytes, current_count, quota_bytes, quota_count FROM agent_quotas WHERE agent_id = $agent_id"
+          ).get({ $agent_id: effectiveAgentId }) as
+            | { current_bytes: number; current_count: number; quota_bytes: number; quota_count: number }
+            | undefined;
+          throw new QuotaExhaustedError(
+            effectiveAgentId,
+            "bytes",
+            (row?.current_bytes ?? 0) + valueBytes,
+            row?.quota_bytes ?? 0
+          );
+        }
       }
 
       // Auto-track relevance if engine is available
@@ -581,8 +627,7 @@ export class MemoryManager {
    * migration with --force will not preserve original timestamps on updates.
    */
   async saveOrUpdate(key: string, value: string, options: SaveMemoryOptions = {}): Promise<Memory> {
-    const existing = this.memories.get(key);
-    if (existing) {
+    if (this.has(key)) {  // scope-aware check
       return this.update(key, { value, ...options });
     }
     return this.save(key, value, options);
@@ -603,6 +648,31 @@ export class MemoryManager {
     }
     if (existing.agentId && this.agentId && existing.agentId !== this.agentId) {
       throw new MemoryKeyNotFoundError(key); // Don't reveal existence to non-owner
+    }
+
+    // Quota delta check: if value is changing, verify byte quota allows growth
+    const encoder = new TextEncoder();
+    const oldBytes = encoder.encode(existing.value).byteLength;
+    const newBytes = options.value !== undefined ? encoder.encode(options.value).byteLength : oldBytes;
+    const bytesDelta = newBytes - oldBytes;
+
+    if (bytesDelta > 0 && existing.agentId) {
+      const db = this.eventStore.getDatabase();
+      const quotaRow = db
+        .prepare(
+          "SELECT current_bytes, quota_bytes FROM agent_quotas WHERE agent_id = $agent_id"
+        )
+        .get({ $agent_id: existing.agentId }) as
+        | { current_bytes: number; quota_bytes: number }
+        | undefined;
+      if (quotaRow && quotaRow.current_bytes + bytesDelta > quotaRow.quota_bytes) {
+        throw new QuotaExhaustedError(
+          existing.agentId,
+          "bytes",
+          quotaRow.current_bytes + bytesDelta,
+          quotaRow.quota_bytes
+        );
+      }
     }
 
     const now = new Date();
@@ -659,6 +729,14 @@ export class MemoryManager {
       category: existing.category,
       priority: existing.priority,
     });
+
+    // Adjust byte quota if value size changed
+    if (bytesDelta !== 0 && existing.agentId) {
+      const db = this.eventStore.getDatabase();
+      db.prepare(
+        "UPDATE agent_quotas SET current_bytes = MAX(0, current_bytes + $delta) WHERE agent_id = $agent_id"
+      ).run({ $delta: bytesDelta, $agent_id: existing.agentId });
+    }
 
     // Update vector index if embedding changed
     if (this.vectorIndex && options.embedding) {
@@ -1025,6 +1103,8 @@ export class MemoryManager {
       }
       // Skip excluded keys
       if (excludeKeys.has(memory.key)) continue;
+      // Scope enforcement: skip memories not visible to current agent
+      if (!this.isVisibleToCurrentAgent(memory)) continue;
 
       // Score by keyword overlap
       const memoryText = `${memory.key} ${memory.value}`.toLowerCase();

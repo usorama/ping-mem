@@ -168,7 +168,7 @@ export class AgentToolModule implements ToolModule {
     const db = this.state.eventStore.getDatabase();
 
     const maxAgents = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10) || 100;
-    const countRow = db.prepare("SELECT COUNT(*) as cnt FROM agent_quotas").get() as { cnt: number };
+    const countRow = db.prepare("SELECT COUNT(*) as cnt FROM agent_quotas WHERE expires_at IS NULL OR expires_at >= $now").get({ $now: new Date().toISOString() }) as { cnt: number };
     // Only check limit on new registrations (not upserts)
     const existingRow = db.prepare("SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id").get({ $agent_id: agentId });
     if (!existingRow && countRow.cnt >= maxAgents) {
@@ -180,7 +180,6 @@ export class AgentToolModule implements ToolModule {
        VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
        ON CONFLICT(agent_id) DO UPDATE SET
          role = $role,
-         admin = $admin,
          ttl_ms = $ttl_ms,
          expires_at = $expires_at,
          quota_bytes = $quota_bytes,

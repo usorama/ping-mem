@@ -357,7 +357,7 @@ export class ContextToolModule implements ToolModule {
     );
     if (!gateResult.passed) {
       const { EvidenceGateRejectionError } = await import("../../types/agent-errors.js");
-      const agentId = createAgentId(effectiveAgentId ?? "unknown");
+      const agentId = createAgentId(effectiveAgentId ?? "unregistered");
       throw new EvidenceGateRejectionError(agentId, args.key as string, gateResult.warnings.join("; "));
     }
     const warnings: string[] = [...gateResult.warnings];

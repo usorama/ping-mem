@@ -96,6 +96,7 @@ export class SemanticCompressor {
     // Batch if too large
     if (inputTokens > this.maxBatchTokens) {
       if (memories.length <= 1) {
+        console.warn(`[SemanticCompressor] Single memory exceeds token limit (${inputTokens} > ${this.maxBatchTokens}), using heuristic fallback`);
         return this.compressWithHeuristic(memories);
       }
       return this.compressInBatches(memories);

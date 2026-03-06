@@ -68,18 +68,21 @@ export class MemoryPubSub {
       // Scope filtering: private memories only delivered to owning agent
       if (event.agentScope === "private" && event.agentId !== options.agentId) return;
 
-      // Role scope: only delivered to agents with same role.
-      // For simplicity, role scope events are delivered to all registered agents.
-      // The MemoryManager already handles read-time scope enforcement.
+      // Strip value from role/shared scope events for non-owner subscribers
+      let deliveredEvent = event;
+      if (event.agentScope && event.agentScope !== "public" && event.agentId !== options.agentId) {
+        const { value, ...rest } = event;
+        deliveredEvent = rest as MemoryEvent;
+      }
 
       // Channel filter
-      if (options.channel && event.channel !== options.channel) return;
+      if (options.channel && deliveredEvent.channel !== options.channel) return;
 
       // Category filter
-      if (options.category && event.category !== options.category) return;
+      if (options.category && deliveredEvent.category !== options.category) return;
 
       try {
-        handler(event);
+        handler(deliveredEvent);
       } catch (err) {
         console.error("[MemoryPubSub] Subscriber handler threw:", err instanceof Error ? err.message : String(err));
       }

@@ -92,63 +92,69 @@ export class WriteLockManager {
     const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
     const acquiredAt = nowIso;
 
-    // Step 1: Lazy cleanup — delete expired locks and expired agents
-    this.db
-      .prepare("DELETE FROM write_locks WHERE expires_at < $now")
-      .run({ $now: nowIso });
-    // Step 2: Atomic INSERT ... ON CONFLICT DO UPDATE
-    // The UPDATE only succeeds if the existing lock has expired OR is held by the same agent
-    const stmt = this.db.prepare(`
-      INSERT INTO write_locks (lock_key, holder_id, acquired_at, expires_at, metadata)
-      VALUES ($lock_key, $holder_id, $acquired_at, $expires_at, '{}')
-      ON CONFLICT(lock_key) DO UPDATE SET
-        holder_id = $holder_id,
-        acquired_at = $acquired_at,
-        expires_at = $expires_at,
-        metadata = '{}'
-      WHERE write_locks.expires_at < $now
-         OR write_locks.holder_id = $holder_id
-    `);
+    const doAcquire = this.db.transaction(() => {
+      // Step 1: Lazy cleanup — delete expired locks
+      this.db
+        .prepare("DELETE FROM write_locks WHERE expires_at < $now")
+        .run({ $now: nowIso });
 
-    const result = stmt.run({
-      $lock_key: key,
-      $holder_id: holderId,
-      $acquired_at: acquiredAt,
-      $expires_at: expiresAt,
-      $now: nowIso,
-    });
+      // Step 2: Atomic INSERT ... ON CONFLICT DO UPDATE
+      // The UPDATE only succeeds if the existing lock has expired OR is held by the same agent
+      const stmt = this.db.prepare(`
+        INSERT INTO write_locks (lock_key, holder_id, acquired_at, expires_at, metadata)
+        VALUES ($lock_key, $holder_id, $acquired_at, $expires_at, '{}')
+        ON CONFLICT(lock_key) DO UPDATE SET
+          holder_id = $holder_id,
+          acquired_at = $acquired_at,
+          expires_at = $expires_at,
+          metadata = '{}'
+        WHERE write_locks.expires_at < $now
+           OR write_locks.holder_id = $holder_id
+      `);
 
-    // Step 3: Check if the upsert actually wrote a row
-    // If changes === 0, a valid lock exists held by someone else
-    if (result.changes === 0) {
-      const existing = this.getLockInfo(key);
-      if (existing && existing.holderId !== holderId) {
-        throw new WriteLockConflictError(
-          key,
-          createAgentId(existing.holderId),
-          createAgentId(holderId)
-        );
-      }
-      // Edge case: lock was released between our check and here.
-      // Retry once (non-recursive, just re-run the statement).
-      const retryResult = stmt.run({
+      const result = stmt.run({
         $lock_key: key,
         $holder_id: holderId,
         $acquired_at: acquiredAt,
         $expires_at: expiresAt,
         $now: nowIso,
       });
-      if (retryResult.changes === 0) {
-        const retryExisting = this.getLockInfo(key);
-        throw new WriteLockConflictError(
-          key,
-          createAgentId(retryExisting?.holderId ?? "unknown"),
-          createAgentId(holderId)
-        );
-      }
-    }
 
-    return { acquired: true, expiresAt };
+      // Step 3: Check if the upsert actually wrote a row
+      // If changes === 0, a valid lock exists held by someone else
+      if (result.changes === 0) {
+        const existing = this.getLockInfoInTransaction(key, nowIso);
+        if (existing && existing.holderId !== holderId) {
+          throw new WriteLockConflictError(
+            key,
+            createAgentId(existing.holderId),
+            createAgentId(holderId)
+          );
+        }
+        // Edge case: lock was released between our check and here.
+        // Retry once (non-recursive, just re-run the statement).
+        const retryResult = stmt.run({
+          $lock_key: key,
+          $holder_id: holderId,
+          $acquired_at: acquiredAt,
+          $expires_at: expiresAt,
+          $now: nowIso,
+        });
+        if (retryResult.changes === 0) {
+          const retryExisting = this.getLockInfoInTransaction(key, nowIso);
+          throw new WriteLockConflictError(
+            key,
+            createAgentId(retryExisting?.holderId ?? "unknown"),
+            createAgentId(holderId)
+          );
+        }
+      }
+
+      return expiresAt;
+    });
+
+    const resultExpiry = doAcquire();
+    return { acquired: true, expiresAt: resultExpiry };
   }
 
   /**
@@ -187,6 +193,26 @@ export class WriteLockManager {
   }
 
   /**
+   * Get lock info using a pre-computed timestamp (for use within transactions
+   * to avoid timestamp drift between cleanup and lookup).
+   */
+  private getLockInfoInTransaction(key: string, nowIso: string): LockInfo | null {
+    const row = this.db
+      .prepare(
+        `SELECT lock_key, holder_id, acquired_at, expires_at, metadata
+         FROM write_locks
+         WHERE lock_key = $lock_key AND expires_at >= $now`
+      )
+      .get({ $lock_key: key, $now: nowIso }) as WriteLockRow | null;
+
+    if (!row) {
+      return null;
+    }
+
+    return this.rowToLockInfo(row);
+  }
+
+  /**
    * Get full information about a lock, including holder and expiry.
    * Returns null if no valid (non-expired) lock exists.
    *
@@ -207,12 +233,27 @@ export class WriteLockManager {
       return null;
     }
 
+    return this.rowToLockInfo(row);
+  }
+
+  /** Convert a WriteLockRow to a LockInfo, with safe metadata parsing. */
+  private rowToLockInfo(row: WriteLockRow): LockInfo {
     return {
       lockKey: row.lock_key,
       holderId: row.holder_id,
       acquiredAt: row.acquired_at,
       expiresAt: row.expires_at,
-      metadata: (() => { try { return JSON.parse(row.metadata) as Record<string, unknown>; } catch { return {}; } })(),
+      metadata: (() => {
+        try {
+          return JSON.parse(row.metadata) as Record<string, unknown>;
+        } catch (err) {
+          console.warn(
+            `[WriteLockManager] Corrupt metadata for lock '${row.lock_key}':`,
+            err instanceof Error ? err.message : String(err)
+          );
+          return {};
+        }
+      })(),
     };
   }
 }

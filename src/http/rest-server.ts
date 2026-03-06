@@ -95,6 +95,7 @@ export class RESTPingMemServer {
   private sessionManager: SessionManager;
   private vectorIndex: VectorIndex | null = null;
   private memoryManagers: Map<SessionId, MemoryManager> = new Map();
+  private managerPromises: Map<string, Promise<MemoryManager>> = new Map();
   private currentSessionId: SessionId | null = null;
   private graphManager: GraphManager | null = null;
   private hybridSearchEngine: HybridSearchEngine | null = null;
@@ -510,7 +511,8 @@ export class RESTPingMemServer {
           let sarifPayload: unknown;
           try {
             sarifPayload = typeof body.sarif === "string" ? JSON.parse(body.sarif) : body.sarif;
-          } catch {
+          } catch (err) {
+            console.warn("[REST] SARIF parse error:", err instanceof Error ? err.message : String(err));
             return c.json<RESTErrorResponse>(
               { error: "Bad Request", message: "Invalid JSON in sarif field" },
               400
@@ -934,7 +936,14 @@ export class RESTPingMemServer {
         }
 
         const memoryManager = await this.getMemoryManager(sessionId);
-        await memoryManager.delete(key);
+        const deleted = await memoryManager.delete(key);
+
+        if (!deleted) {
+          return c.json<RESTErrorResponse>(
+            { error: "Not Found", message: `Memory with key '${key}' not found` },
+            404
+          );
+        }
 
         return c.json<RESTSuccessResponse<{ message: string }>>({
           data: { message: "Memory deleted successfully" },
@@ -1166,11 +1175,26 @@ export class RESTPingMemServer {
         const expiresAt = new Date(Date.now() + ttlMs).toISOString();
 
         const db = this.eventStore.getDatabase();
+
+        // Enforce max-agents limit
+        const maxAgents = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10) || 100;
+        const countRow = db.prepare("SELECT COUNT(*) as cnt FROM agent_quotas").get() as { cnt: number };
+        const existingRow = db.prepare("SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id").get({ $agent_id: agentId });
+        if (!existingRow && countRow.cnt >= maxAgents) {
+          return c.json<RESTErrorResponse>({ error: "Conflict", message: `Maximum agent registrations (${maxAgents}) reached` }, 409);
+        }
+
+        // Enforce metadata size limit
+        const metadataStr = JSON.stringify(metadata ?? {});
+        if (metadataStr.length > 10_000) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "metadata exceeds 10KB size limit" }, 400);
+        }
+
         db.prepare(
           `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
            VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
            ON CONFLICT(agent_id) DO UPDATE SET
-             role = $role, admin = $admin, ttl_ms = $ttl_ms, expires_at = $expires_at,
+             role = $role, ttl_ms = $ttl_ms, expires_at = $expires_at,
              quota_bytes = $quota_bytes, quota_count = $quota_count,
              updated_at = $updated_at, metadata = $metadata`
         ).run({
@@ -1183,7 +1207,7 @@ export class RESTPingMemServer {
           $quota_count: quotaCount,
           $created_at: now,
           $updated_at: now,
-          $metadata: JSON.stringify(metadata ?? {}),
+          $metadata: metadataStr,
         });
 
         return c.json<RESTSuccessResponse<Record<string, unknown>>>({
@@ -1203,8 +1227,11 @@ export class RESTPingMemServer {
           let validatedAgentId: ReturnType<typeof createAgentId>;
           try {
             validatedAgentId = createAgentId(agentId);
-          } catch {
-            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
+          } catch (err) {
+            if (err instanceof Error && err.message.includes("Invalid agent ID")) {
+              return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
+            }
+            throw err;
           }
           const row = db.prepare(
             "SELECT * FROM agent_quotas WHERE agent_id = $agent_id"
@@ -1232,8 +1259,11 @@ export class RESTPingMemServer {
         let agentId: ReturnType<typeof createAgentId>;
         try {
           agentId = createAgentId(rawId);
-        } catch {
-          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
+        } catch (err) {
+          if (err instanceof Error && err.message.includes("Invalid agent ID")) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
+          }
+          throw err;
         }
         const db = this.eventStore.getDatabase();
 
@@ -1446,18 +1476,22 @@ export class RESTPingMemServer {
    * Handle errors and return consistent error responses
    */
   private handleError(c: Context<AppEnv>, error: unknown): Response {
-    console.error("[REST Server] Error:", error);
-
-    const message = error instanceof Error ? error.message : "Unknown error";
     const statusCode = this.getStatusCode(error);
+    const message = error instanceof Error ? error.message : "Unknown error";
     const isClientError = statusCode >= 400 && statusCode < 500;
-    const clientMessage = isClientError ? message : "An internal error occurred";
 
+    if (!isClientError) {
+      const requestId = crypto.randomUUID().slice(0, 8);
+      console.error(`[REST Server] Error [${requestId}] ${c.req.method} ${c.req.path}:`, error);
+      return c.json(
+        { error: this.getErrorName(statusCode), message: `An internal error occurred (ref: ${requestId})` },
+        statusCode as ContentfulStatusCode
+      );
+    }
+
+    console.error("[REST Server] Error:", message);
     return c.json(
-      {
-        error: this.getErrorName(statusCode),
-        message: clientMessage,
-      },
+      { error: this.getErrorName(statusCode), message },
       statusCode as ContentfulStatusCode
     );
   }
@@ -1470,17 +1504,25 @@ export class RESTPingMemServer {
       // Use error class name or code property for reliable mapping
       const name = error.name;
       if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError") return 404;
-      if (name === "QuotaExhaustedError" || name === "WriteLockConflictError" || name === "EvidenceGateRejectionError") return 409;
+      if (name === "QuotaExhaustedError" || name === "WriteLockConflictError") return 409;
+      if (name === "EvidenceGateRejectionError") return 403;
       if (name === "MemoryKeyExistsError") return 409;
-      if (name === "InvalidSessionError" || name === "MemoryManagerError") return 400;
+      if (name === "InvalidSessionError") return 400;
       // Check for known error codes
       const codeErr = error as { code?: string };
       if (codeErr.code === "MEMORY_NOT_FOUND") return 404;
       if (codeErr.code === "QUOTA_EXHAUSTED" || codeErr.code === "WRITE_LOCK_CONFLICT") return 409;
-      if (codeErr.code === "MEMORY_EXISTS" || codeErr.code === "INVALID_SESSION") return 400;
+      if (codeErr.code === "MEMORY_EXISTS") return 409;
+      if (codeErr.code === "INVALID_SESSION") return 400;
       // Fallback to message-based detection for backward compat
-      if (error.message.includes("not found")) return 404;
-      if (error.message.includes("invalid") || error.message.includes("required")) return 400;
+      if (error.message.includes("not found")) {
+        console.warn(`[REST Server] getStatusCode: message-based 404 for '${error.name}': ${error.message.slice(0, 80)}`);
+        return 404;
+      }
+      if (error.message.includes("invalid") || error.message.includes("required")) {
+        console.warn(`[REST Server] getStatusCode: message-based 400 for '${error.name}': ${error.message.slice(0, 80)}`);
+        return 400;
+      }
     }
     return 500;
   }
@@ -1502,25 +1544,48 @@ export class RESTPingMemServer {
   }
 
   /**
-   * Get MemoryManager for session, creating if needed
+   * Get MemoryManager for session, creating if needed.
+   * Uses Promise-based deduplication to prevent TOCTOU races.
    */
-  private async getMemoryManager(sessionId: SessionId): Promise<MemoryManager> {
-    let manager = this.memoryManagers.get(sessionId);
-    if (!manager) {
-      const config: MemoryManagerConfig = {
-        eventStore: this.eventStore,
-        sessionId,
-        pubsub: this.pubsub,
-      };
+  private getMemoryManager(sessionId: SessionId): Promise<MemoryManager> {
+    const cached = this.memoryManagers.get(sessionId);
+    if (cached) return Promise.resolve(cached);
 
-      if (this.vectorIndex) {
-        config.vectorIndex = this.vectorIndex;
-      }
-
-      manager = new MemoryManager(config);
-      await manager.hydrate();
-      this.memoryManagers.set(sessionId, manager);
+    let promise = this.managerPromises.get(sessionId);
+    if (!promise) {
+      promise = this.hydrateManager(sessionId);
+      this.managerPromises.set(sessionId, promise);
     }
+    return promise;
+  }
+
+  private async hydrateManager(sessionId: SessionId): Promise<MemoryManager> {
+    const config: MemoryManagerConfig = {
+      eventStore: this.eventStore,
+      sessionId,
+      pubsub: this.pubsub,
+    };
+
+    if (this.vectorIndex) {
+      config.vectorIndex = this.vectorIndex;
+    }
+
+    // Propagate agent identity from session metadata
+    const session = this.sessionManager.getSession(sessionId);
+    if (session) {
+      const meta = session.metadata;
+      if (meta?.agentId && typeof meta.agentId === "string") {
+        config.agentId = createAgentId(meta.agentId);
+      }
+      if (meta?.agentRole && typeof meta.agentRole === "string") {
+        config.agentRole = meta.agentRole;
+      }
+    }
+
+    const manager = new MemoryManager(config);
+    await manager.hydrate();
+    this.memoryManagers.set(sessionId, manager);
+    this.managerPromises.delete(sessionId);
     return manager;
   }
 
