@@ -354,13 +354,13 @@ export class EventStore {
         admin INTEGER NOT NULL DEFAULT 0,
         ttl_ms INTEGER NOT NULL DEFAULT 86400000,
         expires_at TEXT,
-        current_bytes INTEGER DEFAULT 0,
-        current_count INTEGER DEFAULT 0,
-        quota_bytes INTEGER DEFAULT 10485760,
-        quota_count INTEGER DEFAULT 10000,
+        current_bytes INTEGER NOT NULL DEFAULT 0,
+        current_count INTEGER NOT NULL DEFAULT 0,
+        quota_bytes INTEGER NOT NULL DEFAULT 10485760,
+        quota_count INTEGER NOT NULL DEFAULT 10000,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
-        metadata TEXT DEFAULT '{}'
+        metadata TEXT NOT NULL DEFAULT '{}'
       )`
     );
 

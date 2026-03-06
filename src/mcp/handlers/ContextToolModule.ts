@@ -477,7 +477,7 @@ export class ContextToolModule implements ToolModule {
           this.state.knowledgeStore.ingest(knowledgeIngestEntry);
         }
       } catch (knowledgeError) {
-        console.error(
+        console.warn(
           "[ContextToolModule] Knowledge dual-write failed:",
           knowledgeError instanceof Error ? knowledgeError.message : String(knowledgeError)
         );

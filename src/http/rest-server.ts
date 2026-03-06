@@ -600,135 +600,151 @@ export class RESTPingMemServer {
     // ============================================================================
 
     this.app.post("/api/v1/codebase/ingest", async (c) => {
-      if (!this.config.ingestionService) {
-        return c.json(
-          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
-          503
-        );
-      }
+      try {
+        if (!this.config.ingestionService) {
+          return c.json(
+            { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
 
-      const parseResult = CodebaseIngestSchema.safeParse(await c.req.json());
-      if (!parseResult.success) {
-        return c.json(
-          { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
-          400
-        );
-      }
-      const projectDir = path.resolve(parseResult.data.projectDir);
-      const forceReingest = parseResult.data.forceReingest;
+        const parseResult = CodebaseIngestSchema.safeParse(await c.req.json());
+        if (!parseResult.success) {
+          return c.json(
+            { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+        const projectDir = path.resolve(parseResult.data.projectDir);
+        const forceReingest = parseResult.data.forceReingest;
 
-      const result = await this.config.ingestionService.ingestProject({
-        projectDir,
-        forceReingest,
-      });
+        const result = await this.config.ingestionService.ingestProject({
+          projectDir,
+          forceReingest,
+        });
 
-      if (result) {
-        if (this.config.adminStore) {
+        if (result) {
+          if (this.config.adminStore) {
+            this.config.adminStore.upsertProject({
+              projectId: result.projectId,
+              projectDir,
+              treeHash: result.treeHash,
+              lastIngestedAt: result.ingestedAt,
+            });
+          }
+          return c.json({ data: result });
+        }
+
+        const verify = await this.config.ingestionService.verifyProject(projectDir);
+        if (verify.projectId && this.config.adminStore) {
           this.config.adminStore.upsertProject({
-            projectId: result.projectId,
+            projectId: verify.projectId,
             projectDir,
-            treeHash: result.treeHash,
-            lastIngestedAt: result.ingestedAt,
+            treeHash: verify.currentTreeHash ?? undefined,
+            lastIngestedAt: new Date().toISOString(),
           });
         }
-        return c.json({ data: result });
-      }
 
-      const verify = await this.config.ingestionService.verifyProject(projectDir);
-      if (verify.projectId && this.config.adminStore) {
-        this.config.adminStore.upsertProject({
-          projectId: verify.projectId,
-          projectDir,
-          treeHash: verify.currentTreeHash ?? undefined,
-          lastIngestedAt: new Date().toISOString(),
+        return c.json({
+          data: {
+            projectId: verify.projectId,
+            treeHash: verify.currentTreeHash,
+            filesIndexed: 0,
+            chunksIndexed: 0,
+            commitsIndexed: 0,
+            ingestedAt: new Date().toISOString(),
+            hadChanges: false,
+          },
         });
+      } catch (error) {
+        return this.handleError(c, error);
       }
-
-      return c.json({
-        data: {
-          projectId: verify.projectId,
-          treeHash: verify.currentTreeHash,
-          filesIndexed: 0,
-          chunksIndexed: 0,
-          commitsIndexed: 0,
-          ingestedAt: new Date().toISOString(),
-          hadChanges: false,
-        },
-      });
     });
 
     this.app.post("/api/v1/codebase/verify", async (c) => {
-      if (!this.config.ingestionService) {
-        return c.json(
-          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
-          503
-        );
+      try {
+        if (!this.config.ingestionService) {
+          return c.json(
+            { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
+        const parseResult = CodebaseVerifySchema.safeParse(await c.req.json());
+        if (!parseResult.success) {
+          return c.json(
+            { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+        const projectDir = path.resolve(parseResult.data.projectDir);
+        const result = await this.config.ingestionService.verifyProject(projectDir);
+        return c.json({ data: result });
+      } catch (error) {
+        return this.handleError(c, error);
       }
-      const parseResult = CodebaseVerifySchema.safeParse(await c.req.json());
-      if (!parseResult.success) {
-        return c.json(
-          { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
-          400
-        );
-      }
-      const projectDir = path.resolve(parseResult.data.projectDir);
-      const result = await this.config.ingestionService.verifyProject(projectDir);
-      return c.json({ data: result });
     });
 
     this.app.get("/api/v1/codebase/search", async (c) => {
-      if (!this.config.ingestionService) {
-        return c.json(
-          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
-          503
-        );
-      }
-      const query = c.req.query("query");
-      if (!query) {
-        return c.json({ error: "BadRequest", message: "query is required" }, 400);
-      }
-      const projectId = c.req.query("projectId");
-      const filePath = c.req.query("filePath");
-      const type = c.req.query("type") as "code" | "comment" | "docstring" | undefined;
-      const rawSearchLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
-      const limit = rawSearchLimit !== undefined ? (Number.isNaN(rawSearchLimit) ? 10 : Math.min(Math.max(rawSearchLimit, 1), 1000)) : undefined;
-      const searchOptions: {
-        projectId?: string;
-        filePath?: string;
-        type?: "code" | "comment" | "docstring";
-        limit?: number;
-      } = {};
-      if (projectId) searchOptions.projectId = projectId;
-      if (filePath) searchOptions.filePath = filePath;
-      if (type) searchOptions.type = type;
-      if (limit !== undefined) searchOptions.limit = limit;
+      try {
+        if (!this.config.ingestionService) {
+          return c.json(
+            { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
+        const query = c.req.query("query");
+        if (!query) {
+          return c.json({ error: "BadRequest", message: "query is required" }, 400);
+        }
+        const projectId = c.req.query("projectId");
+        const filePath = c.req.query("filePath");
+        const type = c.req.query("type") as "code" | "comment" | "docstring" | undefined;
+        const rawSearchLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
+        const limit = rawSearchLimit !== undefined ? (Number.isNaN(rawSearchLimit) ? 10 : Math.min(Math.max(rawSearchLimit, 1), 1000)) : undefined;
+        const searchOptions: {
+          projectId?: string;
+          filePath?: string;
+          type?: "code" | "comment" | "docstring";
+          limit?: number;
+        } = {};
+        if (projectId) searchOptions.projectId = projectId;
+        if (filePath) searchOptions.filePath = filePath;
+        if (type) searchOptions.type = type;
+        if (limit !== undefined) searchOptions.limit = limit;
 
-      const results = await this.config.ingestionService.searchCode(query, searchOptions);
-      return c.json({ data: { count: results.length, results } });
+        const results = await this.config.ingestionService.searchCode(query, searchOptions);
+        return c.json({ data: { count: results.length, results } });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
     });
 
     this.app.get("/api/v1/codebase/timeline", async (c) => {
-      if (!this.config.ingestionService) {
-        return c.json(
-          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
-          503
-        );
-      }
-      const projectId = c.req.query("projectId");
-      if (!projectId) {
-        return c.json({ error: "BadRequest", message: "projectId is required" }, 400);
-      }
-      const filePath = c.req.query("filePath") ?? undefined;
-      const rawTimelineLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
-      const limit = rawTimelineLimit !== undefined ? (Number.isNaN(rawTimelineLimit) ? 50 : Math.min(Math.max(rawTimelineLimit, 1), 1000)) : undefined;
-      const timelineOptions: { projectId: string; filePath?: string; limit?: number } = {
-        projectId,
-      };
-      if (filePath) timelineOptions.filePath = filePath;
-      if (limit !== undefined) timelineOptions.limit = limit;
+      try {
+        if (!this.config.ingestionService) {
+          return c.json(
+            { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
+        const projectId = c.req.query("projectId");
+        if (!projectId) {
+          return c.json({ error: "BadRequest", message: "projectId is required" }, 400);
+        }
+        const filePath = c.req.query("filePath") ?? undefined;
+        const rawTimelineLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
+        const limit = rawTimelineLimit !== undefined ? (Number.isNaN(rawTimelineLimit) ? 50 : Math.min(Math.max(rawTimelineLimit, 1), 1000)) : undefined;
+        const timelineOptions: { projectId: string; filePath?: string; limit?: number } = {
+          projectId,
+        };
+        if (filePath) timelineOptions.filePath = filePath;
+        if (limit !== undefined) timelineOptions.limit = limit;
 
-      const results = await this.config.ingestionService.queryTimeline(timelineOptions);
-      return c.json({ data: results });
+        const results = await this.config.ingestionService.queryTimeline(timelineOptions);
+        return c.json({ data: results });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
     });
 
     this.app.get("/api/v1/diagnostics/latest", async (c) => {
@@ -1167,18 +1183,30 @@ export class RESTPingMemServer {
           );
         }
 
-        const { agentId: rawId, role, ttlMs, quotaBytes, quotaCount, metadata } = parseResult.data;
+        const { agentId: rawId, role, ttlMs: rawTtlMs, quotaBytes, quotaCount, metadata } = parseResult.data;
         // admin privilege must be granted via server config, not self-assignment
         const admin = false;
-        const agentId = createAgentId(rawId);
+        let agentId: ReturnType<typeof createAgentId>;
+        try {
+          agentId = createAgentId(rawId);
+        } catch (err) {
+          if (err instanceof Error) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: err.message }, 400);
+          }
+          throw err;
+        }
+        // Clamp TTL: min 1 second, max 7 days
+        const ttlMs = Math.max(1000, Math.min(rawTtlMs, 604800000));
         const now = new Date().toISOString();
         const expiresAt = new Date(Date.now() + ttlMs).toISOString();
 
         const db = this.eventStore.getDatabase();
 
-        // Enforce max-agents limit
+        // Enforce max-agents limit (exclude expired agents)
         const maxAgents = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10) || 100;
-        const countRow = db.prepare("SELECT COUNT(*) as cnt FROM agent_quotas").get() as { cnt: number };
+        const countRow = db.prepare(
+          "SELECT COUNT(*) as cnt FROM agent_quotas WHERE expires_at IS NULL OR expires_at >= $now"
+        ).get({ $now: new Date().toISOString() }) as { cnt: number };
         const existingRow = db.prepare("SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id").get({ $agent_id: agentId });
         if (!existingRow && countRow.cnt >= maxAgents) {
           return c.json<RESTErrorResponse>({ error: "Conflict", message: `Maximum agent registrations (${maxAgents}) reached` }, 409);
@@ -1298,6 +1326,7 @@ export class RESTPingMemServer {
       const stream = new ReadableStream({
         start: (controller) => {
           const encoder = new TextEncoder();
+          let heartbeat: ReturnType<typeof setInterval>;
 
           const subscriptionId = this.pubsub.subscribe(
             {
@@ -1309,6 +1338,9 @@ export class RESTPingMemServer {
               try {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
               } catch (err) {
+                // Stream closed — clean up subscription and heartbeat
+                this.pubsub?.unsubscribe(subscriptionId);
+                clearInterval(heartbeat);
                 if (err instanceof TypeError && /closed|errored/i.test(String(err.message))) return;
                 console.error("[SSE] Failed to send event:", err instanceof Error ? err.message : String(err));
               }
@@ -1316,11 +1348,12 @@ export class RESTPingMemServer {
           );
 
           // Heartbeat every 30 seconds
-          const heartbeat = setInterval(() => {
+          heartbeat = setInterval(() => {
             try {
               controller.enqueue(encoder.encode(`: heartbeat\n\n`));
             } catch (err) {
               clearInterval(heartbeat);
+              this.pubsub?.unsubscribe(subscriptionId);
               if (!(err instanceof TypeError && /closed|errored/i.test(String(err.message)))) {
                 console.error("[SSE] Heartbeat error:", err instanceof Error ? err.message : String(err));
               }
@@ -1505,23 +1538,28 @@ export class RESTPingMemServer {
       const name = error.name;
       if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError") return 404;
       if (name === "QuotaExhaustedError" || name === "WriteLockConflictError") return 409;
-      if (name === "EvidenceGateRejectionError") return 403;
+      if (name === "EvidenceGateRejectionError" || name === "ScopeViolationError") return 403;
       if (name === "MemoryKeyExistsError") return 409;
-      if (name === "InvalidSessionError") return 400;
+      if (name === "SchemaValidationError" || name === "InvalidSessionError") return 400;
       // Check for known error codes
       const codeErr = error as { code?: string };
       if (codeErr.code === "MEMORY_NOT_FOUND") return 404;
       if (codeErr.code === "QUOTA_EXHAUSTED" || codeErr.code === "WRITE_LOCK_CONFLICT") return 409;
       if (codeErr.code === "MEMORY_EXISTS") return 409;
       if (codeErr.code === "INVALID_SESSION") return 400;
-      // Fallback to message-based detection for backward compat
-      if (error.message.includes("not found")) {
-        console.warn(`[REST Server] getStatusCode: message-based 404 for '${error.name}': ${error.message.slice(0, 80)}`);
-        return 404;
-      }
-      if (error.message.includes("invalid") || error.message.includes("required")) {
-        console.warn(`[REST Server] getStatusCode: message-based 400 for '${error.name}': ${error.message.slice(0, 80)}`);
-        return 400;
+      if (codeErr.code === "AGENT_EXPIRED") return 410;
+      // Fallback to message-based detection — only for known domain error types
+      const isDomainError = "code" in error ||
+        /Memory|Agent|Quota|Lock|Evidence|Schema|Scope/.test(error.constructor.name);
+      if (isDomainError) {
+        if (error.message.includes("not found")) {
+          console.warn(`[REST Server] getStatusCode: message-based 404 for '${error.name}': ${error.message.slice(0, 80)}`);
+          return 404;
+        }
+        if (error.message.includes("invalid") || error.message.includes("required")) {
+          console.warn(`[REST Server] getStatusCode: message-based 400 for '${error.name}': ${error.message.slice(0, 80)}`);
+          return 400;
+        }
       }
     }
     return 500;
@@ -1537,6 +1575,7 @@ export class RESTPingMemServer {
       403: "Forbidden",
       404: "Not Found",
       409: "Conflict",
+      410: "Gone",
       500: "Internal Server Error",
       503: "Service Unavailable",
     };
@@ -1553,7 +1592,10 @@ export class RESTPingMemServer {
 
     let promise = this.managerPromises.get(sessionId);
     if (!promise) {
-      promise = this.hydrateManager(sessionId);
+      promise = this.hydrateManager(sessionId).catch((err) => {
+        this.managerPromises.delete(sessionId);
+        throw err;
+      });
       this.managerPromises.set(sessionId, promise);
     }
     return promise;

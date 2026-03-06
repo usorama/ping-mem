@@ -30,9 +30,9 @@ if [ ! -f "$DB_PATH" ]; then
 fi
 
 # Run migrations using bun
-bun -e "
+PING_MEM_DB_PATH="$DB_PATH" bun -e "
 const Database = require('bun:sqlite');
-const db = new Database(process.env.PING_MEM_DB_PATH || process.env.HOME + '/.ping-mem/ping-mem.db');
+const db = new Database(process.env.PING_MEM_DB_PATH);
 
 // agent_quotas table
 db.exec(\`CREATE TABLE IF NOT EXISTS agent_quotas (

@@ -184,10 +184,10 @@ export class SemanticCompressor {
         .toLowerCase()
         .trim()
         .replace(/\s+/g, " ");
-      const shortKey = normalized.slice(0, 100); // Use first 100 chars as dedup key
+      const dedupKey = String(Bun.hash(normalized));
 
-      if (!seen.has(shortKey)) {
-        seen.add(shortKey);
+      if (!seen.has(dedupKey)) {
+        seen.add(dedupKey);
         // Build a fact string: "key: value" (truncated to 200 chars)
         const fact = `${memory.key}: ${memory.value}`.slice(0, 200);
         facts.push(fact);

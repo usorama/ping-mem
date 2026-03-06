@@ -247,8 +247,13 @@ export class KnowledgeStore {
     }
 
     sql += ` ORDER BY fts.rank LIMIT $limit`;
-    // Sanitize FTS5 special characters to prevent syntax injection
-    params.$query = `"${options.query.replace(/"/g, '""')}"`;
+    // Strip FTS5 operators that could alter query semantics
+    let sanitized = options.query
+      .replace(/[*^():]/g, " ")
+      .replace(/\b(AND|OR|NOT|NEAR)\b/gi, " ")
+      .trim();
+    if (!sanitized) sanitized = options.query.trim(); // fallback to original if everything was stripped
+    params.$query = '"' + sanitized.replace(/"/g, '""') + '"';
     params.$limit = limit;
 
     const rows = this.db.prepare(sql).all(params) as KnowledgeSearchRow[];

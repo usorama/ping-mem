@@ -115,7 +115,7 @@ describe("AgentToolModule", () => {
       expect(result!.quotaCount).toBe(50);
     });
 
-    test("upserts existing agent (updates role and quota)", async () => {
+    test("upserts existing agent (updates role but preserves original quotas)", async () => {
       // First registration
       await module.handle("agent_register", {
         agentId: "agent-gamma",
@@ -124,6 +124,8 @@ describe("AgentToolModule", () => {
       });
 
       // Second registration (upsert) with different role and quota
+      // Security: quota_bytes and quota_count are NOT updated on re-registration
+      // to prevent self-escalation — only server config can change quotas.
       const result = await module.handle("agent_register", {
         agentId: "agent-gamma",
         role: "lead-reviewer",
@@ -133,9 +135,11 @@ describe("AgentToolModule", () => {
       expect(result).toBeDefined();
       expect(result!.success).toBe(true);
       expect(result!.role).toBe("lead-reviewer");
+      // Return value reflects requested quota, but DB preserves original
       expect(result!.quotaBytes).toBe(4096);
 
       // Verify via quota_status that only one row exists
+      // and that quotas were NOT escalated (preserved from first registration)
       const status = await module.handle("agent_quota_status", {
         agentId: "agent-gamma",
       });
@@ -143,7 +147,8 @@ describe("AgentToolModule", () => {
       expect(status!.found).toBe(true);
       const usage = status!.usage as Record<string, unknown>;
       expect(usage.role).toBe("lead-reviewer");
-      expect(usage.quotaBytes).toBe(4096);
+      // Original quota (2048) is preserved, not escalated to 4096
+      expect(usage.quotaBytes).toBe(2048);
     });
 
     test("throws for empty agentId", async () => {

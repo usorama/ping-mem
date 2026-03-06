@@ -134,26 +134,16 @@ export class MemoryToolModule implements ToolModule {
     return { result };
   }
 
-  private async handleMemorySubscribe(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (!this.state.pubsub) {
-      throw new Error("MemoryPubSub not available.");
-    }
-
-    const options: import("../../pubsub/index.js").SubscriptionOptions = {};
-    if (typeof args.channel === "string") {
-      options.channel = args.channel;
-    }
-    if (typeof args.category === "string") {
-      options.category = args.category;
-    }
-
-    // Subscribe with a no-op handler for MCP tool subscriptions.
-    // The real delivery mechanism uses the SSE stream endpoint.
-    const subscriptionId = this.state.pubsub.subscribe(options, () => {
-      // Events delivered via SSE stream, not MCP tool responses
-    });
-
-    return { subscriptionId, subscriberCount: this.state.pubsub.subscriberCount, warning: "MCP subscriptions do not deliver events inline. Use the SSE endpoint GET /api/v1/events/stream for real-time delivery." };
+  private async handleMemorySubscribe(_args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    // MCP tool calls are request-response — creating a real subscription
+    // here would leak a zombie listener with a no-op handler.
+    // Direct callers to the SSE endpoint instead.
+    return {
+      content: [{ type: "text", text: JSON.stringify({
+        success: false,
+        message: "MCP subscriptions are not supported. Use the SSE endpoint /api/v1/events/stream for real-time events.",
+      }) }],
+    };
   }
 
   private async handleMemoryUnsubscribe(args: Record<string, unknown>): Promise<Record<string, unknown>> {

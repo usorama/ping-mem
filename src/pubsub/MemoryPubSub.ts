@@ -20,6 +20,8 @@ export interface MemoryEvent {
   category?: string;
   channel?: string;
   agentId?: string;
+  /** Agent role for role-based PubSub filtering */
+  agentRole?: string;
   agentScope?: AgentMemoryScope;
   timestamp: string;
   /** Included for save/update, omitted for delete */
@@ -48,6 +50,10 @@ export class MemoryPubSub {
   private subscriptions: Map<string, { handler: MemoryEventHandler; options: SubscriptionOptions }>;
   private nextId: number = 0;
   private maxSubscribers: number;
+  /** Consecutive error count per subscription for circuit-breaker */
+  private errorCounts: Map<string, number> = new Map();
+  /** Max consecutive failures before auto-unsubscribe */
+  private static readonly MAX_CONSECUTIVE_ERRORS = 5;
 
   constructor(maxSubscribers: number = 50) {
     this.emitter = new EventEmitter();
@@ -64,9 +70,15 @@ export class MemoryPubSub {
       throw new Error(`Maximum subscribers (${this.maxSubscribers}) reached`);
     }
     const id = `sub_${++this.nextId}`;
+    this.errorCounts.set(id, 0);
     const wrappedHandler: MemoryEventHandler = (event) => {
       // Scope filtering: private memories only delivered to owning agent
       if (event.agentScope === "private" && event.agentId !== options.agentId) return;
+
+      // Role-scope filtering: role-scoped events only go to same-role subscribers
+      if (event.agentScope === "role" && event.agentRole && options.agentRole && event.agentRole !== options.agentRole) {
+        return; // Different role — block event entirely
+      }
 
       // Strip value from role/shared scope events for non-owner subscribers
       let deliveredEvent = event;
@@ -83,8 +95,17 @@ export class MemoryPubSub {
 
       try {
         handler(deliveredEvent);
+        // Reset error count on success
+        this.errorCounts.set(id, 0);
       } catch (err) {
-        console.error("[MemoryPubSub] Subscriber handler threw:", err instanceof Error ? err.message : String(err));
+        const count = (this.errorCounts.get(id) ?? 0) + 1;
+        this.errorCounts.set(id, count);
+        console.error(`[MemoryPubSub] Subscriber ${id} handler threw (${count}/${MemoryPubSub.MAX_CONSECUTIVE_ERRORS}):`, err instanceof Error ? err.message : String(err));
+        if (count >= MemoryPubSub.MAX_CONSECUTIVE_ERRORS) {
+          console.error(`[MemoryPubSub] Circuit breaker: auto-unsubscribing ${id} after ${count} consecutive failures`);
+          // Schedule unsubscribe outside the emit loop to avoid mutation during iteration
+          queueMicrotask(() => this.unsubscribe(id));
+        }
       }
     };
     this.subscriptions.set(id, { handler: wrappedHandler, options });
@@ -100,6 +121,7 @@ export class MemoryPubSub {
     if (!sub) return false;
     this.emitter.off("memory", sub.handler);
     this.subscriptions.delete(subscriptionId);
+    this.errorCounts.delete(subscriptionId);
     return true;
   }
 

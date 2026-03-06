@@ -167,6 +167,9 @@ export class AgentToolModule implements ToolModule {
 
     const db = this.state.eventStore.getDatabase();
 
+    // Lazily clean up expired agent registrations before checking limits
+    db.prepare("DELETE FROM agent_quotas WHERE expires_at IS NOT NULL AND expires_at < $now").run({ $now: new Date().toISOString() });
+
     const maxAgents = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10) || 100;
     const countRow = db.prepare("SELECT COUNT(*) as cnt FROM agent_quotas WHERE expires_at IS NULL OR expires_at >= $now").get({ $now: new Date().toISOString() }) as { cnt: number };
     // Only check limit on new registrations (not upserts)
@@ -175,6 +178,8 @@ export class AgentToolModule implements ToolModule {
       throw new Error(`Maximum agent registrations (${maxAgents}) reached`);
     }
 
+    // On re-registration (upsert), do NOT update quota_bytes/quota_count
+    // to prevent self-escalation — only server config can change quotas.
     db.prepare(
       `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
        VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
@@ -182,8 +187,6 @@ export class AgentToolModule implements ToolModule {
          role = $role,
          ttl_ms = $ttl_ms,
          expires_at = $expires_at,
-         quota_bytes = $quota_bytes,
-         quota_count = $quota_count,
          updated_at = $updated_at,
          metadata = $metadata`
     ).run({
