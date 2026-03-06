@@ -73,6 +73,12 @@ All codebase endpoints require the REST server to have IngestionService configur
 | GET | `/api/v1/codebase/search?query=...&projectId=...&type=...&limit=...` | Semantic code search |
 | GET | `/api/v1/codebase/timeline?projectId=...&filePath=...&limit=...` | Temporal commit history |
 | GET | `/health` | Health check (always 200 if server running) |
+| POST | `/api/v1/agents/register` | Register or update agent identity (body: `{agentId, role, admin?, ttlMs?, quotaBytes?, quotaCount?}`) |
+| GET | `/api/v1/agents/quotas` | Get quota status for all or specific agent |
+| DELETE | `/api/v1/agents/:agentId` | Deregister an agent |
+| POST | `/api/v1/knowledge/ingest` | Ingest a knowledge entry (body: `{projectId, title, solution, symptoms?, rootCause?, tags?}`) |
+| POST | `/api/v1/knowledge/search` | Full-text knowledge search (body: `{query, projectId?, crossProject?, tags?, limit?}`) |
+| GET | `/api/v1/events/stream` | SSE stream of real-time memory events |
 
 **Important**: Codebase search is a **GET** endpoint with query params, NOT POST.
 
@@ -785,6 +791,26 @@ All tools are prefixed with `ping_mem_` when loaded in Claude Code:
 | `worklog_record` | Record deterministic worklog event (tool/diagnostics/git/task) |
 | `worklog_list` | List worklog events for a session |
 
+#### Agent Tools (v2.0.0)
+| Tool | Purpose |
+|------|---------|
+| `agent_register` | Register or update an agent identity with quota and TTL |
+| `agent_quota_status` | Get quota usage for a registered agent |
+| `agent_deregister` | Remove an agent registration and release resources |
+
+#### Knowledge Tools (v2.0.0)
+| Tool | Purpose |
+|------|---------|
+| `knowledge_ingest` | Ingest a knowledge entry (upsert by projectId + title) |
+| `knowledge_search` | Full-text search across knowledge entries with FTS5 |
+
+#### Memory PubSub Tools (v2.0.0)
+| Tool | Purpose |
+|------|---------|
+| `memory_subscribe` | Subscribe to real-time memory change events |
+| `memory_unsubscribe` | Unsubscribe from memory events |
+| `memory_compress` | Compress memories into digest facts (heuristic or LLM) |
+
 ---
 
 ## Deployment Instructions
@@ -834,7 +860,8 @@ docker run -d \
 | `QDRANT_URL` | **For ingestion** | | Qdrant REST URL (e.g., `http://localhost:6333`) |
 | `QDRANT_COLLECTION_NAME` | **For ingestion** | `ping-mem-vectors` | Qdrant collection name |
 | `QDRANT_VECTOR_DIMENSIONS` | **For ingestion** | `768` | Vector dimensions |
-| `OPENAI_API_KEY` | Optional | | OpenAI API key (only for ML-based embeddings) |
+| `OPENAI_API_KEY` | Optional | | OpenAI API key (ML-based embeddings + SemanticCompressor LLM mode) |
+| `PING_MEM_MAX_AGENTS` | No | `100` | Maximum number of registered agents |
 | `PING_MEM_PORT` | No | `3000` | HTTP server port |
 | `PING_MEM_TRANSPORT` | No | `rest` | HTTP transport mode (`rest`, `sse`, `streamable-http`) |
 | `PING_MEM_API_KEY` | For auth | | Seed API key for request authentication |
@@ -922,11 +949,13 @@ ping-mem/
 │   │   ├── HybridSearchEngine.ts
 │   │   ├── LineageEngine.ts
 │   │   └── EvolutionEngine.ts
-│   ├── memory/            # Memory operations
+│   ├── knowledge/         # KnowledgeStore (FTS5 knowledge entries) — v2.0
+│   ├── memory/            # Memory operations + SemanticCompressor
+│   ├── pubsub/            # MemoryPubSub (real-time event bus) — v2.0
 │   ├── session/           # Session management
-│   ├── storage/           # SQLite event store
-│   ├── types/             # TypeScript definitions
-│   └── validation/        # Input validation
+│   ├── storage/           # SQLite event store + WriteLockManager
+│   ├── types/             # TypeScript definitions + agent error classes
+│   └── validation/        # Input validation (Zod schemas)
 ├── examples/              # Usage examples (NEW)
 │   └── resume-tracking/   # Resume tracking demo
 ├── dist/                  # Compiled JavaScript

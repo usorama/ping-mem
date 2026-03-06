@@ -9,6 +9,83 @@
  */
 
 // ============================================================================
+// Agent Identity Types (Multi-Agent Memory)
+// ============================================================================
+
+/**
+ * Branded AgentId — security boundary type.
+ * Prevents accidental string assignment; all agent IDs must go through createAgentId().
+ */
+declare const AgentIdBrand: unique symbol;
+export type AgentId = string & { readonly [AgentIdBrand]: typeof AgentIdBrand };
+
+/**
+ * Validate and create a branded AgentId from a raw string.
+ * @throws {Error} if raw is empty or exceeds 256 characters
+ */
+export function createAgentId(raw: string): AgentId {
+  if (!raw || raw.length > 256) throw new Error("Invalid agent ID");
+  return raw as AgentId;
+}
+
+/**
+ * Free-form agent role string (e.g. "researcher", "coder", "reviewer").
+ * Not an enum — consumers define their own roles.
+ */
+export type AgentRole = string;
+
+/**
+ * Visibility scope for agent memories.
+ * - "private": only the owning agent can read/write
+ * - "role": agents with the same role can read
+ * - "shared": all agents in the same session can read
+ * - "public": any agent in any session can read
+ */
+export type AgentMemoryScope = "private" | "role" | "shared" | "public";
+
+/**
+ * Registered agent identity with quota and TTL information.
+ */
+export interface AgentIdentity {
+  /** Branded agent identifier */
+  agentId: AgentId;
+  /** Free-form role string */
+  role: AgentRole;
+  /** Whether this agent has admin privileges */
+  admin: boolean;
+  /** Time-to-live for the agent registration in milliseconds */
+  ttlMs: number;
+  /** ISO 8601 expiration timestamp */
+  expiresAt: string;
+  /** Maximum memory storage in bytes */
+  quotaBytes: number;
+  /** Maximum number of memory entries */
+  quotaCount: number;
+  /** Arbitrary metadata attached to this agent */
+  metadata: Record<string, unknown>;
+}
+
+/**
+ * Current quota usage for an agent.
+ */
+export interface AgentQuotaUsage {
+  /** Branded agent identifier */
+  agentId: AgentId;
+  /** Agent role */
+  role: AgentRole;
+  /** Current bytes consumed */
+  currentBytes: number;
+  /** Current number of memory entries */
+  currentCount: number;
+  /** Maximum bytes allowed */
+  quotaBytes: number;
+  /** Maximum entries allowed */
+  quotaCount: number;
+  /** Percentage of quota used (0-100, based on the higher of bytes/count ratios) */
+  percentUsed: number;
+}
+
+// ============================================================================
 // Session Types
 // ============================================================================
 
@@ -36,6 +113,8 @@ export interface SessionConfig {
   defaultChannel?: string;
   /** Auto-load context from previous sessions */
   autoLoadContext?: boolean;
+  /** Optional agent identity binding for multi-agent sessions */
+  agentId?: AgentId;
   /** Custom metadata */
   metadata?: Record<string, unknown>;
 }
@@ -80,9 +159,9 @@ export interface Session {
 export type MemoryId = string;
 
 /**
- * Memory categories for organization
+ * Built-in memory categories shipped with ping-mem.
  */
-export type MemoryCategory =
+export type BuiltInCategory =
   | "task"
   | "decision"
   | "progress"
@@ -90,7 +169,17 @@ export type MemoryCategory =
   | "error"
   | "warning"
   | "fact"
-  | "observation";
+  | "observation"
+  | "knowledge_entry"
+  | "digest";
+
+/**
+ * Memory categories for organization.
+ * Includes all built-in categories plus any custom string.
+ * The `(string & {})` pattern preserves autocomplete for built-in values
+ * while allowing arbitrary strings at runtime.
+ */
+export type MemoryCategory = BuiltInCategory | (string & {});
 
 /**
  * Priority levels for memories
@@ -130,6 +219,10 @@ export interface Memory {
   embedding?: Float32Array;
   /** Custom metadata */
   metadata: Record<string, unknown>;
+  /** Agent that owns this memory (multi-agent support) */
+  agentId?: AgentId;
+  /** Visibility scope for multi-agent access control */
+  agentScope?: AgentMemoryScope;
 }
 
 /**

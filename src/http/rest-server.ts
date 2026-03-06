@@ -33,11 +33,12 @@ import {
   SummaryCache,
 } from "../diagnostics/index.js";
 import type { FindingInput } from "../diagnostics/types.js";
-import type {
-  SessionId,
-  MemoryCategory,
-  MemoryPriority,
-  MemoryPrivacy,
+import {
+  createAgentId,
+  type SessionId,
+  type MemoryCategory,
+  type MemoryPriority,
+  type MemoryPrivacy,
 } from "../types/index.js";
 
 import type {
@@ -49,6 +50,7 @@ import type {
   CheckpointRequest,
 } from "./types.js";
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
+import { MemoryPubSub } from "../pubsub/index.js";
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
@@ -61,7 +63,11 @@ import {
   DiagnosticsDiffSchema,
   DiagnosticsSummarizeSchema,
   MemoryConsolidateSchema,
+  AgentRegisterSchema,
+  KnowledgeSearchSchema,
+  KnowledgeIngestSchema,
 } from "../validation/api-schemas.js";
+import { KnowledgeStore } from "../knowledge/index.js";
 
 // ============================================================================
 // REST Server Class
@@ -95,6 +101,8 @@ export class RESTPingMemServer {
   private diagnosticsStore: DiagnosticsStore;
   private summaryGenerator: SummaryGenerator | null = null;
   private relevanceEngine: RelevanceEngine;
+  private pubsub: MemoryPubSub;
+  private knowledgeStore: KnowledgeStore;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -108,6 +116,8 @@ export class RESTPingMemServer {
     this.eventStore = new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
     this.sessionManager = new SessionManager({ eventStore: this.eventStore });
     this.relevanceEngine = new RelevanceEngine(this.eventStore.getDatabase());
+    this.pubsub = new MemoryPubSub();
+    this.knowledgeStore = new KnowledgeStore(this.eventStore.getDatabase());
     this.diagnosticsStore =
       this.config.diagnosticsStore ??
       new DiagnosticsStore({
@@ -296,6 +306,7 @@ export class RESTPingMemServer {
         const memoryConfig: MemoryManagerConfig = {
           eventStore: this.eventStore,
           sessionId: session.id,
+          pubsub: this.pubsub,
         };
 
         if (this.vectorIndex) {
@@ -1119,8 +1130,240 @@ export class RESTPingMemServer {
         if (parseResult.data.minDaysOld !== undefined) {
           options.minDaysOld = parseResult.data.minDaysOld;
         }
-        const result = this.relevanceEngine.consolidate(options);
+        const result = await this.relevanceEngine.consolidate(options);
         return c.json({ data: result });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Agent Management Routes
+    // ============================================================================
+
+    this.app.post("/api/v1/agents/register", async (c) => {
+      try {
+        const parseResult = AgentRegisterSchema.safeParse(
+          await c.req.json().catch(() => ({}))
+        );
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const { agentId: rawId, role, admin, ttlMs, quotaBytes, quotaCount, metadata } = parseResult.data;
+        const agentId = createAgentId(rawId);
+        const now = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+
+        const db = this.eventStore.getDatabase();
+        db.prepare(
+          `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
+           VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
+           ON CONFLICT(agent_id) DO UPDATE SET
+             role = $role, admin = $admin, ttl_ms = $ttl_ms, expires_at = $expires_at,
+             quota_bytes = $quota_bytes, quota_count = $quota_count,
+             updated_at = $updated_at, metadata = $metadata`
+        ).run({
+          $agent_id: agentId,
+          $role: role,
+          $admin: admin ? 1 : 0,
+          $ttl_ms: ttlMs,
+          $expires_at: expiresAt,
+          $quota_bytes: quotaBytes,
+          $quota_count: quotaCount,
+          $created_at: now,
+          $updated_at: now,
+          $metadata: JSON.stringify(metadata ?? {}),
+        });
+
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: { agentId, role, admin, ttlMs, expiresAt, quotaBytes, quotaCount },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/agents/quotas", async (c) => {
+      try {
+        const agentId = c.req.query("agentId");
+        const db = this.eventStore.getDatabase();
+
+        if (agentId) {
+          const row = db.prepare(
+            "SELECT * FROM agent_quotas WHERE agent_id = $agent_id"
+          ).get({ $agent_id: createAgentId(agentId) }) as Record<string, unknown> | undefined;
+
+          if (!row) {
+            return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${agentId}' not found` }, 404);
+          }
+          return c.json<RESTSuccessResponse<Record<string, unknown>>>({ data: row });
+        }
+
+        const rows = db.prepare("SELECT * FROM agent_quotas ORDER BY updated_at DESC").all();
+        return c.json<RESTSuccessResponse<{ agents: unknown[] }>>({ data: { agents: rows } });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.delete("/api/v1/agents/:agentId", async (c) => {
+      try {
+        const rawId = c.req.param("agentId");
+        if (!rawId) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "agentId is required" }, 400);
+        }
+        const agentId = createAgentId(rawId);
+        const db = this.eventStore.getDatabase();
+
+        const lockResult = db.prepare("DELETE FROM write_locks WHERE holder_id = $agent_id").run({ $agent_id: agentId });
+        const quotaResult = db.prepare("DELETE FROM agent_quotas WHERE agent_id = $agent_id").run({ $agent_id: agentId });
+
+        if (quotaResult.changes === 0) {
+          return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${rawId}' not found` }, 404);
+        }
+
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: { agentId, quotaRowsDeleted: quotaResult.changes, lockRowsDeleted: lockResult.changes },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // SSE Event Stream (Memory PubSub)
+    // ============================================================================
+
+    this.app.get("/api/v1/events/stream", async (c) => {
+      const channel = c.req.query("channel");
+      const category = c.req.query("category");
+
+      const stream = new ReadableStream({
+        start: (controller) => {
+          const encoder = new TextEncoder();
+
+          const subscriptionId = this.pubsub.subscribe(
+            {
+              ...(channel ? { channel } : {}),
+              ...(category ? { category } : {}),
+            },
+            (event) => {
+              try {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+              } catch {
+                // Stream closed, ignore
+              }
+            }
+          );
+
+          // Heartbeat every 30 seconds
+          const heartbeat = setInterval(() => {
+            try {
+              controller.enqueue(encoder.encode(`: heartbeat\n\n`));
+            } catch {
+              clearInterval(heartbeat);
+            }
+          }, 30_000);
+
+          // Clean up on abort
+          c.req.raw.signal.addEventListener("abort", () => {
+            clearInterval(heartbeat);
+            this.pubsub.unsubscribe(subscriptionId);
+            try {
+              controller.close();
+            } catch {
+              // Already closed
+            }
+          });
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+        },
+      });
+    });
+
+    // ============================================================================
+    // Knowledge Endpoints
+    // ============================================================================
+
+    this.app.post("/api/v1/knowledge/search", async (c) => {
+      try {
+        const raw = await c.req.json();
+        const parsed = KnowledgeSearchSchema.safeParse(raw);
+        if (!parsed.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parsed.error.issues.map((i) => i.message).join("; ") },
+            400
+          );
+        }
+        const body = parsed.data;
+
+        // Build search options with only defined properties (exactOptionalPropertyTypes)
+        const searchOpts: import("../knowledge/index.js").KnowledgeSearchOptions = {
+          query: body.query,
+          crossProject: body.crossProject,
+          limit: body.limit,
+        };
+        if (body.projectId !== undefined) {
+          searchOpts.projectId = body.projectId;
+        }
+        if (body.tags !== undefined) {
+          searchOpts.tags = body.tags;
+        }
+
+        const results = this.knowledgeStore.search(searchOpts);
+
+        return c.json<RESTSuccessResponse<{ count: number; results: unknown[] }>>({
+          data: {
+            count: results.length,
+            results: results.map((r) => ({ ...r.entry, rank: r.rank })),
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.post("/api/v1/knowledge/ingest", async (c) => {
+      try {
+        const raw = await c.req.json();
+        const parsed = KnowledgeIngestSchema.safeParse(raw);
+        if (!parsed.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parsed.error.issues.map((i) => i.message).join("; ") },
+            400
+          );
+        }
+        const body = parsed.data;
+
+        // Build ingest entry with only defined properties (exactOptionalPropertyTypes)
+        const ingestEntry: Omit<import("../knowledge/index.js").KnowledgeEntry, "id" | "createdAt" | "updatedAt"> = {
+          projectId: body.projectId,
+          title: body.title,
+          solution: body.solution,
+          tags: body.tags,
+        };
+        if (body.symptoms !== undefined) {
+          ingestEntry.symptoms = body.symptoms;
+        }
+        if (body.rootCause !== undefined) {
+          ingestEntry.rootCause = body.rootCause;
+        }
+
+        const entry = this.knowledgeStore.ingest(ingestEntry);
+
+        return c.json<RESTSuccessResponse<{ entry: unknown }>>({
+          data: { entry },
+        });
       } catch (error) {
         return this.handleError(c, error);
       }
@@ -1231,6 +1474,7 @@ export class RESTPingMemServer {
       const config: MemoryManagerConfig = {
         eventStore: this.eventStore,
         sessionId,
+        pubsub: this.pubsub,
       };
 
       if (this.vectorIndex) {

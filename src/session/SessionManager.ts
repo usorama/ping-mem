@@ -169,6 +169,12 @@ export class SessionManager {
     const sessionId = this.generateUUID();
     const now = new Date();
 
+    // Merge agentId into metadata when provided (no mutable global state)
+    const metadata: Record<string, unknown> = config.metadata ? { ...config.metadata } : {};
+    if (config.agentId !== undefined) {
+      metadata.agentId = config.agentId;
+    }
+
     const session: Session = {
       id: sessionId,
       name: config.name,
@@ -177,7 +183,7 @@ export class SessionManager {
       memoryCount: 0,
       eventCount: 0,
       lastActivityAt: now,
-      metadata: config.metadata ?? {},
+      metadata,
     };
     if (config.projectDir !== undefined) {
       session.projectDir = config.projectDir;
