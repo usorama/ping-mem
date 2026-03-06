@@ -1,8 +1,13 @@
 {
-  "projectId": "fd52cf7ddd219b6348e1dea36e86ce6889f358da7b89f7c71da06654d59f0d26",
-  "rootPath": "/Users/umasankr/Projects/ping-mem",
-  "treeHash": "2e313c538824fe3409d81844d9693d30ff6067282aed9f393219f31f4af5b691",
+  "projectId": "b4ad003e557d5fa914f2524f17beb6e82aa0f51b8f18426a014edef59c092800",
+  "rootPath": "/projects/ping-mem",
+  "treeHash": "d253ca9b10ad017a73c46df92669e88ac4dcc1db4b305a3ceb439ef912615886",
   "files": [
+    {
+      "path": ".claude/settings.local.json",
+      "sha256": "52901c90ed3736a6aa96dab7daba157ccb3519af19d154a0ab2851867257df39",
+      "bytes": 646
+    },
     {
       "path": ".cursor/mcp.json",
       "sha256": "32de12e02513a2668215a7d5abfce93ca30e816aea8437ce9109c2bd86d00701",
@@ -65,13 +70,13 @@
     },
     {
       "path": "AGENT_INSTRUCTIONS.md",
-      "sha256": "cda5edca0d226afe6630b2d1e0e1003d7d9e256473a824732b9cd2eac7abe600",
-      "bytes": 7120
+      "sha256": "b373732825cd8fb47a986d1a138395572c59112a37ba19e73516a65feae8784a",
+      "bytes": 7425
     },
     {
       "path": "CLAUDE.md",
-      "sha256": "64d1b463a3baec61d0bb71ac537a175ce65943863fa2b3a01a39dd4c39c1682d",
-      "bytes": 41255
+      "sha256": "700795b9145dab96e44dc1bdb95e3fd6330c5ac26be67f267b88ae7fc011bff1",
+      "bytes": 46344
     },
     {
       "path": "DIAGNOSTICS_IMPLEMENTATION.md",
@@ -110,8 +115,13 @@
     },
     {
       "path": "docker-compose.yml",
-      "sha256": "de6056c0bd9a8766bea516976db99ee82fa6f35229b716299c1922273ff3edf0",
+      "sha256": "af5375a13c569ccd4d73bc2019870ccbed24a3efbe059adf6bbd3ed427cf782c",
       "bytes": 4478
+    },
+    {
+      "path": "docs/AGENT_INTEGRATION_GUIDE.md",
+      "sha256": "b31e9456f615c04717d899e74bfe5de23c0697ebc82999ceb1c9d2887b642f77",
+      "bytes": 24255
     },
     {
       "path": "docs/AGENT_WORKFLOW.md",
@@ -189,6 +199,11 @@
       "bytes": 16742
     },
     {
+      "path": "docs/plans/2026-02-06-feat-paro-memory-migration-and-enhancement-plan.md",
+      "sha256": "f7a71dc3a39731c202a7fa9b65db77094cbb0b6670e6ceeacaef8b30c38f8506",
+      "bytes": 22773
+    },
+    {
       "path": "examples/multi-tool-diagnostics/README.md",
       "sha256": "6b61782bd99dfb466675dbfda9e5ba1ed344ec0205505d20af89027718725d4a",
       "bytes": 5754
@@ -224,6 +239,11 @@
       "bytes": 3121
     },
     {
+      "path": "scripts/force-ingest.ts",
+      "sha256": "3061cf3757ff7f4d1579d59e9e11ad2084630a16381b3d49714497096fbfc31d",
+      "bytes": 1245
+    },
+    {
       "path": "scripts/ingest-project.sh",
       "sha256": "6906d8d99c634a27ad367a396af30997fe20f901e5796a684cdb8d35c63f3743",
       "bytes": 6776
@@ -232,6 +252,16 @@
       "path": "scripts/install-client.sh",
       "sha256": "726fb9abb60e377536b37c9851bce80895ebd1684138907782ef26a11224767a",
       "bytes": 9047
+    },
+    {
+      "path": "scripts/migrate-from-memory-keeper.ts",
+      "sha256": "16bc38dccd0e9d219622bd82b1fd0ca421ccc48f7958525be9dee0d9406d2ab8",
+      "bytes": 12966
+    },
+    {
+      "path": "scripts/reindex-qdrant.ts",
+      "sha256": "103ba3c16163624a203396fc86ae9161d02ed9187866cd468f4ceac20fabb1ee",
+      "bytes": 1260
     },
     {
       "path": "scripts/rotate-api-key.sh",
@@ -247,6 +277,11 @@
       "path": "scripts/smoke-test.sh",
       "sha256": "fa0056d8d1542c5a439261cb68b39dcb5dc1131135dd870d8a4614ef1dbb8e8d",
       "bytes": 5290
+    },
+    {
+      "path": "scripts/verify-persistence.ts",
+      "sha256": "44e7701438f9f7023261a84fa1741a9ae65fa906aec91d512abb4f66b634953a",
+      "bytes": 2994
     },
     {
       "path": "src/__mocks__/bun-sqlite.d.ts",
@@ -390,8 +425,8 @@
     },
     {
       "path": "src/diagnostics/index.ts",
-      "sha256": "5f35452355d0dc70c687e634fd446b7bf0a8d36827415350221997d825afa491",
-      "bytes": 241
+      "sha256": "17c711dd268bf9dc9ca1fc92b08ae6dc1c56a8d6a05da829e7672203cec3103d",
+      "bytes": 240
     },
     {
       "path": "src/diagnostics/normalizer.ts",
@@ -455,8 +490,8 @@
     },
     {
       "path": "src/graph/TemporalCodeGraph.ts",
-      "sha256": "6efcbefbfa52069088c56e058d5b40e40f14eb11a601a8cbec8422d57d066112",
-      "bytes": 17886
+      "sha256": "5eac2a29ee1f26d78a20f963564b9171256a774866b721b1b4ae2624e53e7239",
+      "bytes": 19695
     },
     {
       "path": "src/graph/TemporalStore.ts",
@@ -535,8 +570,8 @@
     },
     {
       "path": "src/http/rest-server.ts",
-      "sha256": "872adce5122fec9ded189f3af97e2f19c2610a56a5927d65fd950867d1194094",
-      "bytes": 34392
+      "sha256": "7551b377d3d6a138daa3debe6ac9b44b3255bd22ce3dad4a12d588d5834fa7ad",
+      "bytes": 38753
     },
     {
       "path": "src/http/server.ts",
@@ -550,8 +585,8 @@
     },
     {
       "path": "src/http/types.ts",
-      "sha256": "ab2aced46ac0c24567e99a9eebc618f471903d4ce0e9273cb335a6c679159c08",
-      "bytes": 5735
+      "sha256": "02f1e03b6384cd896b15dc400571bd4e86c7c41253498a16bdca8d477d0da3b4",
+      "bytes": 6011
     },
     {
       "path": "src/ingest/CodeChunker.ts",
@@ -565,18 +600,18 @@
     },
     {
       "path": "src/ingest/GitHistoryReader.ts",
-      "sha256": "03a6487218c3c4365ffa26771995f75088511a845a009bbeab9dbfc199bcb5b3",
-      "bytes": 7182
+      "sha256": "9f4a20fe412678cb3b747f39f39311c2736f53e77827c176d4f60a91296ef39c",
+      "bytes": 7306
     },
     {
       "path": "src/ingest/IngestionOrchestrator.ts",
-      "sha256": "71a69f1963c917bbc262b8ec88d5dbd12d5b3794b955029cd53bb7995680089a",
-      "bytes": 5756
+      "sha256": "d35e8f7dd0a932290353b1cad8bb36ebf4f4b7c1bfc96924e194d1d1a59d8f7d",
+      "bytes": 5923
     },
     {
       "path": "src/ingest/IngestionService.ts",
-      "sha256": "7c1a41d894fea4215b3ac9cbecc7cec45ff9eae741247b23cc75d09aa3e3fa6d",
-      "bytes": 7962
+      "sha256": "66542509b21f9724bbb1680ac8347b9fe23c4123f383111e2de4699700f69ec3",
+      "bytes": 8138
     },
     {
       "path": "src/ingest/ManifestStore.ts",
@@ -585,8 +620,8 @@
     },
     {
       "path": "src/ingest/ProjectScanner.ts",
-      "sha256": "fa7d6cd64d5f6be50f610db519c5d68abcc5c51e99b5846f74d12d43e88956fd",
-      "bytes": 4621
+      "sha256": "785825b7e3b30f96ab4940da6ea8898e5259167d860369285d184980906cd273",
+      "bytes": 5058
     },
     {
       "path": "src/ingest/SafeGit.ts",
@@ -607,6 +642,11 @@
       "path": "src/ingest/UnifiedIngestionService.ts",
       "sha256": "d34fe55be400dfc33183c3698a35b36bd024911110b570605bdd3e80bcf299fe",
       "bytes": 8892
+    },
+    {
+      "path": "src/ingest/__tests__/ProjectScanner.test.ts",
+      "sha256": "59283fd6b78ea76fc14c57211311a576d5fbc646d2cfdf13b5c852f580ed68bf",
+      "bytes": 8086
     },
     {
       "path": "src/ingest/__tests__/SafeGit.security.test.ts",
@@ -630,8 +670,8 @@
     },
     {
       "path": "src/mcp/PingMemServer.ts",
-      "sha256": "b5f986210c7e9958c9389017df8340da37956f0b0682059f3b08164b5c111946",
-      "bytes": 83016
+      "sha256": "3be5e2b3e6c2aee3e3765cc084458d77834f19e7baeff89ca49856132d62bc67",
+      "bytes": 89819
     },
     {
       "path": "src/mcp/__tests__/PingMemServer.test.ts",
@@ -665,8 +705,13 @@
     },
     {
       "path": "src/memory/MemoryManager.ts",
-      "sha256": "51fd2c0261f4ba28f7ebb949b2f2563306b61766b2ff29d83b681c216cfd6861",
-      "bytes": 18272
+      "sha256": "ee16cf5ed3645ffdc2c8294072bf20701cbcc424fe4ccad4c6a1fefb0a8b225c",
+      "bytes": 28990
+    },
+    {
+      "path": "src/memory/RelevanceEngine.ts",
+      "sha256": "25cfa9681e3f83f8c4f0c47b5efcebee7898095849008b64de5b3fc3ba0f6caa",
+      "bytes": 21460
     },
     {
       "path": "src/memory/__tests__/MemoryManager.test.ts",
@@ -694,9 +739,29 @@
       "bytes": 8588
     },
     {
+      "path": "src/migration/MemoryKeeperReader.ts",
+      "sha256": "a7e397611e792613b6f323da44be1557869334b26eddae826d33c3a9a3aeb72a",
+      "bytes": 5092
+    },
+    {
+      "path": "src/migration/MigrationLedger.ts",
+      "sha256": "a97a196cddf75a5e3ec5c6fbf1a852d9fbf15f98d7576e6ffae2349e8609176d",
+      "bytes": 6573
+    },
+    {
+      "path": "src/migration/MigrationVerifier.ts",
+      "sha256": "315292b15f126c4adeccec5c0434f012186802e1fd8f98a1786cf8b409907d36",
+      "bytes": 7316
+    },
+    {
+      "path": "src/profile/UserProfile.ts",
+      "sha256": "32e4bd399d045239a818323082ef09b2e3bbc0e4d3bc2ca38da8b2dbec855493",
+      "bytes": 4843
+    },
+    {
       "path": "src/search/CodeIndexer.ts",
-      "sha256": "6b501f6cbbff4d13d3d63b8bff2486289841b805918dece33c532c2b8583fcc8",
-      "bytes": 6846
+      "sha256": "1e9aab1aa05379e1210703aab090866e76b8b0ce5084b8389972e0037ae0875c",
+      "bytes": 6998
     },
     {
       "path": "src/search/DeterministicVectorizer.ts",
@@ -720,8 +785,8 @@
     },
     {
       "path": "src/search/VectorIndex.ts",
-      "sha256": "138779fdf7fdcf81eb86259c698d88b30c6ee3fa14872d2ac2ef54e088d2ea0b",
-      "bytes": 15384
+      "sha256": "c92340286a4fa3aafb62d2d65879329d8178e5e17fc47e83208b9b0e1f10294c",
+      "bytes": 15992
     },
     {
       "path": "src/search/__tests__/EmbeddingService.test.ts",
@@ -750,8 +815,8 @@
     },
     {
       "path": "src/session/SessionManager.ts",
-      "sha256": "6a71fd4335f2eb6c34c87870c56426b244ec3931a466191f0b5235d8dd26196d",
-      "bytes": 12998
+      "sha256": "548e8f4319eed2ed3879d683dbb7b51b9859f45bff2fd3d1d8f5ec699d1dbcd2",
+      "bytes": 14924
     },
     {
       "path": "src/session/__tests__/SessionManager.test.ts",
@@ -760,8 +825,8 @@
     },
     {
       "path": "src/storage/EventStore.ts",
-      "sha256": "a77d62dd1f854a6a167a535d000fc4f2484d98ae73789f2437dc1cae78ad5452",
-      "bytes": 16201
+      "sha256": "01c84b03968fd169f690cc199c90876b86f87d4ebcc01e36623885ff2c4dc6a5",
+      "bytes": 18660
     },
     {
       "path": "src/storage/__tests__/EventStore.security.test.ts",
@@ -785,8 +850,8 @@
     },
     {
       "path": "src/types/index.ts",
-      "sha256": "a6402839c842da76abe84a533794b7a0aaaecd1f8def54e46c231d4ea75c40fa",
-      "bytes": 9944
+      "sha256": "06bd320a366875127478afa18f48e96b4a14a253732a2b53892308cd2532a421",
+      "bytes": 10058
     },
     {
       "path": "src/util/__tests__/auth-utils.test.ts",
@@ -864,6 +929,6 @@
       "bytes": 849
     }
   ],
-  "generatedAt": "2026-02-01T17:11:47.115Z",
+  "generatedAt": "2026-02-13T03:57:35.072Z",
   "schemaVersion": 1
 }

@@ -13,6 +13,10 @@ import type { QdrantClientWrapper } from "./QdrantClient.js";
 import type { VectorIndex, VectorSearchResult } from "./VectorIndex.js";
 import type { GraphManager } from "../graph/GraphManager.js";
 import type { MemoryId, SessionId } from "../types/index.js";
+import type { BM25Store } from "./BM25Store.js";
+import type { MemoryLookup } from "./MemoryLookup.js";
+import type { Reranker } from "./Reranker.js";
+import { SEARCH_PROFILES, detectProfile } from "./SearchProfiles.js";
 
 // ============================================================================
 // Error Classes
@@ -55,7 +59,7 @@ export class SearchModeError extends HybridSearchError {
 /**
  * Search modes available in hybrid search
  */
-export type SearchMode = "semantic" | "keyword" | "graph";
+export type SearchMode = "semantic" | "keyword" | "graph" | "code" | "causal";
 
 /**
  * Weight configuration for different search modes
@@ -67,6 +71,10 @@ export interface SearchWeights {
   keyword: number;
   /** Weight for graph-based search (default: 0.2) */
   graph: number;
+  /** Weight for code-specific search (optional, used by code_search profile) */
+  code?: number;
+  /** Weight for causal search (optional, used by decision_recall/error_investigation profiles) */
+  causal?: number;
 }
 
 /**
@@ -96,6 +104,8 @@ export interface HybridSearchResult extends VectorSearchResult {
     semantic?: number;
     keyword?: number;
     graph?: number;
+    code?: number;
+    causal?: number;
   };
 }
 
@@ -119,6 +129,14 @@ export interface HybridSearchOptions {
   graphEntityId?: string;
   /** Maximum graph traversal depth (default: 1) */
   graphDepth?: number;
+  /** Skip temporal boost for this query */
+  skipTemporalBoost?: boolean;
+  /** Apply neural re-ranking via Reranker (default: false) */
+  rerank?: boolean;
+  /** Search profile name (overrides weights; auto-detected from query if not set) */
+  profile?: string;
+  /** Causal direction hint for search ("cause" boosts cause-side, "effect" boosts effect-side) */
+  causalDirection?: "cause" | "effect";
 }
 
 /**
@@ -154,6 +172,19 @@ export interface HybridSearchEngineConfig {
     /** b parameter (document length normalization, default: 0.75) */
     b?: number;
   };
+  /** Temporal boost configuration (post-retrieval recency boost) */
+  temporalBoost?: {
+    /** Boost factor (default: 0.3 = max 30% boost for today's memories) */
+    factor?: number;
+    /** Decay half-life in days (default: 30) */
+    decayDays?: number;
+  };
+  /** Optional BM25 persistence store for surviving restarts */
+  bm25Store?: BM25Store;
+  /** Memory lookup for resolving graph entity names to memory content (optional) */
+  memoryLookup?: MemoryLookup;
+  /** Optional Reranker for neural re-ranking of results */
+  reranker?: Reranker;
 }
 
 /**
@@ -169,6 +200,10 @@ interface ResolvedConfig {
     k1: number;
     b: number;
   };
+  temporalBoost: { factor: number; decayDays: number };
+  bm25Store: BM25Store | undefined;
+  memoryLookup: MemoryLookup | undefined;
+  reranker: Reranker | undefined;
 }
 
 // ============================================================================
@@ -439,6 +474,13 @@ export class HybridSearchEngine {
         k1: config.bm25?.k1 ?? DEFAULT_BM25_K1,
         b: config.bm25?.b ?? DEFAULT_BM25_B,
       },
+      temporalBoost: {
+        factor: config.temporalBoost?.factor ?? 0.3,
+        decayDays: config.temporalBoost?.decayDays ?? 30,
+      },
+      bm25Store: config.bm25Store,
+      memoryLookup: config.memoryLookup,
+      reranker: config.reranker,
     };
 
     this.bm25Index = new BM25Index(this.config.bm25.k1, this.config.bm25.b);
@@ -466,6 +508,11 @@ export class HybridSearchEngine {
       indexedAt,
       options?.metadata
     );
+
+    // Persist to BM25Store if configured
+    if (this.config.bm25Store) {
+      this.config.bm25Store.addDocument(memoryId, sessionId, content, indexedAt, options?.metadata);
+    }
 
     // Generate and store embedding for semantic search
     try {
@@ -522,11 +569,26 @@ export class HybridSearchEngine {
       } else if (this.config.localVectorIndex) {
         removed = (await this.config.localVectorIndex.deleteVector(memoryId)) || removed;
       }
-    } catch {
-      // Ignore deletion errors - document may not exist in vector index
+    } catch (error) {
+      // Document may not exist in vector index — log for diagnostics
+      console.warn("[HybridSearchEngine] removeDocument vector deletion failed:", error instanceof Error ? error.message : String(error));
     }
 
     return removed;
+  }
+
+  /**
+   * Add a document directly to the BM25 keyword index (no embedding required).
+   * Useful for testing and keyword-only workflows.
+   */
+  addDocument(
+    memoryId: MemoryId,
+    sessionId: SessionId,
+    content: string,
+    indexedAt: Date,
+    metadata?: Record<string, unknown>
+  ): void {
+    this.bm25Index.addDocument(memoryId, sessionId, content, indexedAt, metadata);
   }
 
   /**
@@ -538,7 +600,56 @@ export class HybridSearchEngine {
   ): Promise<HybridSearchResult[]> {
     const limit = options.limit ?? 10;
     const threshold = options.threshold ?? 0.0;
-    const weights = { ...this.config.weights, ...options.weights };
+
+    // Resolve weights from profile (explicit profile > explicit weights > auto-detect > config defaults)
+    let resolvedWeights: SearchWeights;
+    if (options.weights) {
+      // Explicit weights take highest priority
+      resolvedWeights = { ...this.config.weights, ...options.weights };
+    } else if (options.profile) {
+      // Explicit profile name
+      const profile = SEARCH_PROFILES.get(options.profile);
+      resolvedWeights = profile
+        ? { ...this.config.weights, ...profile.weights }
+        : { ...this.config.weights };
+    } else {
+      // Auto-detect profile from query
+      const detectedProfileName = detectProfile(query);
+      const profile = SEARCH_PROFILES.get(detectedProfileName);
+      resolvedWeights = profile
+        ? { ...this.config.weights, ...profile.weights }
+        : { ...this.config.weights };
+    }
+    // Auto-detect causal direction from query
+    let causalDirection = options.causalDirection;
+    if (!causalDirection) {
+      const lowerQuery = query.toLowerCase();
+      if (/\b(why|what caused|reason|because|due to)\b/.test(lowerQuery)) {
+        causalDirection = "cause";
+      } else if (/\b(what if|consequence|result|effect|impact|leads to)\b/.test(lowerQuery)) {
+        causalDirection = "effect";
+      }
+    }
+
+    // Boost causal weight when direction is detected and causal mode has weight
+    // Mutate in-place to preserve all existing properties (e.g. code, causal, future keys)
+    if (causalDirection && resolvedWeights.causal) {
+      const boostedCausal = resolvedWeights.causal * 1.5;
+      // Compute total using boosted causal instead of original
+      const total = resolvedWeights.semantic + resolvedWeights.keyword + resolvedWeights.graph
+        + boostedCausal + (resolvedWeights.code ?? 0);
+      if (total > 0) {
+        const scale = 1.0 / total;
+        // Scale all existing properties in-place
+        resolvedWeights.semantic *= scale;
+        resolvedWeights.keyword *= scale;
+        resolvedWeights.graph *= scale;
+        if (resolvedWeights.code !== undefined) resolvedWeights.code *= scale;
+        resolvedWeights.causal = boostedCausal * scale;
+      }
+    }
+
+    const weights = resolvedWeights;
     const modes = options.modes ?? this.getAvailableModes();
 
     // Collect results from each mode with their ranks
@@ -586,10 +697,39 @@ export class HybridSearchEngine {
       );
     }
 
+    // Code and causal modes are no-ops for now (providers will be wired later).
+    // They participate in RRF with empty result sets, so their weights have no effect yet.
+    if (modes.includes("code")) {
+      resultsByMode.set("code", new Map());
+    }
+    if (modes.includes("causal")) {
+      resultsByMode.set("causal", new Map());
+    }
+
     await Promise.all(searchPromises);
 
     // Apply reciprocal rank fusion
-    const fusedResults = this.reciprocalRankFusion(resultsByMode, weights);
+    let fusedResults = this.reciprocalRankFusion(resultsByMode, weights);
+
+    // Apply temporal boost unless explicitly skipped
+    if (!options.skipTemporalBoost) {
+      fusedResults = this.applyTemporalBoost(fusedResults);
+      // Re-sort after boost
+      fusedResults.sort((a, b) => b.hybridScore - a.hybridScore);
+    }
+
+    // Optional re-ranking via Cohere Rerank API (skip if reranker returns null on failure)
+    if (options.rerank && this.config.reranker && fusedResults.length > 0) {
+      const documents = fusedResults.map((r) => r.content);
+      const reranked = await this.config.reranker.rerank(query, documents);
+      if (reranked !== null) {
+        const reorderedResults = reranked.map((rr) => ({
+          ...fusedResults[rr.index]!,
+          hybridScore: rr.relevanceScore,
+        }));
+        fusedResults = reorderedResults;
+      }
+    }
 
     // Filter by threshold and limit
     return fusedResults
@@ -684,7 +824,8 @@ export class HybridSearchEngine {
   }
 
   /**
-   * Perform graph-based search using entity relationships
+   * Perform graph-based search using entity relationships.
+   * Collects entity names from relationships and looks up memories via MemoryLookup.
    */
   private async graphSearch(
     entityId: string,
@@ -695,26 +836,32 @@ export class HybridSearchEngine {
     }
 
     try {
-      // Get related entities from graph
       const relationships = await this.config.graphManager.findRelationshipsByEntity(entityId);
       const limit = (options.limit ?? 10) * 2;
 
-      // Collect related entity IDs with hop distance
-      const relatedEntityIds = new Set<string>();
+      // Collect entity names from relationships
+      const entityNames = new Set<string>();
       for (const rel of relationships) {
-        if (rel.sourceId !== entityId) relatedEntityIds.add(rel.sourceId);
-        if (rel.targetId !== entityId) relatedEntityIds.add(rel.targetId);
+        const sourceName = rel.properties?.sourceName ?? rel.sourceId;
+        const targetName = rel.properties?.targetName ?? rel.targetId;
+        if (rel.sourceId !== entityId) entityNames.add(String(sourceName));
+        if (rel.targetId !== entityId) entityNames.add(String(targetName));
       }
 
-      // Fetch content for related entities
-      // For now, we simulate this by returning empty results if no semantic search
-      // In a full implementation, this would query the memory store
-      const results: VectorSearchResult[] = [];
+      if (entityNames.size === 0 || !this.config.memoryLookup) {
+        return [];
+      }
 
-      // Note: In a full implementation, you would fetch the actual memory content
-      // for related entities. For now, we return empty to avoid circular dependencies.
+      // Lookup memories by entity names
+      const results = await this.config.memoryLookup.lookupByEntityNames(
+        Array.from(entityNames)
+      );
 
-      return results.slice(0, limit);
+      // Score by hop distance (all direct relationships = hop 1)
+      return results.slice(0, limit).map((result) => ({
+        ...result,
+        similarity: 1.0 / (1 + 1), // hop distance 1 for direct relationships
+      }));
     } catch (error) {
       throw new SearchModeError(
         `Graph search failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -742,6 +889,24 @@ export class HybridSearchEngine {
     });
 
     return ranked;
+  }
+
+  /**
+   * Apply temporal post-retrieval boost to RRF results.
+   * Formula: boostedScore = rrfScore * (1 + factor * exp(-ageDays / decayDays))
+   */
+  private applyTemporalBoost(results: HybridSearchResult[]): HybridSearchResult[] {
+    const { factor, decayDays } = this.config.temporalBoost;
+    const now = Date.now();
+
+    return results.map((result) => {
+      const ageDays = (now - result.indexedAt.getTime()) / (1000 * 60 * 60 * 24);
+      const boost = factor * Math.exp(-ageDays / decayDays);
+      return {
+        ...result,
+        hybridScore: result.hybridScore * (1 + boost),
+      };
+    });
   }
 
   /**
@@ -776,7 +941,7 @@ export class HybridSearchEngine {
       const modeScores = new Map<SearchMode, number>();
 
       for (const [mode, results] of resultsByMode) {
-        const weight = weights[mode];
+        const weight = weights[mode] ?? 0;
         const ranked = results.get(memoryId);
 
         if (ranked) {
@@ -811,10 +976,12 @@ export class HybridSearchEngine {
       const normalizedScore = Math.min(1, rrfData.score * RRF_K);
 
       // Build modeScores with only defined values (exactOptionalPropertyTypes compliance)
-      const modeScoresObj: { semantic?: number; keyword?: number; graph?: number } = {};
+      const modeScoresObj: { semantic?: number; keyword?: number; graph?: number; code?: number; causal?: number } = {};
       const semanticScore = rrfData.modeScores.get("semantic");
       const keywordScore = rrfData.modeScores.get("keyword");
       const graphScore = rrfData.modeScores.get("graph");
+      const codeScore = rrfData.modeScores.get("code");
+      const causalScore = rrfData.modeScores.get("causal");
 
       if (semanticScore !== undefined) {
         modeScoresObj.semantic = semanticScore;
@@ -824,6 +991,12 @@ export class HybridSearchEngine {
       }
       if (graphScore !== undefined) {
         modeScoresObj.graph = graphScore;
+      }
+      if (codeScore !== undefined) {
+        modeScoresObj.code = codeScore;
+      }
+      if (causalScore !== undefined) {
+        modeScoresObj.causal = causalScore;
       }
 
       // Build hybrid result with only defined optional properties
@@ -893,6 +1066,28 @@ export class HybridSearchEngine {
    */
   clear(): void {
     this.bm25Index.clear();
+  }
+
+  /**
+   * Load BM25 documents from persistent store into the in-memory index.
+   * Call this on startup to restore the BM25 index without rebuilding from scratch.
+   */
+  loadFromStore(): number {
+    if (!this.config.bm25Store) {
+      return 0;
+    }
+
+    const docs = this.config.bm25Store.loadAll();
+    for (const doc of docs) {
+      let meta: Record<string, unknown> | undefined;
+      try {
+        meta = doc.metadata ? JSON.parse(doc.metadata) as Record<string, unknown> : undefined;
+      } catch (e) {
+        console.warn("[HybridSearch] Corrupt BM25 metadata for", doc.memoryId, e instanceof Error ? e.message : e);
+      }
+      this.bm25Index.addDocument(doc.memoryId, doc.sessionId, doc.content, doc.indexedAt, meta);
+    }
+    return docs.length;
   }
 }
 

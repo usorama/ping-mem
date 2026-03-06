@@ -72,9 +72,16 @@ export type ParseBodyResult<T> = ParseResult<T> | ParseError;
  * ```
  */
 export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const MAX_BODY_BYTES = 10 * 1024 * 1024;
+  let totalSize = 0;
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalSize += buf.length;
+    if (totalSize > MAX_BODY_BYTES) {
+      throw new ValidationError(`Request body exceeds maximum size of ${MAX_BODY_BYTES} bytes`);
+    }
+    chunks.push(buf);
   }
   if (chunks.length === 0) {
     return {};

@@ -258,6 +258,50 @@ export class GraphManager {
   }
 
   /**
+   * Batch-fetch multiple entities by ID in a single Neo4j query.
+   * Missing IDs are absent from the returned map.
+   */
+  async getEntitiesByIds(ids: string[]): Promise<Map<string, Entity>> {
+    if (ids.length === 0) {
+      return new Map();
+    }
+
+    const uniqueIds = [...new Set(ids)];
+    const cypher = `
+      UNWIND $ids AS id
+      MATCH (e:Entity {id: id})
+      RETURN e.id as id, e.type as type, e.name as name, e.properties as properties,
+             e.createdAt as createdAt, e.updatedAt as updatedAt,
+             e.eventTime as eventTime, e.ingestionTime as ingestionTime
+    `;
+
+    try {
+      const results = await this.config.neo4jClient.executeQuery<{
+        id: string;
+        type: string;
+        name: string;
+        properties: string;
+        createdAt: string;
+        updatedAt: string;
+        eventTime: string;
+        ingestionTime: string;
+      }>(cypher, { ids: uniqueIds });
+
+      const entityMap = new Map<string, Entity>();
+      for (const result of results) {
+        entityMap.set(result.id, this.mapToEntity(result));
+      }
+      return entityMap;
+    } catch (error) {
+      throw new GraphManagerError(
+        `Failed to batch get entities: ${error instanceof Error ? error.message : String(error)}`,
+        "getEntitiesByIds",
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+
+  /**
    * Update an existing entity
    *
    * @param id - Entity ID to update
@@ -823,7 +867,8 @@ export class GraphManager {
   private parseProperties(properties: string): Record<string, unknown> {
     try {
       return JSON.parse(properties) as Record<string, unknown>;
-    } catch {
+    } catch (err) {
+      console.error("[GraphManager] Failed to parse entity properties:", err instanceof Error ? err.message : err);
       return {};
     }
   }

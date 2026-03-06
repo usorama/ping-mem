@@ -24,6 +24,7 @@ export interface IngestionServiceOptions {
 export interface IngestProjectOptions {
   projectDir: string;
   forceReingest?: boolean;
+  maxCommits?: number; // Max git commits to ingest (default 200)
 }
 
 export interface IngestProjectResult {
@@ -81,9 +82,12 @@ export class IngestionService {
   async ingestProject(
     options: IngestProjectOptions
   ): Promise<IngestProjectResult | null> {
-    const ingestOptions: Parameters<typeof this.orchestrator.ingest>[1] = {};
+    const ingestOptions: import("./IngestionOrchestrator.js").IngestionOptions = {};
     if (options.forceReingest !== undefined) {
       ingestOptions.forceReingest = options.forceReingest;
+    }
+    if (options.maxCommits !== undefined) {
+      ingestOptions.maxCommits = options.maxCommits;
     }
 
     const ingestionResult = await this.orchestrator.ingest(options.projectDir, ingestOptions);

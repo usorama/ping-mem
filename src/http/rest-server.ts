@@ -5,11 +5,12 @@
  * without requiring MCP protocol overhead.
  *
  * @module http/rest-server
- * @version 1.0.0
+ * @version 1.4.0
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import * as path from "path";
@@ -48,6 +49,7 @@ import type {
   CheckpointRequest,
 } from "./types.js";
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
+import { registerUIRoutes } from "./ui/routes.js";
 
 // ============================================================================
 // REST Server Class
@@ -59,8 +61,14 @@ import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
  * Provides HTTP endpoints for memory operations without requiring
  * full MCP protocol implementation.
  */
+export type AppEnv = {
+  Variables: {
+    cspNonce: string;
+  };
+};
+
 export class RESTPingMemServer {
-  private app: Hono;
+  private app: Hono<AppEnv>;
   private config: HTTPServerConfig & PingMemServerConfig;
 
   // Core components (same as PingMemServer)
@@ -120,7 +128,7 @@ export class RESTPingMemServer {
     }
 
     // Initialize Hono app
-    this.app = new Hono();
+    this.app = new Hono<AppEnv>();
 
     // Set up middleware
     this.setupMiddleware();
@@ -133,30 +141,58 @@ export class RESTPingMemServer {
    * Set up Hono middleware
    */
   private setupMiddleware(): void {
-    // CORS
-    const corsConfig = this.config.cors ?? { origin: "*" };
+    // CORS - default to rejecting cross-origin requests unless configured
+    const envOrigin = process.env.PING_MEM_CORS_ORIGIN;
+    const defaultOrigin = envOrigin ? envOrigin.split(",").map(s => s.trim()) : [];
+    const corsConfig = this.config.cors ?? { origin: defaultOrigin };
+    const hasSpecificOrigins = defaultOrigin.length > 0;
     this.app.use(
       "*",
       cors({
-        origin: corsConfig.origin ?? "*",
+        origin: corsConfig.origin ?? defaultOrigin,
         allowMethods: corsConfig.methods ?? ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allowHeaders: corsConfig.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"],
-        credentials: true,
+        credentials: hasSpecificOrigins,
       })
     );
 
     // Logger
     this.app.use("*", logger());
 
+    // Security headers — applied to all responses
+    // Uses nonce-based CSP to avoid 'unsafe-inline' for scripts
+    this.app.use("*", async (c, next) => {
+      const nonce = crypto.randomUUID();
+      // Store nonce on context for UI renderers to add to inline <script> tags
+      c.set("cspNonce", nonce);
+      await next();
+      c.header("X-Content-Type-Options", "nosniff");
+      c.header("X-Frame-Options", "DENY");
+      c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+      c.header(
+        "Content-Security-Policy",
+        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'`,
+      );
+      c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    });
+
     // API Key authentication (if configured)
     // Auth is required only when: (apiKeyManager has seed key) OR (explicit apiKey is set non-empty)
+    // Supports both X-API-Key header and Authorization: Bearer <token> header
     const authRequired = this.config.apiKeyManager
       ? this.config.apiKeyManager.hasSeedKey()
       : (this.config.apiKey && this.config.apiKey.trim().length > 0);
 
     if (authRequired) {
-      this.app.use("/api/*", async (c, next) => {
-        const apiKey = c.req.header("x-api-key");
+      const authMiddleware = async (c: Parameters<Parameters<typeof this.app.use>[1]>[0], next: () => Promise<void>) => {
+        // Check X-API-Key header first, then fall back to Authorization: Bearer
+        let apiKey = c.req.header("x-api-key");
+        if (!apiKey) {
+          const authHeader = c.req.header("authorization");
+          if (authHeader?.startsWith("Bearer ")) {
+            apiKey = authHeader.slice(7);
+          }
+        }
         const isValid = this.config.apiKeyManager
           ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
           : apiKey === this.config.apiKey;
@@ -164,13 +200,17 @@ export class RESTPingMemServer {
           return c.json(
             {
               error: "Unauthorized",
-              message: "Invalid API key",
+              message: "Invalid or missing API key. Use X-API-Key header or Authorization: Bearer <token>.",
             },
             401
           );
         }
         return next();
-      });
+      };
+      this.app.use("/api/*", authMiddleware);
+      this.app.use("/ui/*", authMiddleware);
+    } else {
+      console.warn("[REST Server] WARNING: No API key configured. All routes are unauthenticated.");
     }
   }
 
@@ -186,7 +226,13 @@ export class RESTPingMemServer {
         : (this.config.apiKey && this.config.apiKey.trim().length > 0);
 
       if (authRequired) {
-        const apiKey = c.req.header("x-api-key");
+        let apiKey = c.req.header("x-api-key");
+        if (!apiKey) {
+          const authHeader = c.req.header("authorization");
+          if (authHeader?.startsWith("Bearer ")) {
+            apiKey = authHeader.slice(7);
+          }
+        }
         const isValid = this.config.apiKeyManager
           ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
           : apiKey === this.config.apiKey;
@@ -233,8 +279,8 @@ export class RESTPingMemServer {
 
         this.memoryManagers.set(session.id, memoryManager);
 
-        return c.json<RESTSuccessResponse<typeof session>>({
-          data: session,
+        return c.json({
+          data: { ...session, sessionId: session.id },
         });
       } catch (error) {
         return this.handleError(c, error);
@@ -359,8 +405,9 @@ export class RESTPingMemServer {
               setTimeout(() => resolve([]), 200)
             );
             relatedMemories = await Promise.race([recallPromise, timeout]);
-          } catch {
+          } catch (error) {
             // Best-effort: don't block save
+            console.warn("[rest-server] Proactive recall failed:", error instanceof Error ? error.message : String(error));
           }
         }
 
@@ -411,7 +458,15 @@ export class RESTPingMemServer {
         let rawSarif: string | undefined;
 
         if (body.sarif !== undefined) {
-          const sarifPayload = typeof body.sarif === "string" ? JSON.parse(body.sarif) : body.sarif;
+          let sarifPayload: unknown;
+          try {
+            sarifPayload = typeof body.sarif === "string" ? JSON.parse(body.sarif) : body.sarif;
+          } catch {
+            return c.json<RESTErrorResponse>(
+              { error: "Bad Request", message: "Invalid JSON in sarif field" },
+              400
+            );
+          }
           const parsed = parseSarif(sarifPayload);
           findings = parsed.findings;
           toolName = toolName ?? parsed.toolName;
@@ -1013,12 +1068,53 @@ export class RESTPingMemServer {
         return this.handleError(c, error);
       }
     });
+
+    // ============================================================================
+    // Static Files & UI Routes
+    // ============================================================================
+
+    // Serve static files from src/static/
+    this.app.get("/static/*", async (c) => {
+      const filePath = c.req.path.replace("/static/", "");
+      const staticDir = process.env.PING_MEM_STATIC_DIR
+        ?? path.resolve(process.cwd(), "src/static");
+      const fullPath = path.resolve(staticDir, filePath);
+
+      // Security: prevent path traversal — canonicalize and compare with trailing separator
+      const staticDirNorm = path.resolve(staticDir) + path.sep;
+      if (!fullPath.startsWith(staticDirNorm) && fullPath !== path.resolve(staticDir)) {
+        console.warn("[Static] Path traversal attempt blocked:", filePath);
+        return c.text("Forbidden", 403);
+      }
+
+      try {
+        const file = Bun.file(fullPath);
+        if (!(await file.exists())) {
+          return c.text("Not Found", 404);
+        }
+        const contentType = getContentType(filePath);
+        return new Response(file, {
+          headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=3600" },
+        });
+      } catch (err) {
+        console.error("[Static] Error serving file:", filePath, err instanceof Error ? err.message : err);
+        return c.text("Internal Server Error", 500);
+      }
+    });
+
+    // Register UI routes
+    registerUIRoutes(this.app, {
+      eventStore: this.eventStore,
+      sessionManager: this.sessionManager,
+      diagnosticsStore: this.diagnosticsStore,
+      ingestionService: this.config.ingestionService,
+    });
   }
 
   /**
    * Handle errors and return consistent error responses
    */
-  private handleError(c: any, error: unknown): Response {
+  private handleError(c: Context<AppEnv>, error: unknown): Response {
     console.error("[REST Server] Error:", error);
 
     const message = error instanceof Error ? error.message : "Unknown error";
@@ -1029,7 +1125,7 @@ export class RESTPingMemServer {
         error: this.getErrorName(statusCode),
         message,
       },
-      statusCode
+      statusCode as ContentfulStatusCode
     );
   }
 
@@ -1142,9 +1238,17 @@ export class RESTPingMemServer {
    * Read request body as string
    */
   private async readRequestBody(req: IncomingMessage): Promise<string> {
+    const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
     return new Promise((resolve, reject) => {
       let data = "";
-      req.on("data", (chunk) => {
+      let size = 0;
+      req.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > MAX_BODY_BYTES) {
+          req.destroy();
+          reject(new Error("Request body too large"));
+          return;
+        }
         data += chunk;
       });
       req.on("end", () => {
@@ -1174,7 +1278,7 @@ export class RESTPingMemServer {
   /**
    * Get the Hono app instance (for advanced use cases)
    */
-  getApp(): Hono {
+  getApp(): Hono<AppEnv> {
     return this.app;
   }
 
@@ -1197,6 +1301,19 @@ export class RESTPingMemServer {
 // Utilities
 // ============================================================================
 
+function getContentType(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  const types: Record<string, string> = {
+    css: "text/css",
+    js: "application/javascript",
+    html: "text/html",
+    json: "application/json",
+    svg: "image/svg+xml",
+    png: "image/png",
+  };
+  return types[ext ?? ""] ?? "application/octet-stream";
+}
+
 /**
  * Create a default REST server configuration
  */
@@ -1208,7 +1325,9 @@ export function createDefaultRESTConfig(
     host: "0.0.0.0",
     transport: "rest",
     cors: {
-      origin: "*",
+      origin: process.env.PING_MEM_CORS_ORIGIN
+        ? process.env.PING_MEM_CORS_ORIGIN.split(",").map(s => s.trim())
+        : [],
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       headers: ["Content-Type", "X-API-Key", "X-Session-ID"],
     },

@@ -87,7 +87,7 @@ export interface EmbeddingProvider {
 /**
  * Supported embedding provider types
  */
-export type EmbeddingProviderType = "openai" | "custom";
+export type EmbeddingProviderType = "openai" | "gemini" | "custom";
 
 /**
  * Cache configuration options
@@ -330,6 +330,137 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 }
 
 // ============================================================================
+// Gemini Embedding Provider
+// ============================================================================
+
+/**
+ * Gemini embedding provider using the REST API directly (no SDK)
+ *
+ * Uses the text-embedding-004 model with configurable output dimensionality.
+ */
+export class GeminiEmbeddingProvider implements EmbeddingProvider {
+  private readonly apiKey: string;
+  private readonly model: string;
+  public readonly dimensions: number;
+  public readonly name = "gemini";
+
+  constructor(apiKey: string, options?: { model?: string; dimensions?: number }) {
+    if (!apiKey) {
+      throw new EmbeddingConfigurationError(
+        "Gemini API key is required",
+        "MISSING_API_KEY"
+      );
+    }
+
+    this.apiKey = apiKey;
+    this.model = options?.model ?? "text-embedding-004";
+    this.dimensions = options?.dimensions ?? DEFAULT_CONFIG.dimensions;
+  }
+
+  async embed(text: string): Promise<Float32Array> {
+    if (!text || text.trim().length === 0) {
+      throw new EmbeddingGenerationError(
+        "Cannot embed empty text",
+        "EMPTY_TEXT"
+      );
+    }
+
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:embedContent`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": this.apiKey,
+        },
+        body: JSON.stringify({
+          model: `models/${this.model}`,
+          content: { parts: [{ text }] },
+          outputDimensionality: this.dimensions,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new EmbeddingGenerationError(
+          `Gemini API error (${response.status}): ${errorBody}`,
+          "API_ERROR"
+        );
+      }
+
+      const data = (await response.json()) as { embedding?: { values?: number[] } };
+      const values = data?.embedding?.values;
+
+      if (!values || !Array.isArray(values)) {
+        throw new EmbeddingGenerationError(
+          "No embedding returned from Gemini",
+          "NO_EMBEDDING"
+        );
+      }
+
+      return new Float32Array(values);
+    } catch (error) {
+      if (error instanceof EmbeddingServiceError) {
+        throw error;
+      }
+
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new EmbeddingGenerationError(
+        `Failed to generate Gemini embedding: ${errorMessage}`,
+        "GENERATION_FAILED",
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+}
+
+// ============================================================================
+// Fallback Embedding Provider
+// ============================================================================
+
+/**
+ * Fallback embedding provider that tries a primary provider first,
+ * falling back to a secondary provider on any error.
+ *
+ * Both providers must produce embeddings of the same dimensionality.
+ */
+export class FallbackEmbeddingProvider implements EmbeddingProvider {
+  private readonly primary: EmbeddingProvider;
+  private readonly fallback: EmbeddingProvider;
+  public readonly dimensions: number;
+  public readonly name: string;
+
+  constructor(primary: EmbeddingProvider, fallback: EmbeddingProvider) {
+    if (primary.dimensions !== fallback.dimensions) {
+      throw new EmbeddingConfigurationError(
+        `Dimension mismatch: primary provider "${primary.name}" has ${primary.dimensions} dimensions, ` +
+        `fallback provider "${fallback.name}" has ${fallback.dimensions} dimensions. ` +
+        `Both providers must produce embeddings of the same dimensionality.`,
+        "DIMENSION_MISMATCH"
+      );
+    }
+
+    this.primary = primary;
+    this.fallback = fallback;
+    this.dimensions = primary.dimensions;
+    this.name = `${primary.name}+${fallback.name}`;
+  }
+
+  async embed(text: string): Promise<Float32Array> {
+    try {
+      return await this.primary.embed(text);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[FallbackEmbeddingProvider] Primary provider "${this.primary.name}" failed: ${errorMessage}. ` +
+        `Falling back to "${this.fallback.name}".`
+      );
+      return await this.fallback.embed(text);
+    }
+  }
+}
+
+// ============================================================================
 // Embedding Service Implementation
 // ============================================================================
 
@@ -373,6 +504,18 @@ export class EmbeddingService {
       if (config.baseUrl !== undefined) openaiOptions.baseUrl = config.baseUrl;
 
       this.provider = new OpenAIEmbeddingProvider(config.apiKey, openaiOptions);
+    } else if (config.provider === "gemini") {
+      if (!config.apiKey) {
+        throw new EmbeddingConfigurationError(
+          "API key is required for Gemini provider",
+          "MISSING_API_KEY"
+        );
+      }
+      const geminiOptions: { model?: string; dimensions?: number } = {};
+      if (config.model !== undefined) geminiOptions.model = config.model;
+      if (config.dimensions !== undefined) geminiOptions.dimensions = config.dimensions;
+
+      this.provider = new GeminiEmbeddingProvider(config.apiKey, geminiOptions);
     } else {
       throw new EmbeddingConfigurationError(
         `Unknown provider type: ${config.provider}`,
@@ -507,20 +650,28 @@ export function createOpenAIEmbeddingService(
  * Create an embedding service from environment variables
  *
  * Environment variables:
- * - OPENAI_API_KEY: OpenAI API key (required)
- * - OPENAI_BASE_URL: Optional base URL override
- * - EMBEDDING_MODEL: Model to use (default: text-embedding-3-small)
+ * - OPENAI_API_KEY: OpenAI API key (used for OpenAI provider)
+ * - GEMINI_API_KEY: Gemini API key (used for Gemini provider)
+ * - OPENAI_BASE_URL: Optional base URL override for OpenAI
+ * - EMBEDDING_MODEL: Model to use (default varies by provider)
  * - EMBEDDING_DIMENSIONS: Embedding dimensions (default: 768)
  *
+ * Provider selection:
+ * - If both OPENAI_API_KEY and GEMINI_API_KEY are set: FallbackEmbeddingProvider (OpenAI primary, Gemini fallback)
+ * - If only OPENAI_API_KEY: OpenAI provider
+ * - If only GEMINI_API_KEY: Gemini provider
+ * - If neither: throws EmbeddingConfigurationError
+ *
  * @returns Configured EmbeddingService instance
- * @throws {EmbeddingConfigurationError} If required environment variables are missing
+ * @throws {EmbeddingConfigurationError} If no API keys are configured
  */
 export function createEmbeddingServiceFromEnv(): EmbeddingService {
-  const apiKey = process.env["OPENAI_API_KEY"];
+  const openaiKey = process.env["OPENAI_API_KEY"];
+  const geminiKey = process.env["GEMINI_API_KEY"];
 
-  if (!apiKey) {
+  if (!openaiKey && !geminiKey) {
     throw new EmbeddingConfigurationError(
-      "Missing required environment variable: OPENAI_API_KEY",
+      "Missing required environment variable: OPENAI_API_KEY or GEMINI_API_KEY",
       "MISSING_ENV_VAR"
     );
   }
@@ -530,15 +681,46 @@ export function createEmbeddingServiceFromEnv(): EmbeddingService {
   const dimensionsStr = process.env["EMBEDDING_DIMENSIONS"];
   const dimensions = dimensionsStr ? parseInt(dimensionsStr, 10) : undefined;
 
-  // Build options object, only including defined properties
-  const options: {
-    model?: string;
-    dimensions?: number;
-    baseUrl?: string;
-  } = {};
-  if (baseUrl !== undefined) options.baseUrl = baseUrl;
-  if (model !== undefined) options.model = model;
-  if (dimensions !== undefined) options.dimensions = dimensions;
+  // Both keys present: create fallback provider (OpenAI primary, Gemini fallback)
+  if (openaiKey && geminiKey) {
+    const openaiOptions: { model?: string; dimensions?: number; baseUrl?: string } = {};
+    if (baseUrl !== undefined) openaiOptions.baseUrl = baseUrl;
+    if (model !== undefined) openaiOptions.model = model;
+    if (dimensions !== undefined) openaiOptions.dimensions = dimensions;
 
-  return createOpenAIEmbeddingService(apiKey, options);
+    const openaiProvider = new OpenAIEmbeddingProvider(openaiKey, openaiOptions);
+
+    const geminiOptions: { model?: string; dimensions?: number } = {};
+    if (dimensions !== undefined) geminiOptions.dimensions = dimensions;
+
+    const geminiProvider = new GeminiEmbeddingProvider(geminiKey, geminiOptions);
+
+    const fallbackProvider = new FallbackEmbeddingProvider(openaiProvider, geminiProvider);
+
+    return new EmbeddingService({
+      provider: "custom",
+      customProvider: fallbackProvider,
+    });
+  }
+
+  // Only OpenAI key: existing behavior
+  if (openaiKey) {
+    const options: { model?: string; dimensions?: number; baseUrl?: string } = {};
+    if (baseUrl !== undefined) options.baseUrl = baseUrl;
+    if (model !== undefined) options.model = model;
+    if (dimensions !== undefined) options.dimensions = dimensions;
+
+    return createOpenAIEmbeddingService(openaiKey, options);
+  }
+
+  // Only Gemini key: create Gemini provider
+  const geminiOptions: { model?: string; dimensions?: number } = {};
+  if (dimensions !== undefined) geminiOptions.dimensions = dimensions;
+
+  const geminiProvider = new GeminiEmbeddingProvider(geminiKey!, geminiOptions);
+
+  return new EmbeddingService({
+    provider: "custom",
+    customProvider: geminiProvider,
+  });
 }

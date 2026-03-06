@@ -439,7 +439,8 @@ export class EventStore {
         if (metadata.projectDir === projectDir) {
           matching.push(row.session_id as SessionId);
         }
-      } catch {
+      } catch (error) {
+        console.warn("[EventStore] findSessionIdsByProjectDir: failed to parse metadata for session", row.session_id, error instanceof Error ? error.message : String(error));
         continue;
       }
     }
@@ -579,6 +580,19 @@ export class EventStore {
     return rows.map((row) => row.memory_key);
   }
 
+  // ========== Recent Events ==========
+
+  /**
+   * Get the most recent events across all sessions, ordered by timestamp DESC.
+   */
+  getRecentEvents(limit: number = 20): Event[] {
+    const stmt = this.db.prepare(
+      "SELECT * FROM events ORDER BY timestamp DESC LIMIT $limit"
+    );
+    const rows = stmt.all({ $limit: limit }) as EventRow[];
+    return rows.map((row) => this.rowToEvent(row));
+  }
+
   // ========== Utility Operations ==========
 
   /**
@@ -599,7 +613,8 @@ export class EventStore {
     try {
       this.db.prepare("SELECT 1").get();
       return true;
-    } catch {
+    } catch (error) {
+      console.warn("[EventStore] ping failed:", error instanceof Error ? error.message : String(error));
       return false;
     }
   }

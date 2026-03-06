@@ -11,6 +11,7 @@
 
 import { execFile } from "child_process";
 import { promisify } from "util";
+import path from "path";
 
 const runCommand = promisify(execFile);
 const GIT_HASH_REGEX = /^[a-f0-9]{7,40}$/i;
@@ -86,9 +87,23 @@ export class SafeGit {
     return stdout.trim().split("\\n").filter(Boolean);
   }
 
+  private validateFilePath(filePath: string): string {
+    // Reject absolute paths
+    if (path.isAbsolute(filePath)) {
+      throw new Error(`Invalid file path: absolute paths are not allowed: ${filePath}`);
+    }
+    // Normalize and check for traversal
+    const normalized = path.normalize(filePath);
+    if (normalized.startsWith("..") || normalized.includes(`${path.sep}..`)) {
+      throw new Error(`Invalid file path: path traversal detected: ${filePath}`);
+    }
+    return normalized;
+  }
+
   async getFileContent(commitHash: string, filePath: string): Promise<string> {
     const safeHash = this.validateHash(commitHash);
-    const { stdout } = await this.run(["show", `${safeHash}:${filePath}`]);
+    const safePath = this.validateFilePath(filePath);
+    const { stdout } = await this.run(["show", `${safeHash}:${safePath}`]);
     return stdout;
   }
 }

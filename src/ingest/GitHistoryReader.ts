@@ -49,13 +49,14 @@ export class GitHistoryReader {
    * Read full git history from a repository.
    * Returns commits in topological order (parents before children when possible).
    */
-  async readHistory(projectDir: string): Promise<GitHistoryResult> {
+  async readHistory(projectDir: string, options?: { maxCommits?: number }): Promise<GitHistoryResult> {
     const gitRoot = await this.getGitRoot(projectDir);
     if (!gitRoot) {
       return { commits: [], fileChanges: [], hunks: [] };
     }
 
-    const commits = await this.readCommits(gitRoot);
+    const maxCommits = options?.maxCommits ?? 200;
+    const commits = await this.readCommits(gitRoot, maxCommits);
     console.log(`  Found ${commits.length} commits, processing diffs...`);
     const fileChanges: GitFileChange[] = [];
     const hunks: GitDiffHunk[] = [];
@@ -87,7 +88,7 @@ export class GitHistoryReader {
     }
   }
 
-  private async readCommits(gitRoot: string): Promise<GitCommit[]> {
+  private async readCommits(gitRoot: string, maxCommits: number): Promise<GitCommit[]> {
     // Use a delimiter that won't appear in commit messages
     const delimiter = "---COMMIT-SEPARATOR---";
     const format = [
@@ -104,7 +105,7 @@ export class GitHistoryReader {
     ].join("%n") + delimiter;
 
     const git = createSafeGit(gitRoot, { maxBuffer: 100 * 1024 * 1024 });
-    const output = await git.getLog(1000, format);
+    const output = await git.getLog(maxCommits, format);
 
     const commits: GitCommit[] = [];
     const commitBlocks = output

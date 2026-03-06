@@ -81,8 +81,7 @@ export class SSEPingMemServer {
     this.setupHandlers();
 
     // Connect server to transport
-    // Note: Type assertion needed due to optional onclose/onerror in StreamableHTTPServerTransport
-    this.server.connect(this.transport as any);
+    this.server.connect(this.transport as Parameters<typeof this.server.connect>[0]);
   }
 
   /**
@@ -128,7 +127,7 @@ export class SSEPingMemServer {
     parsedBody?: unknown
   ): Promise<void> {
     // Add CORS headers
-    this.addCorsHeaders(res);
+    this.addCorsHeaders(req, res);
 
     // Handle preflight OPTIONS request
     if (req.method === "OPTIONS") {
@@ -139,18 +138,26 @@ export class SSEPingMemServer {
 
     // Validate API key if configured
     // Auth is required only when: (apiKeyManager has seed key) OR (explicit apiKey is set non-empty)
+    // Supports both X-API-Key header and Authorization: Bearer <token> header
     const authRequired = this.config.apiKeyManager
       ? this.config.apiKeyManager.hasSeedKey()
       : (this.config.apiKey && this.config.apiKey.trim().length > 0);
 
     if (authRequired) {
-      const apiKey = req.headers["x-api-key"] as string | undefined;
+      // Check X-API-Key header first, then fall back to Authorization: Bearer
+      let apiKey = req.headers["x-api-key"] as string | undefined;
+      if (!apiKey) {
+        const authHeader = req.headers["authorization"] as string | undefined;
+        if (authHeader?.startsWith("Bearer ")) {
+          apiKey = authHeader.slice(7);
+        }
+      }
       const isValid = this.config.apiKeyManager
         ? this.config.apiKeyManager.isValid(apiKey)
         : apiKey === this.config.apiKey;
       if (!isValid) {
         res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid API key" }));
+        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid or missing API key. Use X-API-Key header or Authorization: Bearer <token>." }));
         return;
       }
     }
@@ -165,7 +172,7 @@ export class SSEPingMemServer {
         res.end(
           JSON.stringify({
             error: "Internal Server Error",
-            message: error instanceof Error ? error.message : "Unknown error",
+            message: "An unexpected error occurred",
           })
         );
       }
@@ -175,17 +182,28 @@ export class SSEPingMemServer {
   /**
    * Add CORS headers to response
    */
-  private addCorsHeaders(res: ServerResponse): void {
-    const cors = this.config.cors ?? { origin: "*" };
-    const origins = Array.isArray(cors.origin) ? cors.origin : [cors.origin ?? "*"];
+  private addCorsHeaders(req: IncomingMessage, res: ServerResponse): void {
+    const envOrigin = process.env.PING_MEM_CORS_ORIGIN;
+    const defaultOrigin = envOrigin ? envOrigin.split(",").map(s => s.trim()) : [];
+    const corsConfig = this.config.cors ?? { origin: defaultOrigin };
+    const resolvedOrigin = corsConfig.origin ?? defaultOrigin;
+    const origins = Array.isArray(resolvedOrigin) ? resolvedOrigin : [resolvedOrigin];
 
-    res.setHeader("Access-Control-Allow-Origin", origins.join(", "));
-    res.setHeader("Access-Control-Allow-Methods", (cors.methods ?? ["GET", "POST", "OPTIONS"]).join(", "));
+    // Only set CORS headers if origins are configured
+    if (origins.length === 0 || origins[0] === "") return;
+
+    const requestOrigin = req.headers.origin;
+    if (requestOrigin && origins.includes(requestOrigin)) {
+      res.setHeader("Access-Control-Allow-Origin", requestOrigin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+    }
+
+    res.setHeader("Access-Control-Allow-Methods", (corsConfig.methods ?? ["GET", "POST", "OPTIONS"]).join(", "));
     res.setHeader(
       "Access-Control-Allow-Headers",
-      (cors.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"]).join(", ")
+      (corsConfig.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID", "Authorization"]).join(", ")
     );
-    res.setHeader("Access-Control-Allow-Credentials", "true");
   }
 
   /**
@@ -246,7 +264,9 @@ export function createDefaultSSEConfig(
     host: "0.0.0.0",
     transport: "streamable-http",
     cors: {
-      origin: "*",
+      origin: process.env.PING_MEM_CORS_ORIGIN
+        ? process.env.PING_MEM_CORS_ORIGIN.split(",").map(s => s.trim())
+        : [],
       methods: ["GET", "POST", "OPTIONS"],
       headers: ["Content-Type", "X-API-Key", "X-Session-ID"],
     },
