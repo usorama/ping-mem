@@ -3,6 +3,19 @@ set -euo pipefail
 
 DB_PATH="${PING_MEM_DB_PATH:-$HOME/.ping-mem/ping-mem.db}"
 
+# Validate DB_PATH
+if [[ "$DB_PATH" != *.db ]]; then
+  echo "ERROR: DB_PATH must end in .db (got: $DB_PATH)"
+  exit 1
+fi
+if [ -f "$DB_PATH" ]; then
+  MAGIC=$(head -c 16 "$DB_PATH" 2>/dev/null | strings | head -1)
+  if [[ "$MAGIC" != "SQLite format 3" ]]; then
+    echo "ERROR: $DB_PATH is not a valid SQLite database"
+    exit 1
+  fi
+fi
+
 echo "Running ping-mem v2 migrations on: $DB_PATH"
 
 # Check if database exists

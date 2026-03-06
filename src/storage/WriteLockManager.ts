@@ -88,13 +88,14 @@ export class WriteLockManager {
     ttlMs: number = DEFAULT_LOCK_TTL_MS
   ): LockAcquireResult {
     const now = new Date();
+    const nowIso = now.toISOString();
     const expiresAt = new Date(now.getTime() + ttlMs).toISOString();
-    const acquiredAt = now.toISOString();
+    const acquiredAt = nowIso;
 
     // Step 1: Lazy cleanup — delete expired locks and expired agents
     this.db
-      .prepare("DELETE FROM write_locks WHERE expires_at < datetime('now')")
-      .run();
+      .prepare("DELETE FROM write_locks WHERE expires_at < $now")
+      .run({ $now: nowIso });
     // Step 2: Atomic INSERT ... ON CONFLICT DO UPDATE
     // The UPDATE only succeeds if the existing lock has expired OR is held by the same agent
     const stmt = this.db.prepare(`
@@ -105,7 +106,7 @@ export class WriteLockManager {
         acquired_at = $acquired_at,
         expires_at = $expires_at,
         metadata = '{}'
-      WHERE write_locks.expires_at < datetime('now')
+      WHERE write_locks.expires_at < $now
          OR write_locks.holder_id = $holder_id
     `);
 
@@ -114,6 +115,7 @@ export class WriteLockManager {
       $holder_id: holderId,
       $acquired_at: acquiredAt,
       $expires_at: expiresAt,
+      $now: nowIso,
     });
 
     // Step 3: Check if the upsert actually wrote a row
@@ -134,6 +136,7 @@ export class WriteLockManager {
         $holder_id: holderId,
         $acquired_at: acquiredAt,
         $expires_at: expiresAt,
+        $now: nowIso,
       });
       if (retryResult.changes === 0) {
         const retryExisting = this.getLockInfo(key);
@@ -174,11 +177,12 @@ export class WriteLockManager {
    * @returns true if a valid lock exists
    */
   isLocked(key: string): boolean {
+    const now = new Date().toISOString();
     const row = this.db
       .prepare(
-        "SELECT lock_key FROM write_locks WHERE lock_key = $lock_key AND expires_at >= datetime('now')"
+        "SELECT lock_key FROM write_locks WHERE lock_key = $lock_key AND expires_at >= $now"
       )
-      .get({ $lock_key: key }) as { lock_key: string } | null;
+      .get({ $lock_key: key, $now: now }) as { lock_key: string } | null;
     return row !== null;
   }
 
@@ -190,13 +194,14 @@ export class WriteLockManager {
    * @returns Lock info or null
    */
   getLockInfo(key: string): LockInfo | null {
+    const now = new Date().toISOString();
     const row = this.db
       .prepare(
         `SELECT lock_key, holder_id, acquired_at, expires_at, metadata
          FROM write_locks
-         WHERE lock_key = $lock_key AND expires_at >= datetime('now')`
+         WHERE lock_key = $lock_key AND expires_at >= $now`
       )
-      .get({ $lock_key: key }) as WriteLockRow | null;
+      .get({ $lock_key: key, $now: now }) as WriteLockRow | null;
 
     if (!row) {
       return null;

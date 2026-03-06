@@ -95,6 +95,9 @@ export class SemanticCompressor {
 
     // Batch if too large
     if (inputTokens > this.maxBatchTokens) {
+      if (memories.length <= 1) {
+        return this.compressWithHeuristic(memories);
+      }
       return this.compressInBatches(memories);
     }
 

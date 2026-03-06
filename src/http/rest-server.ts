@@ -353,7 +353,8 @@ export class RESTPingMemServer {
 
     this.app.get("/api/v1/session/list", async (c) => {
       try {
-        const limit = parseInt(c.req.query("limit") ?? "10");
+        const rawLimit = parseInt(c.req.query("limit") ?? "10", 10);
+        const limit = Number.isNaN(rawLimit) ? 10 : Math.min(Math.max(rawLimit, 1), 1000);
         const sessions = this.sessionManager.listSessions().slice(0, limit);
 
         return c.json<RESTSuccessResponse<typeof sessions>>({
@@ -390,7 +391,7 @@ export class RESTPingMemServer {
           );
         }
 
-        const memoryManager = this.getMemoryManager(sessionId);
+        const memoryManager = await this.getMemoryManager(sessionId);
 
         // Build options, excluding undefined values
         const options: Record<string, unknown> = {};
@@ -687,7 +688,8 @@ export class RESTPingMemServer {
       const projectId = c.req.query("projectId");
       const filePath = c.req.query("filePath");
       const type = c.req.query("type") as "code" | "comment" | "docstring" | undefined;
-      const limit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
+      const rawSearchLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
+      const limit = rawSearchLimit !== undefined ? (Number.isNaN(rawSearchLimit) ? 10 : Math.min(Math.max(rawSearchLimit, 1), 1000)) : undefined;
       const searchOptions: {
         projectId?: string;
         filePath?: string;
@@ -715,7 +717,8 @@ export class RESTPingMemServer {
         return c.json({ error: "BadRequest", message: "projectId is required" }, 400);
       }
       const filePath = c.req.query("filePath") ?? undefined;
-      const limit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
+      const rawTimelineLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
+      const limit = rawTimelineLimit !== undefined ? (Number.isNaN(rawTimelineLimit) ? 50 : Math.min(Math.max(rawTimelineLimit, 1), 1000)) : undefined;
       const timelineOptions: { projectId: string; filePath?: string; limit?: number } = {
         projectId,
       };
@@ -881,7 +884,7 @@ export class RESTPingMemServer {
           );
         }
 
-        const memoryManager = this.getMemoryManager(sessionId);
+        const memoryManager = await this.getMemoryManager(sessionId);
 
         // Use recall to get memory by key
         const results = await memoryManager.recall({ key });
@@ -930,7 +933,7 @@ export class RESTPingMemServer {
           );
         }
 
-        const memoryManager = this.getMemoryManager(sessionId);
+        const memoryManager = await this.getMemoryManager(sessionId);
         await memoryManager.delete(key);
 
         return c.json<RESTSuccessResponse<{ message: string }>>({
@@ -969,7 +972,7 @@ export class RESTPingMemServer {
           );
         }
 
-        const memoryManager = this.getMemoryManager(sessionId);
+        const memoryManager = await this.getMemoryManager(sessionId);
 
         // Build query params
         const queryParams: Record<string, unknown> = { query };
@@ -984,10 +987,12 @@ export class RESTPingMemServer {
           queryParams.priority = c.req.query("priority") as MemoryPriority;
         }
         if (c.req.query("limit")) {
-          queryParams.limit = parseInt(c.req.query("limit")!);
+          const rawLim = parseInt(c.req.query("limit")!, 10);
+          queryParams.limit = Number.isNaN(rawLim) ? 10 : Math.min(Math.max(rawLim, 1), 1000);
         }
         if (c.req.query("offset")) {
-          queryParams.offset = parseInt(c.req.query("offset")!);
+          const rawOff = parseInt(c.req.query("offset")!, 10);
+          queryParams.offset = Number.isNaN(rawOff) ? 0 : Math.max(rawOff, 0);
         }
 
         const results = await memoryManager.recall(queryParams);
@@ -1195,9 +1200,15 @@ export class RESTPingMemServer {
         const db = this.eventStore.getDatabase();
 
         if (agentId) {
+          let validatedAgentId: ReturnType<typeof createAgentId>;
+          try {
+            validatedAgentId = createAgentId(agentId);
+          } catch {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
+          }
           const row = db.prepare(
             "SELECT * FROM agent_quotas WHERE agent_id = $agent_id"
-          ).get({ $agent_id: createAgentId(agentId) }) as Record<string, unknown> | undefined;
+          ).get({ $agent_id: validatedAgentId }) as Record<string, unknown> | undefined;
 
           if (!row) {
             return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${agentId}' not found` }, 404);
@@ -1218,7 +1229,12 @@ export class RESTPingMemServer {
         if (!rawId) {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "agentId is required" }, 400);
         }
-        const agentId = createAgentId(rawId);
+        let agentId: ReturnType<typeof createAgentId>;
+        try {
+          agentId = createAgentId(rawId);
+        } catch {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
+        }
         const db = this.eventStore.getDatabase();
 
         const deleteResult = db.transaction(() => {
@@ -1247,6 +1263,7 @@ export class RESTPingMemServer {
     this.app.get("/api/v1/events/stream", async (c) => {
       const channel = c.req.query("channel");
       const category = c.req.query("category");
+      const agentId = c.req.query("agentId");
 
       const stream = new ReadableStream({
         start: (controller) => {
@@ -1256,6 +1273,7 @@ export class RESTPingMemServer {
             {
               ...(channel ? { channel } : {}),
               ...(category ? { category } : {}),
+              ...(agentId ? { agentId } : {}),
             },
             (event) => {
               try {
@@ -1285,8 +1303,11 @@ export class RESTPingMemServer {
             this.pubsub.unsubscribe(subscriptionId);
             try {
               controller.close();
-            } catch {
-              // Already closed
+            } catch (err) {
+              // Stream already closed by client disconnect
+              if (err instanceof Error && !/closed|errored/i.test(err.message)) {
+                console.error("[SSE] Cleanup error:", err.message);
+              }
             }
           });
         },
@@ -1429,11 +1450,13 @@ export class RESTPingMemServer {
 
     const message = error instanceof Error ? error.message : "Unknown error";
     const statusCode = this.getStatusCode(error);
+    const isClientError = statusCode >= 400 && statusCode < 500;
+    const clientMessage = isClientError ? message : "An internal error occurred";
 
     return c.json(
       {
         error: this.getErrorName(statusCode),
-        message,
+        message: clientMessage,
       },
       statusCode as ContentfulStatusCode
     );
@@ -1444,18 +1467,20 @@ export class RESTPingMemServer {
    */
   private getStatusCode(error: unknown): number {
     if (error instanceof Error) {
-      if (error.message.includes("not found")) {
-        return 404;
-      }
-      if (error.message.includes("unauthorized") || error.message.includes("authentication")) {
-        return 401;
-      }
-      if (error.message.includes("forbidden")) {
-        return 403;
-      }
-      if (error.message.includes("invalid") || error.message.includes("validation")) {
-        return 400;
-      }
+      // Use error class name or code property for reliable mapping
+      const name = error.name;
+      if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError") return 404;
+      if (name === "QuotaExhaustedError" || name === "WriteLockConflictError" || name === "EvidenceGateRejectionError") return 409;
+      if (name === "MemoryKeyExistsError") return 409;
+      if (name === "InvalidSessionError" || name === "MemoryManagerError") return 400;
+      // Check for known error codes
+      const codeErr = error as { code?: string };
+      if (codeErr.code === "MEMORY_NOT_FOUND") return 404;
+      if (codeErr.code === "QUOTA_EXHAUSTED" || codeErr.code === "WRITE_LOCK_CONFLICT") return 409;
+      if (codeErr.code === "MEMORY_EXISTS" || codeErr.code === "INVALID_SESSION") return 400;
+      // Fallback to message-based detection for backward compat
+      if (error.message.includes("not found")) return 404;
+      if (error.message.includes("invalid") || error.message.includes("required")) return 400;
     }
     return 500;
   }
@@ -1469,6 +1494,7 @@ export class RESTPingMemServer {
       401: "Unauthorized",
       403: "Forbidden",
       404: "Not Found",
+      409: "Conflict",
       500: "Internal Server Error",
       503: "Service Unavailable",
     };
@@ -1478,7 +1504,7 @@ export class RESTPingMemServer {
   /**
    * Get MemoryManager for session, creating if needed
    */
-  private getMemoryManager(sessionId: SessionId): MemoryManager {
+  private async getMemoryManager(sessionId: SessionId): Promise<MemoryManager> {
     let manager = this.memoryManagers.get(sessionId);
     if (!manager) {
       const config: MemoryManagerConfig = {
@@ -1492,6 +1518,7 @@ export class RESTPingMemServer {
       }
 
       manager = new MemoryManager(config);
+      await manager.hydrate();
       this.memoryManagers.set(sessionId, manager);
     }
     return manager;

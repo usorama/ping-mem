@@ -344,9 +344,10 @@ export class ContextToolModule implements ToolModule {
     // Evidence gate check — derive admin from agent_quotas if agentId present
     const metadata = saveOptions.metadata ?? {};
     let isAdmin = false;
-    if (saveOptions.agentId) {
+    const effectiveAgentId = memoryManager.getAgentId?.();
+    if (effectiveAgentId) {
       const db = this.state.eventStore.getDatabase();
-      const adminRow = db.prepare("SELECT admin FROM agent_quotas WHERE agent_id = $id").get({ $id: saveOptions.agentId }) as { admin: number } | null;
+      const adminRow = db.prepare("SELECT admin FROM agent_quotas WHERE agent_id = $id").get({ $id: effectiveAgentId }) as { admin: number } | null;
       isAdmin = adminRow?.admin === 1;
     }
     const gateResult = checkEvidenceGate(
@@ -356,9 +357,7 @@ export class ContextToolModule implements ToolModule {
     );
     if (!gateResult.passed) {
       const { EvidenceGateRejectionError } = await import("../../types/agent-errors.js");
-      const agentId = createAgentId(
-        typeof saveOptions.agentId === "string" ? saveOptions.agentId : "unknown"
-      );
+      const agentId = createAgentId(effectiveAgentId ?? "unknown");
       throw new EvidenceGateRejectionError(agentId, args.key as string, gateResult.warnings.join("; "));
     }
     const warnings: string[] = [...gateResult.warnings];

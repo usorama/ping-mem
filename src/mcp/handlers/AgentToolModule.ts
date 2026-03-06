@@ -148,17 +148,32 @@ export class AgentToolModule implements ToolModule {
     }
     const agentId = createAgentId(args.agentId);
     const role = args.role;
+    if (role.length > 200) {
+      throw new Error("role exceeds 200 character limit");
+    }
     // admin is always false for self-registration — only server config can grant admin
     const admin = false;
-    const ttlMs = Math.min(typeof args.ttlMs === "number" ? args.ttlMs : 86_400_000, 604_800_000); // cap at 7 days
-    const quotaBytes = Math.min(typeof args.quotaBytes === "number" ? args.quotaBytes : 10_485_760, 104_857_600); // cap at 100MB
-    const quotaCount = Math.min(typeof args.quotaCount === "number" ? args.quotaCount : 10_000, 100_000); // cap at 100k
+    const ttlMs = Math.max(1000, Math.min(typeof args.ttlMs === "number" ? args.ttlMs : 86_400_000, 604_800_000)); // min 1s, cap at 7 days
+    const quotaBytes = Math.max(1024, Math.min(typeof args.quotaBytes === "number" ? args.quotaBytes : 10_485_760, 104_857_600)); // min 1KB, cap at 100MB
+    const quotaCount = Math.max(1, Math.min(typeof args.quotaCount === "number" ? args.quotaCount : 10_000, 100_000)); // min 1, cap at 100k
     const metadata = (typeof args.metadata === "object" && args.metadata !== null ? args.metadata : {}) as Record<string, unknown>;
+    const metadataStr = JSON.stringify(metadata);
+    if (metadataStr.length > 10_000) {
+      throw new Error("metadata exceeds 10KB size limit");
+    }
 
     const now = new Date().toISOString();
     const expiresAt = new Date(Date.now() + ttlMs).toISOString();
 
     const db = this.state.eventStore.getDatabase();
+
+    const maxAgents = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10) || 100;
+    const countRow = db.prepare("SELECT COUNT(*) as cnt FROM agent_quotas").get() as { cnt: number };
+    // Only check limit on new registrations (not upserts)
+    const existingRow = db.prepare("SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id").get({ $agent_id: agentId });
+    if (!existingRow && countRow.cnt >= maxAgents) {
+      throw new Error(`Maximum agent registrations (${maxAgents}) reached`);
+    }
 
     db.prepare(
       `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
@@ -182,7 +197,7 @@ export class AgentToolModule implements ToolModule {
       $quota_count: quotaCount,
       $created_at: now,
       $updated_at: now,
-      $metadata: JSON.stringify(metadata),
+      $metadata: metadataStr,
     });
 
     return {
@@ -200,7 +215,10 @@ export class AgentToolModule implements ToolModule {
   private async handleQuotaStatus(
     args: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
-    const agentId = createAgentId(args.agentId as string);
+    if (typeof args.agentId !== "string") {
+      throw new Error("agentId is required and must be a string");
+    }
+    const agentId = createAgentId(args.agentId);
 
     const db = this.state.eventStore.getDatabase();
 
@@ -210,6 +228,10 @@ export class AgentToolModule implements ToolModule {
 
     if (!row) {
       return { found: false, agentId };
+    }
+
+    if (row.expires_at && new Date(row.expires_at) < new Date()) {
+      return { found: false, agentId, expired: true };
     }
 
     const bytesRatio =
@@ -234,7 +256,10 @@ export class AgentToolModule implements ToolModule {
   private async handleDeregister(
     args: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
-    const agentId = createAgentId(args.agentId as string);
+    if (typeof args.agentId !== "string") {
+      throw new Error("agentId is required and must be a string");
+    }
+    const agentId = createAgentId(args.agentId);
 
     const db = this.state.eventStore.getDatabase();
 

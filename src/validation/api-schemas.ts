@@ -139,7 +139,7 @@ export type DiagnosticsSummarizeInput = z.infer<typeof DiagnosticsSummarizeSchem
 export const AgentRegisterSchema = z.object({
   agentId: z.string().min(1, "agentId is required").max(256).trim(),
   role: z.string().min(1, "role is required").max(200).trim(),
-  admin: z.boolean().optional().default(false),
+  admin: z.literal(false).optional().default(false),
   ttlMs: z.number().int().positive().max(604800000).optional().default(86400000), // max 7 days
   quotaBytes: z.number().int().positive().optional().default(10485760), // 10MB
   quotaCount: z.number().int().positive().optional().default(10000),

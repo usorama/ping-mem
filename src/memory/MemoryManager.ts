@@ -597,6 +597,14 @@ export class MemoryManager {
       throw new MemoryKeyNotFoundError(key);
     }
 
+    // Enforce write authorization: only owner or public memories can be updated
+    if (!this.isVisibleToCurrentAgent(existing)) {
+      throw new MemoryKeyNotFoundError(key);
+    }
+    if (existing.agentId && this.agentId && existing.agentId !== this.agentId) {
+      throw new MemoryKeyNotFoundError(key); // Don't reveal existence to non-owner
+    }
+
     const now = new Date();
 
     // Update fields
@@ -681,6 +689,14 @@ export class MemoryManager {
       return false;
     }
 
+    // Enforce write authorization: only owner or public memories can be deleted
+    if (!this.isVisibleToCurrentAgent(existing)) {
+      return false;
+    }
+    if (existing.agentId && this.agentId && existing.agentId !== this.agentId) {
+      return false; // Don't reveal existence to non-owner
+    }
+
     // Remove from caches
     this.memories.delete(key);
     this.memoriesById.delete(existing.id);
@@ -701,6 +717,15 @@ export class MemoryManager {
     // Remove from vector index
     if (this.vectorIndex) {
       await this.vectorIndex.deleteVector(existing.id);
+    }
+
+    // Decrement agent quota usage
+    if (existing.agentId) {
+      const db = this.eventStore.getDatabase();
+      const valueBytes = new TextEncoder().encode(existing.value).byteLength;
+      db.prepare(
+        "UPDATE agent_quotas SET current_bytes = MAX(0, current_bytes - $bytes), current_count = MAX(0, current_count - 1) WHERE agent_id = $agent_id"
+      ).run({ $bytes: valueBytes, $agent_id: existing.agentId });
     }
 
     // Publish memory delete event via PubSub
@@ -748,14 +773,20 @@ export class MemoryManager {
    * Get a memory by ID
    */
   getById(memoryId: MemoryId): Memory | null {
-    return this.memoriesById.get(memoryId) ?? null;
+    const memory = this.memoriesById.get(memoryId) ?? null;
+    if (memory && !this.isVisibleToCurrentAgent(memory)) {
+      return null;
+    }
+    return memory;
   }
 
   /**
    * Check if a memory exists
    */
   has(key: string): boolean {
-    return this.memories.has(key);
+    const memory = this.memories.get(key);
+    if (!memory) return false;
+    return this.isVisibleToCurrentAgent(memory);
   }
 
   /**
@@ -817,9 +848,11 @@ export class MemoryManager {
 
     // Pattern matching
     if (query.keyPattern) {
-      const pattern = new RegExp(
-        query.keyPattern.replace(/\*/g, ".*").replace(/\?/g, ".")
-      );
+      const escaped = query.keyPattern
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, ".*")
+        .replace(/\?/g, ".");
+      const pattern = new RegExp(`^${escaped}$`);
       for (const memory of this.memories.values()) {
         if (pattern.test(memory.key) && this.isVisibleToCurrentAgent(memory)) {
           results.push({ memory, score: 1.0 });
@@ -930,7 +963,7 @@ export class MemoryManager {
     // Map vector results to memory query results
     const results: MemoryQueryResult[] = [];
     for (const vr of vectorResults) {
-      const memory = this.memoriesById.get(vr.memoryId);
+      const memory = this.getById(vr.memoryId);
       if (memory) {
         results.push({
           memory,
@@ -1106,6 +1139,16 @@ export class MemoryManager {
           if (memData.channel !== undefined) {
             reconstructed.channel = memData.channel;
           }
+          if (memData.agentId !== undefined) {
+            reconstructed.agentId = memData.agentId;
+          }
+          if (memData.agentScope !== undefined) {
+            reconstructed.agentScope = memData.agentScope;
+          }
+
+          // Scope enforcement: skip memories not visible to current agent
+          if (!this.isVisibleToCurrentAgent(reconstructed)) continue;
+
           scored.push({ memory: reconstructed, score });
         }
       } catch (error) {
@@ -1181,6 +1224,11 @@ export class MemoryManager {
    */
   getEventStore(): EventStore {
     return this.eventStore;
+  }
+
+  /** Get the agent ID configured for this manager */
+  getAgentId(): AgentId | undefined {
+    return this.agentId;
   }
 
   /**

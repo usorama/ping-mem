@@ -79,7 +79,6 @@ describe("REST Agent Endpoints", () => {
       const res = await request(server, "POST", "/api/v1/agents/register", {
         agentId: "test-agent-2",
         role: "reviewer",
-        admin: true,
         ttlMs: 3600000,
         quotaBytes: 2048,
         quotaCount: 50,
