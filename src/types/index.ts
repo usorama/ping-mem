@@ -24,7 +24,9 @@ export type AgentId = string & { readonly [AgentIdBrand]: typeof AgentIdBrand };
  * @throws {Error} if raw is empty or exceeds 256 characters
  */
 export function createAgentId(raw: string): AgentId {
-  if (!raw || raw.length > 256) throw new Error("Invalid agent ID");
+  if (!raw || !raw.trim()) throw new Error("Agent ID must be a non-empty string");
+  if (raw.length > 256) throw new Error(`Agent ID exceeds 256 character limit (got ${raw.length})`);
+  if (!/^[a-zA-Z0-9_\-.:@]+$/.test(raw)) throw new Error(`Agent ID contains invalid characters: only alphanumeric, underscore, hyphen, dot, colon, @ allowed`);
   return raw as AgentId;
 }
 

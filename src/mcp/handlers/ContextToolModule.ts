@@ -341,13 +341,26 @@ export class ContextToolModule implements ToolModule {
       saveOptions.agentScope = args.agentScope as AgentMemoryScope;
     }
 
-    // Evidence gate check
+    // Evidence gate check — derive admin from agent_quotas if agentId present
     const metadata = saveOptions.metadata ?? {};
+    let isAdmin = false;
+    if (saveOptions.agentId) {
+      const db = this.state.eventStore.getDatabase();
+      const adminRow = db.prepare("SELECT admin FROM agent_quotas WHERE agent_id = $id").get({ $id: saveOptions.agentId }) as { admin: number } | null;
+      isAdmin = adminRow?.admin === 1;
+    }
     const gateResult = checkEvidenceGate(
       saveOptions.category,
       metadata,
-      false // TODO: check agent admin flag from session metadata
+      isAdmin
     );
+    if (!gateResult.passed) {
+      const { EvidenceGateRejectionError } = await import("../../types/agent-errors.js");
+      const agentId = createAgentId(
+        typeof saveOptions.agentId === "string" ? saveOptions.agentId : "unknown"
+      );
+      throw new EvidenceGateRejectionError(agentId, args.key as string, gateResult.warnings.join("; "));
+    }
     const warnings: string[] = [...gateResult.warnings];
 
     const savedMemory = await memoryManager.save(args.key as string, args.value as string, saveOptions);
@@ -447,12 +460,7 @@ export class ContextToolModule implements ToolModule {
         };
         if (parsed.title && parsed.solution) {
           // Derive projectId from parsed value, session metadata, or fallback to key
-          const projectId =
-            parsed.projectId ??
-            (this.state.currentSessionId
-              ? (this.state.memoryManagers.get(this.state.currentSessionId) as unknown as { config?: { projectDir?: string } })?.config?.projectDir
-              : undefined) ??
-            "default";
+          const projectId = parsed.projectId ?? "default";
 
           // Build ingest entry with only defined properties (exactOptionalPropertyTypes)
           const knowledgeIngestEntry: Omit<import("../../knowledge/index.js").KnowledgeEntry, "id" | "createdAt" | "updatedAt"> = {
@@ -470,7 +478,7 @@ export class ContextToolModule implements ToolModule {
           this.state.knowledgeStore.ingest(knowledgeIngestEntry);
         }
       } catch (knowledgeError) {
-        console.warn(
+        console.error(
           "[ContextToolModule] Knowledge dual-write failed:",
           knowledgeError instanceof Error ? knowledgeError.message : String(knowledgeError)
         );

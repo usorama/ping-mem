@@ -78,7 +78,11 @@ export class MemoryPubSub {
       // Category filter
       if (options.category && event.category !== options.category) return;
 
-      handler(event);
+      try {
+        handler(event);
+      } catch (err) {
+        console.error("[MemoryPubSub] Subscriber handler threw:", err instanceof Error ? err.message : String(err));
+      }
     };
     this.subscriptions.set(id, { handler: wrappedHandler, options });
     this.emitter.on("memory", wrappedHandler);
@@ -114,7 +118,8 @@ export class MemoryPubSub {
    * Clean up all subscriptions.
    */
   destroy(): void {
-    for (const [id] of this.subscriptions) {
+    const ids = [...this.subscriptions.keys()];
+    for (const id of ids) {
       this.unsubscribe(id);
     }
   }

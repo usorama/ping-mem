@@ -4,7 +4,7 @@
  * @module pubsub/__tests__/MemoryPubSub.test
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { MemoryPubSub } from "../MemoryPubSub.js";
 import type { MemoryEvent, MemoryEventHandler } from "../MemoryPubSub.js";
 

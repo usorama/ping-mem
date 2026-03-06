@@ -108,7 +108,8 @@ describe("AgentToolModule", () => {
 
       expect(result).toBeDefined();
       expect(result!.success).toBe(true);
-      expect(result!.admin).toBe(true);
+      // admin is always false for self-registration (security: no self-escalation)
+      expect(result!.admin).toBe(false);
       expect(result!.ttlMs).toBe(3600000);
       expect(result!.quotaBytes).toBe(1024);
       expect(result!.quotaCount).toBe(50);

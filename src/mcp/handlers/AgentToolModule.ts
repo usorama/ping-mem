@@ -143,13 +143,17 @@ export class AgentToolModule implements ToolModule {
   private async handleRegister(
     args: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
-    const agentId = createAgentId(args.agentId as string);
-    const role = args.role as string;
-    const admin = (args.admin as boolean | undefined) ?? false;
-    const ttlMs = (args.ttlMs as number | undefined) ?? 86_400_000;
-    const quotaBytes = (args.quotaBytes as number | undefined) ?? 10_485_760;
-    const quotaCount = (args.quotaCount as number | undefined) ?? 10_000;
-    const metadata = (args.metadata as Record<string, unknown> | undefined) ?? {};
+    if (typeof args.agentId !== "string" || typeof args.role !== "string") {
+      throw new Error("agentId and role are required strings");
+    }
+    const agentId = createAgentId(args.agentId);
+    const role = args.role;
+    // admin is always false for self-registration — only server config can grant admin
+    const admin = false;
+    const ttlMs = Math.min(typeof args.ttlMs === "number" ? args.ttlMs : 86_400_000, 604_800_000); // cap at 7 days
+    const quotaBytes = Math.min(typeof args.quotaBytes === "number" ? args.quotaBytes : 10_485_760, 104_857_600); // cap at 100MB
+    const quotaCount = Math.min(typeof args.quotaCount === "number" ? args.quotaCount : 10_000, 100_000); // cap at 100k
+    const metadata = (typeof args.metadata === "object" && args.metadata !== null ? args.metadata : {}) as Record<string, unknown>;
 
     const now = new Date().toISOString();
     const expiresAt = new Date(Date.now() + ttlMs).toISOString();
@@ -234,15 +238,11 @@ export class AgentToolModule implements ToolModule {
 
     const db = this.state.eventStore.getDatabase();
 
-    // Delete write locks held by this agent
-    const lockResult = db
-      .prepare("DELETE FROM write_locks WHERE holder_id = $agent_id")
-      .run({ $agent_id: agentId });
-
-    // Delete the agent quota row
-    const quotaResult = db
-      .prepare("DELETE FROM agent_quotas WHERE agent_id = $agent_id")
-      .run({ $agent_id: agentId });
+    const { lockResult, quotaResult } = db.transaction(() => {
+      const lockResult = db.prepare("DELETE FROM write_locks WHERE holder_id = $agent_id").run({ $agent_id: agentId });
+      const quotaResult = db.prepare("DELETE FROM agent_quotas WHERE agent_id = $agent_id").run({ $agent_id: agentId });
+      return { lockResult, quotaResult };
+    })();
 
     return {
       success: true,

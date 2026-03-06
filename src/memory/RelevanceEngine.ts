@@ -559,8 +559,11 @@ export class RelevanceEngine {
             // Fallback to simple truncation if compressor returns no facts
             digestValue = this.buildHeuristicDigest(chunk);
           }
-        } catch {
-          // Fallback to simple truncation on any error
+        } catch (compressError) {
+          console.warn(
+            `[RelevanceEngine] Semantic compression failed, falling back to heuristic:`,
+            compressError instanceof Error ? compressError.message : String(compressError)
+          );
           digestValue = this.buildHeuristicDigest(chunk);
         }
 

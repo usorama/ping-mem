@@ -14,7 +14,7 @@ fi
 # Run migrations using bun
 bun -e "
 const Database = require('bun:sqlite');
-const db = new Database('$DB_PATH');
+const db = new Database(process.env.PING_MEM_DB_PATH || process.env.HOME + '/.ping-mem/ping-mem.db');
 
 // agent_quotas table
 db.exec(\`CREATE TABLE IF NOT EXISTS agent_quotas (
@@ -68,6 +68,27 @@ db.exec(\`CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
   content='knowledge_entries',
   content_rowid='rowid'
 )\`);
+
+// FTS5 sync triggers
+db.exec(\`CREATE TRIGGER IF NOT EXISTS knowledge_ai AFTER INSERT ON knowledge_entries BEGIN
+  INSERT INTO knowledge_fts(rowid, title, solution, symptoms, root_cause, tags)
+  VALUES (new.rowid, new.title, new.solution, new.symptoms, new.root_cause, new.tags);
+END\`);
+
+db.exec(\`CREATE TRIGGER IF NOT EXISTS knowledge_ad AFTER DELETE ON knowledge_entries BEGIN
+  INSERT INTO knowledge_fts(knowledge_fts, rowid, title, solution, symptoms, root_cause, tags)
+  VALUES ('delete', old.rowid, old.title, old.solution, old.symptoms, old.root_cause, old.tags);
+END\`);
+
+db.exec(\`CREATE TRIGGER IF NOT EXISTS knowledge_au AFTER UPDATE ON knowledge_entries BEGIN
+  INSERT INTO knowledge_fts(knowledge_fts, rowid, title, solution, symptoms, root_cause, tags)
+  VALUES ('delete', old.rowid, old.title, old.solution, old.symptoms, old.root_cause, old.tags);
+  INSERT INTO knowledge_fts(rowid, title, solution, symptoms, root_cause, tags)
+  VALUES (new.rowid, new.title, new.solution, new.symptoms, new.root_cause, new.tags);
+END\`);
+
+// Performance index
+db.exec('CREATE INDEX IF NOT EXISTS idx_knowledge_project_id ON knowledge_entries(project_id)');
 
 console.log('✓ All v2 migrations applied successfully');
 db.close();

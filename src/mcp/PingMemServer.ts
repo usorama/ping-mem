@@ -49,6 +49,7 @@ import {
   MemoryToolModule,
   CausalToolModule,
   KnowledgeToolModule,
+  AgentToolModule,
 } from "./handlers/index.js";
 import { CONTEXT_TOOLS } from "./handlers/ContextToolModule.js";
 import { GRAPH_TOOLS } from "./handlers/GraphToolModule.js";
@@ -58,6 +59,7 @@ import { CODEBASE_TOOLS } from "./handlers/CodebaseToolModule.js";
 import { MEMORY_TOOLS } from "./handlers/MemoryToolModule.js";
 import { CAUSAL_TOOLS } from "./handlers/CausalToolModule.js";
 import { KNOWLEDGE_TOOLS } from "./handlers/KnowledgeToolModule.js";
+import { AGENT_TOOLS } from "./handlers/AgentToolModule.js";
 import { KnowledgeStore } from "../knowledge/index.js";
 import { MemoryPubSub } from "../pubsub/index.js";
 
@@ -110,6 +112,7 @@ export const TOOLS: ToolDefinition[] = [
   ...MEMORY_TOOLS,
   ...CAUSAL_TOOLS,
   ...KNOWLEDGE_TOOLS,
+  ...AGENT_TOOLS,
 ];
 
 // ============================================================================
@@ -210,6 +213,7 @@ export class PingMemServer {
       new MemoryToolModule(this.state),
       new CausalToolModule(this.state),
       new KnowledgeToolModule(this.state),
+      new AgentToolModule(this.state),
     ];
 
     // Initialize MCP server

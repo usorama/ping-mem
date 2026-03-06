@@ -1153,7 +1153,9 @@ export class RESTPingMemServer {
           );
         }
 
-        const { agentId: rawId, role, admin, ttlMs, quotaBytes, quotaCount, metadata } = parseResult.data;
+        const { agentId: rawId, role, ttlMs, quotaBytes, quotaCount, metadata } = parseResult.data;
+        // admin privilege must be granted via server config, not self-assignment
+        const admin = false;
         const agentId = createAgentId(rawId);
         const now = new Date().toISOString();
         const expiresAt = new Date(Date.now() + ttlMs).toISOString();
@@ -1219,8 +1221,12 @@ export class RESTPingMemServer {
         const agentId = createAgentId(rawId);
         const db = this.eventStore.getDatabase();
 
-        const lockResult = db.prepare("DELETE FROM write_locks WHERE holder_id = $agent_id").run({ $agent_id: agentId });
-        const quotaResult = db.prepare("DELETE FROM agent_quotas WHERE agent_id = $agent_id").run({ $agent_id: agentId });
+        const deleteResult = db.transaction(() => {
+          const lockResult = db.prepare("DELETE FROM write_locks WHERE holder_id = $agent_id").run({ $agent_id: agentId });
+          const quotaResult = db.prepare("DELETE FROM agent_quotas WHERE agent_id = $agent_id").run({ $agent_id: agentId });
+          return { lockResult, quotaResult };
+        })();
+        const { lockResult, quotaResult } = deleteResult;
 
         if (quotaResult.changes === 0) {
           return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${rawId}' not found` }, 404);
@@ -1254,8 +1260,9 @@ export class RESTPingMemServer {
             (event) => {
               try {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
-              } catch {
-                // Stream closed, ignore
+              } catch (err) {
+                if (err instanceof TypeError && /closed|errored/i.test(String(err.message))) return;
+                console.error("[SSE] Failed to send event:", err instanceof Error ? err.message : String(err));
               }
             }
           );
@@ -1264,8 +1271,11 @@ export class RESTPingMemServer {
           const heartbeat = setInterval(() => {
             try {
               controller.enqueue(encoder.encode(`: heartbeat\n\n`));
-            } catch {
+            } catch (err) {
               clearInterval(heartbeat);
+              if (!(err instanceof TypeError && /closed|errored/i.test(String(err.message)))) {
+                console.error("[SSE] Heartbeat error:", err instanceof Error ? err.message : String(err));
+              }
             }
           }, 30_000);
 

@@ -231,7 +231,7 @@ describe("WriteLockManager", () => {
       expect(row).toBeNull();
     });
 
-    test("expired agents are cleaned up on acquire", () => {
+    test("expired agents are NOT cleaned up by lock acquire (layer separation)", () => {
       // Insert an expired agent quota
       db.prepare(
         `INSERT INTO agent_quotas
@@ -239,14 +239,14 @@ describe("WriteLockManager", () => {
          VALUES ($agent_id, 'expired-role', 0, 1000, '2020-01-01T00:00:00Z', 0, 0, 10485760, 10000, '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z', '{}')`
       ).run({ $agent_id: "expired-agent" });
 
-      // Acquire a lock — triggers lazy cleanup
+      // Acquire a lock — should NOT clean up agent_quotas (layer violation removed)
       lockManager.acquireLock("any-key", "live-agent");
 
-      // The expired agent quota should have been deleted
+      // The expired agent quota should still exist (cleanup is not WriteLockManager's job)
       const row = db
         .prepare("SELECT * FROM agent_quotas WHERE agent_id = 'expired-agent'")
         .get();
-      expect(row).toBeNull();
+      expect(row).toBeDefined();
     });
   });
 

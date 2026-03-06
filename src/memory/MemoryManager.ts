@@ -472,15 +472,6 @@ export class MemoryManager {
       this.memories.set(key, memory);
       this.memoriesById.set(memoryId, memory);
 
-      // Update agent quota usage after successful cache store
-      if (effectiveAgentId) {
-        const db = this.eventStore.getDatabase();
-        const valueBytes = new TextEncoder().encode(value).byteLength;
-        db.prepare(
-          "UPDATE agent_quotas SET current_bytes = current_bytes + $bytes, current_count = current_count + 1 WHERE agent_id = $agent_id"
-        ).run({ $bytes: valueBytes, $agent_id: effectiveAgentId });
-      }
-
       // Create event for audit trail with full memory data for hydration
       const memoryData: Partial<Omit<Memory, "id">> = {
         key,
@@ -520,6 +511,16 @@ export class MemoryManager {
         priority: memory.priority,
         channel: memory.channel,
       });
+
+      // Update agent quota usage AFTER event creation for consistency
+      // (if event fails, quota isn't consumed)
+      if (effectiveAgentId) {
+        const db = this.eventStore.getDatabase();
+        const valueBytes = new TextEncoder().encode(value).byteLength;
+        db.prepare(
+          "UPDATE agent_quotas SET current_bytes = current_bytes + $bytes, current_count = current_count + 1 WHERE agent_id = $agent_id"
+        ).run({ $bytes: valueBytes, $agent_id: effectiveAgentId });
+      }
 
       // Auto-track relevance if engine is available
       if (this.relevanceEngine) {

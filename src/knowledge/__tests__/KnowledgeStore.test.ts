@@ -4,7 +4,7 @@
  * @module knowledge/__tests__/KnowledgeStore.test
  */
 
-import { describe, it, expect, beforeEach } from "@jest/globals";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
 import { KnowledgeStore } from "../KnowledgeStore.js";
 import type { KnowledgeEntry } from "../KnowledgeStore.js";

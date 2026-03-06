@@ -122,8 +122,9 @@ export class SemanticCompressor {
       );
 
       if (!response.ok) {
+        const body = await response.text().catch(() => "<unreadable>");
         console.warn(
-          `[SemanticCompressor] LLM call failed (${response.status}), falling back to heuristic`
+          `[SemanticCompressor] LLM call failed (${response.status}): ${body.slice(0, 500)}, falling back to heuristic`
         );
         return this.compressWithHeuristic(memories);
       }
@@ -135,6 +136,7 @@ export class SemanticCompressor {
       try {
         parsed = JSON.parse(content) as { facts?: unknown };
       } catch {
+        console.warn(`[SemanticCompressor] LLM returned invalid JSON, falling back to heuristic. Preview: ${content.slice(0, 200)}`);
         return this.compressWithHeuristic(memories);
       }
 
@@ -156,7 +158,7 @@ export class SemanticCompressor {
         },
       };
     } catch (error) {
-      console.warn(
+      console.error(
         "[SemanticCompressor] LLM compression failed, falling back to heuristic:",
         error
       );

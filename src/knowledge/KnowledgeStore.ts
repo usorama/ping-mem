@@ -82,7 +82,7 @@ function rowToEntry(row: KnowledgeRow): KnowledgeEntry {
     projectId: row.project_id,
     title: row.title,
     solution: row.solution,
-    tags: JSON.parse(row.tags) as string[],
+    tags: (() => { try { return JSON.parse(row.tags) as string[]; } catch { return []; } })(),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -157,6 +157,9 @@ export class KnowledgeStore {
         VALUES (new.rowid, new.title, new.solution, new.symptoms, new.root_cause, new.tags);
       END
     `);
+
+    // Performance indexes
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_knowledge_project_id ON knowledge_entries(project_id)`);
   }
 
   /**
@@ -238,13 +241,14 @@ export class KnowledgeStore {
     // Tag filtering: entries must contain all specified tags
     if (options.tags && options.tags.length > 0) {
       for (let i = 0; i < options.tags.length; i++) {
-        sql += ` AND ke.tags LIKE $tag${i}`;
-        params[`$tag${i}`] = `%"${options.tags[i]}"%`;
+        sql += ` AND EXISTS (SELECT 1 FROM json_each(ke.tags) WHERE json_each.value = $tag${i})`;
+        params[`$tag${i}`] = options.tags[i]!;
       }
     }
 
     sql += ` ORDER BY fts.rank LIMIT $limit`;
-    params.$query = options.query;
+    // Sanitize FTS5 special characters to prevent syntax injection
+    params.$query = `"${options.query.replace(/"/g, '""')}"`;
     params.$limit = limit;
 
     const rows = this.db.prepare(sql).all(params) as KnowledgeSearchRow[];

@@ -95,12 +95,6 @@ export class WriteLockManager {
     this.db
       .prepare("DELETE FROM write_locks WHERE expires_at < datetime('now')")
       .run();
-    this.db
-      .prepare(
-        "DELETE FROM agent_quotas WHERE ttl_ms > 0 AND expires_at IS NOT NULL AND expires_at < datetime('now')"
-      )
-      .run();
-
     // Step 2: Atomic INSERT ... ON CONFLICT DO UPDATE
     // The UPDATE only succeeds if the existing lock has expired OR is held by the same agent
     const stmt = this.db.prepare(`
@@ -213,7 +207,7 @@ export class WriteLockManager {
       holderId: row.holder_id,
       acquiredAt: row.acquired_at,
       expiresAt: row.expires_at,
-      metadata: JSON.parse(row.metadata) as Record<string, unknown>,
+      metadata: (() => { try { return JSON.parse(row.metadata) as Record<string, unknown>; } catch { return {}; } })(),
     };
   }
 }

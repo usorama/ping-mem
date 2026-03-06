@@ -88,7 +88,8 @@ describe("REST Agent Endpoints", () => {
 
       expect(res.status).toBe(200);
       const json = (await res.json()) as { data: Record<string, unknown> };
-      expect(json.data.admin).toBe(true);
+      // admin is always false for self-registration (security: no self-escalation)
+      expect(json.data.admin).toBe(false);
       expect(json.data.quotaBytes).toBe(2048);
       expect(json.data.quotaCount).toBe(50);
     });

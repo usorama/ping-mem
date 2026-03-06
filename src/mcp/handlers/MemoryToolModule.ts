@@ -153,7 +153,7 @@ export class MemoryToolModule implements ToolModule {
       // Events delivered via SSE stream, not MCP tool responses
     });
 
-    return { subscriptionId, subscriberCount: this.state.pubsub.subscriberCount };
+    return { subscriptionId, subscriberCount: this.state.pubsub.subscriberCount, warning: "MCP subscriptions do not deliver events inline. Use the SSE endpoint GET /api/v1/events/stream for real-time delivery." };
   }
 
   private async handleMemoryUnsubscribe(args: Record<string, unknown>): Promise<Record<string, unknown>> {

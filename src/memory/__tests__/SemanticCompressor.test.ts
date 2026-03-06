@@ -4,7 +4,7 @@
  * @module memory/__tests__/SemanticCompressor.test
  */
 
-import { describe, it, expect, beforeEach } from "@jest/globals";
+import { describe, it, expect, beforeEach } from "bun:test";
 import { SemanticCompressor } from "../SemanticCompressor.js";
 import type { Memory } from "../../types/index.js";
 
