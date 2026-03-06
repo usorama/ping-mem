@@ -6,7 +6,7 @@
  */
 
 import type { Context } from "hono";
-import { renderLayout, formatDate, escapeHtml, getCspNonce } from "./layout.js";
+import { renderLayout, formatDate, escapeHtml, getCspNonce, getCsrfToken } from "./layout.js";
 import { statCard, card, eventTypeBadge, emptyState } from "./components.js";
 import type { UIDependencies } from "./routes.js";
 
@@ -81,22 +81,26 @@ export function registerDashboardRoutes(deps: UIDependencies) {
       `;
 
       const nonce = getCspNonce(c);
+      const csrfToken = getCsrfToken(c);
       return c.html(renderLayout({
         title: "Dashboard",
         content,
         activeRoute: "dashboard",
         nonce,
+        csrfToken,
       }));
     } catch (err) {
       const errName = err instanceof Error ? err.constructor.name : "Unknown";
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[Dashboard] Error:", errName, errMsg);
       const nonce = getCspNonce(c);
+      const csrfToken = getCsrfToken(c);
       return c.html(renderLayout({
         title: "Dashboard",
         content: `<div class="card" style="padding:24px;color:var(--error)">Dashboard error (${escapeHtml(errName)}): ${escapeHtml(errMsg)}. Check server logs.</div>`,
         activeRoute: "dashboard",
         nonce,
+        csrfToken,
       }));
     }
   };

@@ -50,6 +50,18 @@ import type {
 } from "./types.js";
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
 import { registerUIRoutes } from "./ui/routes.js";
+import { csrfProtection } from "./middleware/csrf.js";
+import { rateLimiter } from "./middleware/rate-limit.js";
+import {
+  SessionStartSchema,
+  ContextSaveSchema,
+  CheckpointSchema,
+  CodebaseIngestSchema,
+  CodebaseVerifySchema,
+  DiagnosticsDiffSchema,
+  DiagnosticsSummarizeSchema,
+  MemoryConsolidateSchema,
+} from "../validation/api-schemas.js";
 
 // ============================================================================
 // REST Server Class
@@ -64,6 +76,7 @@ import { registerUIRoutes } from "./ui/routes.js";
 export type AppEnv = {
   Variables: {
     cspNonce: string;
+    csrfToken: string;
   };
 };
 
@@ -212,6 +225,16 @@ export class RESTPingMemServer {
     } else {
       console.warn("[REST Server] WARNING: No API key configured. All routes are unauthenticated.");
     }
+
+    // CSRF protection for browser-based UI routes
+    this.app.use("/ui/*", csrfProtection());
+
+    // Rate limit state-changing API endpoints (60 req/min per IP)
+    this.app.use("/api/v1/*", rateLimiter({
+      name: "api-v1",
+      maxRequests: 60,
+      windowMs: 60_000,
+    }));
   }
 
   /**
@@ -252,12 +275,19 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/session/start", async (c) => {
       try {
-        const body = await c.req.json();
+        const parseResult = SessionStartSchema.safeParse(await c.req.json());
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+        const body = parseResult.data;
         const session = await this.sessionManager.startSession({
           name: body.name,
-          projectDir: body.projectDir,
-          continueFrom: body.continueFrom,
-          defaultChannel: body.defaultChannel,
+          ...(body.projectDir !== undefined ? { projectDir: body.projectDir } : {}),
+          ...(body.continueFrom !== undefined ? { continueFrom: body.continueFrom } : {}),
+          ...(body.defaultChannel !== undefined ? { defaultChannel: body.defaultChannel } : {}),
         });
 
         this.currentSessionId = session.id;
@@ -329,7 +359,14 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/context", async (c) => {
       try {
-        const body = await c.req.json() as ContextSaveRequest;
+        const parseResult = ContextSaveSchema.safeParse(await c.req.json());
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+        const body = parseResult.data;
         const sessionId = this.currentSessionId ?? c.req.header("x-session-id");
 
         if (!sessionId) {
@@ -556,13 +593,15 @@ export class RESTPingMemServer {
         );
       }
 
-      const body = await c.req.json();
-      const rawProjectDir = body.projectDir as string | undefined;
-      const projectDir = rawProjectDir ? path.resolve(rawProjectDir) : undefined;
-      if (!projectDir) {
-        return c.json({ error: "BadRequest", message: "projectDir is required" }, 400);
+      const parseResult = CodebaseIngestSchema.safeParse(await c.req.json());
+      if (!parseResult.success) {
+        return c.json(
+          { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+          400
+        );
       }
-      const forceReingest = body.forceReingest === true;
+      const projectDir = path.resolve(parseResult.data.projectDir);
+      const forceReingest = parseResult.data.forceReingest;
 
       const result = await this.config.ingestionService.ingestProject({
         projectDir,
@@ -611,12 +650,14 @@ export class RESTPingMemServer {
           503
         );
       }
-      const body = await c.req.json();
-      const rawProjectDir = body.projectDir as string | undefined;
-      const projectDir = rawProjectDir ? path.resolve(rawProjectDir) : undefined;
-      if (!projectDir) {
-        return c.json({ error: "BadRequest", message: "projectDir is required" }, 400);
+      const parseResult = CodebaseVerifySchema.safeParse(await c.req.json());
+      if (!parseResult.success) {
+        return c.json(
+          { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+          400
+        );
       }
+      const projectDir = path.resolve(parseResult.data.projectDir);
       const result = await this.config.ingestionService.verifyProject(projectDir);
       return c.json({ data: result });
     });
@@ -716,18 +757,14 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/diagnostics/diff", async (c) => {
       try {
-        const body = await c.req.json();
-        const analysisIdA = body.analysisIdA as string | undefined;
-        const analysisIdB = body.analysisIdB as string | undefined;
-        if (!analysisIdA || !analysisIdB) {
+        const parseResult = DiagnosticsDiffSchema.safeParse(await c.req.json());
+        if (!parseResult.success) {
           return c.json<RESTErrorResponse>(
-            {
-              error: "Bad Request",
-              message: "analysisIdA and analysisIdB are required",
-            },
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
             400
           );
         }
+        const { analysisIdA, analysisIdB } = parseResult.data;
 
         const diff = this.diagnosticsStore.diffAnalyses(analysisIdA, analysisIdB);
         return c.json<RESTSuccessResponse<Record<string, unknown>>>({
@@ -762,9 +799,14 @@ export class RESTPingMemServer {
     this.app.post("/api/v1/diagnostics/summarize/:analysisId", async (c) => {
       try {
         const analysisId = c.req.param("analysisId");
-        const body = await c.req.json();
-        const useLLM = body.useLLM === true;
-        const forceRefresh = body.forceRefresh === true;
+        const parseResult = DiagnosticsSummarizeSchema.safeParse(await c.req.json());
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+        const { useLLM, forceRefresh } = parseResult.data;
 
         const findings = this.diagnosticsStore.listFindings(analysisId);
 
@@ -965,7 +1007,14 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/checkpoint", async (c) => {
       try {
-        const body = await c.req.json() as CheckpointRequest;
+        const parseResult = CheckpointSchema.safeParse(await c.req.json());
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+        const body = parseResult.data;
         const sessionId = this.currentSessionId ?? c.req.header("x-session-id");
 
         if (!sessionId) {
@@ -1054,13 +1103,21 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/memory/consolidate", async (c) => {
       try {
-        const body = await c.req.json().catch(() => ({})) as Record<string, unknown>;
-        const options: Parameters<typeof this.relevanceEngine.consolidate>[0] = {};
-        if (typeof body.maxScore === "number") {
-          options.maxScore = body.maxScore;
+        const parseResult = MemoryConsolidateSchema.safeParse(
+          await c.req.json().catch(() => ({}))
+        );
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
         }
-        if (typeof body.minDaysOld === "number") {
-          options.minDaysOld = body.minDaysOld;
+        const options: Parameters<typeof this.relevanceEngine.consolidate>[0] = {};
+        if (parseResult.data.maxScore !== undefined) {
+          options.maxScore = parseResult.data.maxScore;
+        }
+        if (parseResult.data.minDaysOld !== undefined) {
+          options.minDaysOld = parseResult.data.minDaysOld;
         }
         const result = this.relevanceEngine.consolidate(options);
         return c.json({ data: result });

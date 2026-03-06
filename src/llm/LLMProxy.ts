@@ -121,8 +121,12 @@ export class LLMProxy {
         message?: { content?: string };
         model?: string;
       };
+      const content = data.message?.content ?? "";
+      if (!content) {
+        console.warn("[LLMProxy] Ollama returned empty content. Response:", JSON.stringify(data).slice(0, 200));
+      }
       return {
-        content: data.message?.content ?? "",
+        content,
         model: data.model ?? this.ollamaModel,
         provider: "ollama",
       };

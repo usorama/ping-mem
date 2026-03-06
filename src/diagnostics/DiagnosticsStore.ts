@@ -443,6 +443,48 @@ export class DiagnosticsStore {
     return rows.map((row) => this.rowToRun(row));
   }
 
+  /**
+   * Get finding counts grouped by analysis ID in a single query.
+   * Avoids N+1 when rendering lists of runs with their finding counts.
+   */
+  getFindingsCounts(
+    analysisIds: string[]
+  ): Map<string, { total: number; errors: number; warnings: number; notes: number }> {
+    const result = new Map<string, { total: number; errors: number; warnings: number; notes: number }>();
+    if (analysisIds.length === 0) return result;
+
+    const placeholders = analysisIds.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(
+        `SELECT analysis_id,
+          COUNT(*) as total,
+          SUM(CASE WHEN severity = 'error' THEN 1 ELSE 0 END) as errors,
+          SUM(CASE WHEN severity = 'warning' THEN 1 ELSE 0 END) as warnings,
+          SUM(CASE WHEN severity = 'note' THEN 1 ELSE 0 END) as notes
+        FROM diagnostic_findings
+        WHERE analysis_id IN (${placeholders})
+        GROUP BY analysis_id`
+      )
+      .all(...analysisIds) as Array<{
+      analysis_id: string;
+      total: number;
+      errors: number;
+      warnings: number;
+      notes: number;
+    }>;
+
+    for (const row of rows) {
+      result.set(row.analysis_id, {
+        total: row.total,
+        errors: row.errors,
+        warnings: row.warnings,
+        notes: row.notes,
+      });
+    }
+
+    return result;
+  }
+
   getDatabase(): Database {
     return this.db;
   }

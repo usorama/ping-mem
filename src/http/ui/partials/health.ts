@@ -17,9 +17,19 @@ export function registerHealthPartialRoute(deps: UIDependencies) {
       let status: "green" | "yellow" | "red" = "green";
       let title = "All services healthy";
 
-      const hasIngestion = !!ingestionService;
-      let hasDiagnostics = true;
+      let hasIngestion = false;
+      if (ingestionService) {
+        try {
+          // Probe: call listProjects with limit 1 to verify Neo4j + Qdrant connectivity
+          await ingestionService.listProjects({ limit: 1 });
+          hasIngestion = true;
+        } catch (err) {
+          console.error("[Health] Ingestion probe failed:", err instanceof Error ? err.message : err);
+          hasIngestion = false;
+        }
+      }
 
+      let hasDiagnostics = true;
       try {
         // Quick probe: list runs with limit 1
         diagnosticsStore.listRuns({ limit: 1 });

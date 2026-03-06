@@ -5,6 +5,24 @@
  * All views use this layout for consistent structure.
  */
 
+import * as fs from "fs";
+import * as path from "path";
+import * as crypto from "crypto";
+
+function computeSri(filePath: string): string {
+  try {
+    const content = fs.readFileSync(filePath);
+    const hash = crypto.createHash("sha384").update(content).digest("base64");
+    return `sha384-${hash}`;
+  } catch {
+    return "";
+  }
+}
+
+const staticDir = process.env.PING_MEM_STATIC_DIR ?? path.resolve(process.cwd(), "src/static");
+const SRI_HTMX = computeSri(path.join(staticDir, "htmx.min.js"));
+const SRI_CHAT = computeSri(path.join(staticDir, "chat.js"));
+
 export type UIRoute = "dashboard" | "memories" | "diagnostics" | "ingestion";
 
 interface LayoutOptions {
@@ -13,6 +31,8 @@ interface LayoutOptions {
   activeRoute: UIRoute;
   /** CSP nonce for inline scripts (required for nonce-based CSP) */
   nonce?: string | undefined;
+  /** CSRF token for state-changing requests from HTMX */
+  csrfToken?: string | undefined;
 }
 
 const NAV_ITEMS: Array<{ route: UIRoute; path: string; icon: string; label: string }> = [
@@ -23,7 +43,7 @@ const NAV_ITEMS: Array<{ route: UIRoute; path: string; icon: string; label: stri
 ];
 
 export function renderLayout(options: LayoutOptions): string {
-  const { title, content, activeRoute, nonce } = options;
+  const { title, content, activeRoute, nonce, csrfToken } = options;
   const nonceAttr = nonce ? ` nonce="${escapeHtml(nonce)}"` : "";
 
   const navLinks = NAV_ITEMS.map(
@@ -39,10 +59,11 @@ export function renderLayout(options: LayoutOptions): string {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="${escapeHtml(csrfToken ?? '')}">
   <title>${escapeHtml(title)} - ping-mem</title>
   <link rel="stylesheet" href="/static/styles.css">
-  <script src="/static/htmx.min.js" defer${nonceAttr}></script>
-  <script src="/static/chat.js" defer${nonceAttr}></script>
+  <script src="/static/htmx.min.js" defer${nonceAttr}${SRI_HTMX ? ` integrity="${SRI_HTMX}" crossorigin="anonymous"` : ""}></script>
+  <script src="/static/chat.js" defer${nonceAttr}${SRI_CHAT ? ` integrity="${SRI_CHAT}" crossorigin="anonymous"` : ""}></script>
   <script${nonceAttr}>
     // Theme: check localStorage before paint to prevent flash
     (function() {
@@ -130,7 +151,15 @@ export function renderLayout(options: LayoutOptions): string {
     document.addEventListener('click', function(e) {
       if (e.target && e.target.id === 'detail-close-btn') {
         var panel = document.getElementById('detail-panel');
-        if (panel) panel.innerHTML = '';
+        if (panel) panel.textContent = '';
+      }
+    });
+
+    // CSRF: inject token header into all HTMX requests
+    document.addEventListener('DOMContentLoaded', function() {
+      var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+      if (csrfMeta) {
+        document.body.setAttribute('hx-headers', JSON.stringify({'x-csrf-token': csrfMeta.content}));
       }
     });
   </script>
@@ -177,6 +206,17 @@ export function timeAgo(date: Date | string): string {
 export function getCspNonce(c: { get?: (key: string) => unknown }): string | undefined {
   if (typeof c.get === "function") {
     return c.get("cspNonce") as string | undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Safely retrieve the CSRF token from a Hono context.
+ * Returns undefined if context doesn't have the get() method (e.g. in test mocks).
+ */
+export function getCsrfToken(c: { get?: (key: string) => unknown }): string | undefined {
+  if (typeof c.get === "function") {
+    return c.get("csrfToken") as string | undefined;
   }
   return undefined;
 }

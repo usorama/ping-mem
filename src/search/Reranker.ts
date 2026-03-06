@@ -107,8 +107,8 @@ export class Reranker {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.warn(
-          `[Reranker] Cohere Rerank API error (${response.status}): ${errorText}`
+        console.error(
+          `[Reranker] Reranking failed, returning un-reranked results: Cohere API error (${response.status}): ${errorText}`
         );
         return null;
       }
@@ -122,8 +122,8 @@ export class Reranker {
         }))
         .sort((a, b) => b.relevanceScore - a.relevanceScore);
     } catch (error) {
-      console.warn(
-        `[Reranker] Cohere Rerank API call failed: ${error instanceof Error ? error.message : String(error)}`
+      console.error(
+        `[Reranker] Reranking failed, returning un-reranked results: ${error instanceof Error ? error.message : String(error)}`
       );
       return null;
     }

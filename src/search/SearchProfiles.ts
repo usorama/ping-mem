@@ -129,7 +129,6 @@ const TEMPORAL_KEYWORDS = new Set([
   "latest",
   "today",
   "yesterday",
-  "last week",
 ]);
 
 // ============================================================================
@@ -175,7 +174,8 @@ export function detectProfile(query: string): string {
     return "error_investigation";
   }
 
-  // Check for temporal keywords (includes multi-word like "last week" — check via includes fallback)
+  // Check for temporal keywords
+  // "last week" is multi-word — checked via includes() since token matching only handles single words
   if (matchesKeyword(TEMPORAL_KEYWORDS) || lowerQuery.includes("last week")) {
     return "temporal";
   }

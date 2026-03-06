@@ -46,8 +46,14 @@ function queryMemories(
 ): { memories: MemoryRow[]; total: number } {
   const db = eventStore.getDatabase();
 
-  // Query MEMORY_SAVED events, deduplicated by key (most recent wins)
-  // Then exclude keys that have MEMORY_DELETED events after the save
+  // Push category, priority, and text-search filters into SQL WHERE clause
+  // using json_extract to reduce the dataset before loading into JS.
+  // Escape LIKE pattern special characters in the query string.
+  const escapeLike = (s: string): string =>
+    s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+
+  const queryPattern = filters.query ? `%${escapeLike(filters.query)}%` : "";
+
   const sql = `
     SELECT e.payload, e.timestamp
     FROM events e
@@ -58,14 +64,26 @@ function queryMemories(
       AND json_extract(d.payload, '$.key') = json_extract(e.payload, '$.key')
       AND d.rowid > e.rowid
     )
+    AND ($category = '' OR json_extract(e.payload, '$.memory.category') = $category)
+    AND ($priority = '' OR json_extract(e.payload, '$.memory.priority') = $priority)
+    AND ($query = '' OR (
+      json_extract(e.payload, '$.key') LIKE $queryPattern ESCAPE '\\'
+      OR json_extract(e.payload, '$.memory.value') LIKE $queryPattern ESCAPE '\\'
+    ))
     ORDER BY e.timestamp DESC
+    LIMIT 10000
   `;
 
-  const rows = db.prepare(sql).all() as Array<{ payload: string; timestamp: string }>;
+  const rows = db.prepare(sql).all({
+    $category: filters.category ?? "",
+    $priority: filters.priority ?? "",
+    $query: filters.query ?? "",
+    $queryPattern: queryPattern,
+  }) as Array<{ payload: string; timestamp: string }>;
 
   // Deduplicate by key (keep most recent save)
   const seen = new Set<string>();
-  let memories: MemoryRow[] = [];
+  const memories: MemoryRow[] = [];
 
   for (const row of rows) {
     try {
@@ -96,24 +114,6 @@ function queryMemories(
       console.warn("[Memories] Skipping corrupted memory payload:", err instanceof Error ? err.message : err);
       continue;
     }
-  }
-
-  // Apply filters
-  if (filters.query) {
-    const q = filters.query.toLowerCase();
-    memories = memories.filter(
-      (m) =>
-        m.key.toLowerCase().includes(q) ||
-        m.value.toLowerCase().includes(q)
-    );
-  }
-
-  if (filters.category) {
-    memories = memories.filter((m) => m.category === filters.category);
-  }
-
-  if (filters.priority) {
-    memories = memories.filter((m) => m.priority === filters.priority);
   }
 
   const total = memories.length;

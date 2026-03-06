@@ -160,13 +160,7 @@ export class CausalToolModule implements ToolModule {
     const persist = (args.persist as boolean) ?? false;
 
     if (persist) {
-      // Note: Full persistence requires entity resolution (not yet implemented)
-      try {
-        const links = await this.state.causalDiscoveryAgent.discover(text);
-        return { discovered: links.length, links, persisted: false, note: "Persistence requires entity resolution (not yet implemented)" };
-      } catch (error) {
-        return { error: `Causal discovery failed: ${error instanceof Error ? error.message : String(error)}`, discovered: 0, links: [] };
-      }
+      throw new Error("Persistence is not yet supported for causal discovery. Use persist=false or omit the parameter.");
     }
 
     try {

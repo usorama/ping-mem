@@ -6,9 +6,22 @@
  */
 
 import type { Context } from "hono";
-import { renderLayout, escapeHtml, getCspNonce } from "./layout.js";
+import { renderLayout, escapeHtml, getCspNonce, getCsrfToken } from "./layout.js";
 import { loadingIndicator } from "./components.js";
 import type { UIDependencies } from "./routes.js";
+
+import * as nodeCrypto from "crypto";
+import * as fs from "fs";
+import * as path from "path";
+
+const staticDir = process.env.PING_MEM_STATIC_DIR ?? path.resolve(process.cwd(), "src/static");
+function computeSriForChart(filePath: string): string {
+  try {
+    const content = fs.readFileSync(filePath);
+    return `sha384-${nodeCrypto.createHash("sha384").update(content).digest("base64")}`;
+  } catch { return ""; }
+}
+const SRI_CHART = computeSriForChart(path.join(staticDir, "chart.umd.min.js"));
 
 export function registerDiagnosticsRoutes(deps: UIDependencies) {
   return async (c: Context) => {
@@ -18,20 +31,23 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
     // Get recent runs
     const runs = diagnosticsStore.listRuns({ limit: 30 });
 
-    // Pre-fetch findings counts to avoid N+1 queries (one query per run)
+    // Batch-fetch findings counts in a single SQL query (avoids N+1)
+    const analysisIds = runs.map((r) => r.analysisId);
+    const findingsCounts = diagnosticsStore.getFindingsCounts(analysisIds);
+
+    // Build a simple total-count cache and aggregate severity for chart
     const findingsCache = new Map<string, number>();
     const severityCounts = { error: 0, warning: 0, note: 0 };
 
-    for (const run of runs) {
-      const findings = diagnosticsStore.listFindings(run.analysisId);
-      findingsCache.set(run.analysisId, findings.length);
+    for (let i = 0; i < runs.length; i++) {
+      const run = runs[i]!;
+      const counts = findingsCounts.get(run.analysisId);
+      findingsCache.set(run.analysisId, counts?.total ?? 0);
       // Aggregate severity for the first 10 runs
-      if (findingsCache.size <= 10) {
-        for (const f of findings) {
-          if (f.severity === "error") severityCounts.error++;
-          else if (f.severity === "warning") severityCounts.warning++;
-          else severityCounts.note++;
-        }
+      if (i < 10 && counts) {
+        severityCounts.error += counts.errors;
+        severityCounts.warning += counts.warnings;
+        severityCounts.note += counts.notes;
       }
     }
 
@@ -71,7 +87,9 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
       </div>`;
     }
 
-    const chartData = JSON.stringify(severityCounts);
+    const chartData = JSON.stringify(severityCounts)
+      .replace(/</g, "\\u003c")
+      .replace(/>/g, "\\u003e");
     const nonce = getCspNonce(c);
     const nonceAttr = nonce ? ` nonce="${nonce}"` : "";
 
@@ -112,7 +130,7 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
 
       <div id="findings-panel"></div>
 
-      <script src="/static/chart.umd.min.js"${nonceAttr}></script>
+      <script src="/static/chart.umd.min.js"${nonceAttr}${SRI_CHART ? ` integrity="${SRI_CHART}" crossorigin="anonymous"` : ""}></script>
       <script${nonceAttr}>
         (function() {
           var data = ${chartData};
@@ -141,21 +159,25 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
       </script>
     `;
 
+    const csrfToken = getCsrfToken(c);
     return c.html(renderLayout({
       title: "Diagnostics",
       content,
       activeRoute: "diagnostics",
       nonce,
+      csrfToken,
     }));
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.error("[Diagnostics] Page render error:", errMsg);
       const nonce = getCspNonce(c);
+      const csrfToken = getCsrfToken(c);
       return c.html(renderLayout({
         title: "Diagnostics",
         content: `<div class="card" style="padding:24px;color:var(--error)">Diagnostics error: ${escapeHtml(errMsg)}. Check server logs.</div>`,
         activeRoute: "diagnostics",
         nonce,
+        csrfToken,
       }));
     }
   };

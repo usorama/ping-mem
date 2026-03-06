@@ -235,11 +235,11 @@ describe("Reranker", () => {
       expect(results[2]!.index).toBe(1);
     });
 
-    it("should log warning on API error", async () => {
-      const originalWarn = console.warn;
-      const warnings: string[] = [];
-      console.warn = (...args: unknown[]) => {
-        warnings.push(args.map(String).join(" "));
+    it("should log error on API error", async () => {
+      const originalError = console.error;
+      const errors: string[] = [];
+      console.error = (...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
       };
 
       const mockFetch = mock(() =>
@@ -252,10 +252,10 @@ describe("Reranker", () => {
       const reranker = new Reranker({ apiKey });
       await reranker.rerank("query", ["doc"]);
 
-      expect(warnings.length).toBeGreaterThanOrEqual(1);
-      expect(warnings.some((w) => w.includes("Cohere Rerank API error") || w.includes("[Reranker]"))).toBe(true);
+      expect(errors.length).toBeGreaterThanOrEqual(1);
+      expect(errors.some((e) => e.includes("[Reranker]") && e.includes("Reranking failed"))).toBe(true);
 
-      console.warn = originalWarn;
+      console.error = originalError;
     });
   });
 });

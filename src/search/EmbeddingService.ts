@@ -427,6 +427,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
 export class FallbackEmbeddingProvider implements EmbeddingProvider {
   private readonly primary: EmbeddingProvider;
   private readonly fallback: EmbeddingProvider;
+  private fallbackCount = 0;
   public readonly dimensions: number;
   public readonly name: string;
 
@@ -448,11 +449,15 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
 
   async embed(text: string): Promise<Float32Array> {
     try {
-      return await this.primary.embed(text);
+      const result = await this.primary.embed(text);
+      this.fallbackCount = 0;
+      return result;
     } catch (error) {
+      this.fallbackCount++;
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.warn(
-        `[FallbackEmbeddingProvider] Primary provider "${this.primary.name}" failed: ${errorMessage}. ` +
+      const level = this.fallbackCount > 10 ? "error" : "warn";
+      console[level](
+        `[FallbackEmbedding] Primary "${this.primary.name}" failed (${this.fallbackCount} consecutive): ${errorMessage}. ` +
         `Falling back to "${this.fallback.name}".`
       );
       return await this.fallback.embed(text);

@@ -728,6 +728,8 @@ export class HybridSearchEngine {
           hybridScore: rr.relevanceScore,
         }));
         fusedResults = reorderedResults;
+      } else {
+        console.warn("[HybridSearchEngine] Reranking failed — returning results in default RRF order");
       }
     }
 

@@ -7,10 +7,15 @@
  */
 
 import type { Context } from "hono";
+import { z } from "zod";
 import { LLMProxy } from "../../llm/LLMProxy.js";
 import type { ChatMessage } from "../../llm/types.js";
 import type { UIDependencies } from "./routes.js";
 import { getClientIp } from "./layout.js";
+
+const ChatRequestSchema = z.object({
+  message: z.string().min(1, "Message is required").max(4096, "Message too long"),
+});
 
 // ============================================================================
 // Rate Limiting
@@ -39,8 +44,6 @@ function checkRateLimit(ip: string): boolean {
 
 const SYSTEM_PROMPT = `You are ping-mem's assistant. You help developers understand their codebase, memories, and diagnostics data stored in ping-mem. Answer concisely based on the provided context. If you don't have enough context, say so.`;
 
-const MAX_MESSAGE_LENGTH = 4096;
-
 export function registerChatRoutes(deps: UIDependencies) {
   const llm = new LLMProxy();
 
@@ -55,19 +58,15 @@ export function registerChatRoutes(deps: UIDependencies) {
 
       let userMessage: string;
       try {
-        const body = (await c.req.json()) as { message?: string };
-        userMessage = body.message ?? "";
+        const raw = await c.req.json();
+        const parsed = ChatRequestSchema.safeParse(raw);
+        if (!parsed.success) {
+          return c.json({ error: parsed.error.issues[0]?.message ?? "Invalid request" }, 400);
+        }
+        userMessage = parsed.data.message;
       } catch (err) {
         console.warn("[Chat] Invalid request body:", err instanceof Error ? err.message : err);
         return c.json({ error: "Invalid request body" }, 400);
-      }
-
-      if (!userMessage.trim()) {
-        return c.json({ error: "Message is required" }, 400);
-      }
-
-      if (userMessage.length > MAX_MESSAGE_LENGTH) {
-        return c.json({ error: `Message exceeds maximum length of ${MAX_MESSAGE_LENGTH} characters` }, 400);
       }
 
       // Build context from ping-mem data
