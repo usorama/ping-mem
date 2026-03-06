@@ -103,7 +103,7 @@ export class CausalToolModule implements ToolModule {
 
   private async handleSearchCauses(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (!this.state.causalGraphManager) {
-      return { error: "Causal graph not configured", causes: [] };
+      throw new Error("Causal graph not configured. Provide causalGraphManager in PingMemServerConfig.");
     }
     const query = (args.query as string | undefined) ?? "";
     const entityId = args.entityId as string | undefined;
@@ -121,7 +121,7 @@ export class CausalToolModule implements ToolModule {
 
   private async handleSearchEffects(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (!this.state.causalGraphManager) {
-      return { error: "Causal graph not configured", effects: [] };
+      throw new Error("Causal graph not configured. Provide causalGraphManager in PingMemServerConfig.");
     }
     const query = (args.query as string | undefined) ?? "";
     const entityId = args.entityId as string | undefined;
@@ -137,7 +137,7 @@ export class CausalToolModule implements ToolModule {
 
   private async handleGetCausalChain(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (!this.state.causalGraphManager) {
-      return { error: "Causal graph not configured", chain: [] };
+      throw new Error("Causal graph not configured. Provide causalGraphManager in PingMemServerConfig.");
     }
     const startEntityId = args.startEntityId as string;
     const endEntityId = args.endEntityId as string;
@@ -161,11 +161,19 @@ export class CausalToolModule implements ToolModule {
 
     if (persist) {
       // Note: Full persistence requires entity resolution (not yet implemented)
-      const links = await this.state.causalDiscoveryAgent.discover(text);
-      return { discovered: links.length, links, persisted: false, note: "Persistence requires entity resolution (not yet implemented)" };
+      try {
+        const links = await this.state.causalDiscoveryAgent.discover(text);
+        return { discovered: links.length, links, persisted: false, note: "Persistence requires entity resolution (not yet implemented)" };
+      } catch (error) {
+        return { error: `Causal discovery failed: ${error instanceof Error ? error.message : String(error)}`, discovered: 0, links: [] };
+      }
     }
 
-    const links = await this.state.causalDiscoveryAgent.discover(text);
-    return { discovered: links.length, links, persisted: false };
+    try {
+      const links = await this.state.causalDiscoveryAgent.discover(text);
+      return { discovered: links.length, links, persisted: false };
+    } catch (error) {
+      return { error: `Causal discovery failed: ${error instanceof Error ? error.message : String(error)}`, discovered: 0, links: [] };
+    }
   }
 }

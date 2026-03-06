@@ -23,6 +23,7 @@ export interface ContradictionResult {
   isContradiction: boolean;
   conflict: string;
   confidence: number;
+  error?: string;
 }
 
 const SYSTEM_PROMPT = `You are a contradiction detector. Compare the old and new descriptions of an entity and determine if they contradict each other.
@@ -95,8 +96,9 @@ export class ContradictionDetector {
 
       return { isContradiction: false, conflict: "", confidence };
     } catch (error) {
-      console.warn("[ContradictionDetector] Detection failed:", error instanceof Error ? error.message : String(error));
-      return { isContradiction: false, conflict: "", confidence: 0 };
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[ContradictionDetector] Detection failed:", message);
+      return { isContradiction: false, conflict: "", confidence: 0, error: message };
     }
   }
 }

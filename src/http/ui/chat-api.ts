@@ -24,7 +24,9 @@ const MAX_MAP_SIZE = 10_000;
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
   if (rateLimits.size > MAX_MAP_SIZE) {
-    rateLimits.clear();
+    for (const [key, entry] of rateLimits) {
+      if (now > entry.resetAt) rateLimits.delete(key);
+    }
   }
   const entry = rateLimits.get(ip);
   if (!entry || now > entry.resetAt) {
@@ -131,7 +133,7 @@ export function registerChatRoutes(deps: UIDependencies) {
             console.error("[Chat] Stream error:", errMsg);
             controller.enqueue(
               encoder.encode(
-                `data: ${JSON.stringify({ content: "", done: true, model: "error", provider: "error", error: errMsg })}\n\n`,
+                `data: ${JSON.stringify({ content: "", done: true, model: "error", provider: "error", error: "An internal error occurred. Please try again." })}\n\n`,
               ),
             );
           }

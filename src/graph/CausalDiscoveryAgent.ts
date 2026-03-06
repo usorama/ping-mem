@@ -169,8 +169,9 @@ export class CausalDiscoveryAgent {
           evidence: link.evidence,
         }));
     } catch (error) {
-      console.warn("[CausalDiscoveryAgent] Discovery failed:", error instanceof Error ? error.message : String(error));
-      return [];
+      const message = error instanceof Error ? error.message : String(error);
+      console.error("[CausalDiscoveryAgent] Discovery failed:", message);
+      throw new Error(`Causal discovery failed: ${message}`);
     }
   }
 

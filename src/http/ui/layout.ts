@@ -24,7 +24,7 @@ const NAV_ITEMS: Array<{ route: UIRoute; path: string; icon: string; label: stri
 
 export function renderLayout(options: LayoutOptions): string {
   const { title, content, activeRoute, nonce } = options;
-  const nonceAttr = nonce ? ` nonce="${nonce}"` : "";
+  const nonceAttr = nonce ? ` nonce="${escapeHtml(nonce)}"` : "";
 
   const navLinks = NAV_ITEMS.map(
     (item) =>
@@ -144,7 +144,8 @@ export function escapeHtml(str: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+    .replace(/'/g, "&#39;")
+    .replace(/\x60/g, "&#96;");
 }
 
 export function formatDate(date: Date | string): string {
@@ -210,7 +211,8 @@ export function getClientIp(c: { req: { header: (name: string) => string | undef
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy-load to avoid test/non-Bun failures
       _getConnInfo = require("hono/bun").getConnInfo;
-    } catch {
+    } catch (err) {
+      console.warn("[getClientIp] Failed to load hono/bun getConnInfo:", err instanceof Error ? err.message : err);
       _getConnInfo = false; // Mark as unavailable so we don't retry
     }
   }
@@ -218,8 +220,8 @@ export function getClientIp(c: { req: { header: (name: string) => string | undef
     try {
       const info = _getConnInfo(c);
       if (info?.remote?.address) return info.remote.address;
-    } catch {
-      // conninfo call failed (e.g., test mock without Bun server)
+    } catch (err) {
+      console.warn("[getClientIp] conninfo call failed:", err instanceof Error ? err.message : err);
     }
   }
   return "unknown";

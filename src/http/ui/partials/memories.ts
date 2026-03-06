@@ -265,15 +265,21 @@ export function registerMemoryPartialRoutes(deps: UIDependencies) {
   return {
     /** GET /ui/partials/memories — search/filter results (table fragment) */
     search: async (c: Context) => {
-      const query = c.req.query("query") ?? "";
-      const category = c.req.query("category") ?? "";
-      const priority = c.req.query("priority") ?? "";
-      const MAX_LIMIT = 500;
-      const limit = Math.min(Math.max(1, parseInt(c.req.query("limit") ?? "25", 10) || 25), MAX_LIMIT);
-      const offset = Math.max(0, parseInt(c.req.query("offset") ?? "0", 10) || 0);
+      try {
+        const query = c.req.query("query") ?? "";
+        const category = c.req.query("category") ?? "";
+        const priority = c.req.query("priority") ?? "";
+        const MAX_LIMIT = 500;
+        const limit = Math.min(Math.max(1, parseInt(c.req.query("limit") ?? "25", 10) || 25), MAX_LIMIT);
+        const offset = Math.max(0, parseInt(c.req.query("offset") ?? "0", 10) || 0);
 
-      const html = renderMemoryTable(deps.eventStore, { query, category, priority, limit, offset });
-      return c.html(html);
+        const html = renderMemoryTable(deps.eventStore, { query, category, priority, limit, offset });
+        return c.html(html);
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.error("[Memories] Search error:", errMsg);
+        return c.html(`<div class="empty-state"><p style="color:var(--error)">Search failed</p></div>`);
+      }
     },
 
     /** GET /ui/partials/memory/:key — detail panel */

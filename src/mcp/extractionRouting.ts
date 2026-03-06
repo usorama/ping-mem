@@ -12,7 +12,7 @@
  *
  * LLM extraction is triggered when:
  * - Category is one of: decision, error, task
- * - Content is longer than 200 characters
+ * - Content is longer than 500 characters
  * - Caller explicitly requested entity extraction
  */
 export function shouldUseLlmExtraction(

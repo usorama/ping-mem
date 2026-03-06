@@ -867,7 +867,8 @@ export class GraphManager {
   private parseProperties(properties: string): Record<string, unknown> {
     try {
       return JSON.parse(properties) as Record<string, unknown>;
-    } catch {
+    } catch (err) {
+      console.error("[GraphManager] Failed to parse entity properties:", err instanceof Error ? err.message : err);
       return {};
     }
   }

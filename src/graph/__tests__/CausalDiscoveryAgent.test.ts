@@ -179,7 +179,7 @@ describe("CausalDiscoveryAgent", () => {
       expect(results[0]!.confidence).toBe(0.95);
     });
 
-    it("should handle LLM failure gracefully and return empty", async () => {
+    it("should throw when LLM fails", async () => {
       const mockOpenAI = createFailingOpenAI();
       const agent = new CausalDiscoveryAgent({
         openai: mockOpenAI,
@@ -188,9 +188,7 @@ describe("CausalDiscoveryAgent", () => {
         graphManager: createMockGraphManager() as unknown as GraphManager,
       });
 
-      const results = await agent.discover("Some text");
-
-      expect(results).toHaveLength(0);
+      await expect(agent.discover("Some text")).rejects.toThrow("Causal discovery failed:");
     });
 
     it("should handle malformed JSON gracefully and return empty", async () => {
@@ -276,7 +274,7 @@ describe("CausalDiscoveryAgent", () => {
       expect(count).toBe(2);
     });
 
-    it("should return 0 when LLM fails", async () => {
+    it("should throw when LLM fails", async () => {
       const mockOpenAI = createFailingOpenAI();
       const agent = new CausalDiscoveryAgent({
         openai: mockOpenAI,
@@ -285,9 +283,7 @@ describe("CausalDiscoveryAgent", () => {
         graphManager: createMockGraphManager() as unknown as GraphManager,
       });
 
-      const count = await agent.discoverCount("Some text");
-
-      expect(count).toBe(0);
+      await expect(agent.discoverCount("Some text")).rejects.toThrow("Causal discovery failed:");
     });
   });
 });

@@ -172,7 +172,7 @@ export class SSEPingMemServer {
         res.end(
           JSON.stringify({
             error: "Internal Server Error",
-            message: error instanceof Error ? error.message : "Unknown error",
+            message: "An unexpected error occurred",
           })
         );
       }

@@ -371,11 +371,7 @@ export class DiagnosticsToolModule implements ToolModule {
 
     // Generate LLM summary
     if (!this.state.summaryGenerator) {
-      return {
-        error: "LLM summarization not available. Set OPENAI_API_KEY environment variable.",
-        fallbackAvailable: true,
-        suggestion: "Retry with useLLM: false to get raw findings",
-      };
+      throw new Error("Summary generator not configured. Provide LLM API key for diagnostics summarization.");
     }
 
     try {

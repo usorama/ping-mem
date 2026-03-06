@@ -24,7 +24,9 @@ const MAX_MAP_SIZE = 10_000;
 function checkReingestRateLimit(ip: string): boolean {
   const now = Date.now();
   if (reingestRateLimits.size > MAX_MAP_SIZE) {
-    reingestRateLimits.clear();
+    for (const [key, entry] of reingestRateLimits) {
+      if (now > entry.resetAt) reingestRateLimits.delete(key);
+    }
   }
   const entry = reingestRateLimits.get(ip);
   if (!entry || now > entry.resetAt) {
@@ -64,7 +66,7 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
         </div>`);
       }
 
-      if (!projectDir) {
+      if (!projectDir || !projectDir.trim() || !path.isAbsolute(projectDir)) {
         return c.html(`<div class="card" style="margin-top:16px">
           <div style="padding:16px;color:var(--error)">Missing projectDir</div>
         </div>`);
@@ -97,7 +99,7 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
           <div style="padding:16px;color:var(--error)">
             ${badge("Forbidden", "error")} Project not in registered projects list
           </div>
-        </div>`);
+        </div>`, 403);
       }
 
       // Rate limit reingest requests (5 per minute per IP)
@@ -113,7 +115,7 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
 
       try {
         const result = await ingestionService.ingestProject({
-          projectDir,
+          projectDir: resolvedDir,
           forceReingest: true,
         });
 

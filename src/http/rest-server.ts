@@ -173,6 +173,7 @@ export class RESTPingMemServer {
         "Content-Security-Policy",
         `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'`,
       );
+      c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     });
 
     // API Key authentication (if configured)
@@ -208,6 +209,8 @@ export class RESTPingMemServer {
       };
       this.app.use("/api/*", authMiddleware);
       this.app.use("/ui/*", authMiddleware);
+    } else {
+      console.warn("[REST Server] WARNING: No API key configured. All routes are unauthenticated.");
     }
   }
 

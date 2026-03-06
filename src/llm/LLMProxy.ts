@@ -52,11 +52,7 @@ export class LLMProxy {
       }
     }
 
-    return {
-      content: "Unable to reach any LLM provider. Ensure Ollama is running locally or set GEMINI_API_KEY.",
-      model: "none",
-      provider: "none",
-    };
+    throw new Error("Unable to reach any LLM provider. Ensure Ollama is running locally or set GEMINI_API_KEY.");
   }
 
   /**
@@ -98,12 +94,7 @@ export class LLMProxy {
       }
     }
 
-    yield {
-      content: "Unable to reach any LLM provider. Ensure Ollama is running locally or set GEMINI_API_KEY.",
-      done: true,
-      model: "none",
-      provider: "none" as const,
-    };
+    throw new Error("Unable to reach any LLM provider. Ensure Ollama is running locally or set GEMINI_API_KEY.");
   }
 
   private async chatOllama(messages: ChatMessage[]): Promise<ChatResponse> {

@@ -81,15 +81,12 @@ describe("LLMProxy", () => {
         geminiApiKey: "test-key",
       });
 
-      const result = await proxy.chat([
+      await expect(proxy.chat([
         { role: "user", content: "Hello" },
-      ]);
-
-      expect(result.content).toContain("Unable to reach");
-      expect(result.model).toBe("none");
+      ])).rejects.toThrow("Unable to reach any LLM provider");
     });
 
-    test("returns error message when Ollama fails and no Gemini key", async () => {
+    test("throws when Ollama fails and no Gemini key", async () => {
       globalThis.fetch = mock(async () => {
         throw new Error("Connection refused");
       }) as typeof fetch;
@@ -99,11 +96,9 @@ describe("LLMProxy", () => {
         geminiApiKey: undefined,
       });
 
-      const result = await proxy.chat([
+      await expect(proxy.chat([
         { role: "user", content: "Hello" },
-      ]);
-
-      expect(result.content).toContain("Unable to reach");
+      ])).rejects.toThrow("Unable to reach any LLM provider");
     });
 
     test("falls back on Ollama HTTP error", async () => {
