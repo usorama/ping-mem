@@ -1608,6 +1608,7 @@ export class RESTPingMemServer {
       sessionManager: this.sessionManager,
       diagnosticsStore: this.diagnosticsStore,
       ingestionService: this.config.ingestionService,
+      knowledgeStore: this.knowledgeStore,
     });
   }
 

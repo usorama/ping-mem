@@ -9,6 +9,7 @@ import type { EventStore } from "../../storage/EventStore.js";
 import type { SessionManager } from "../../session/SessionManager.js";
 import type { DiagnosticsStore } from "../../diagnostics/DiagnosticsStore.js";
 import type { IngestionService } from "../../ingest/IngestionService.js";
+import type { KnowledgeStore } from "../../knowledge/KnowledgeStore.js";
 import type { AppEnv } from "../rest-server.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 import { registerMemoryRoutes } from "./memories.js";
@@ -17,6 +18,16 @@ import { registerDiagnosticsRoutes } from "./diagnostics.js";
 import { registerDiagnosticsPartialRoutes } from "./partials/diagnostics.js";
 import { registerIngestionRoutes } from "./ingestion.js";
 import { registerIngestionPartialRoutes } from "./partials/ingestion.js";
+import { registerAgentsRoutes } from "./agents.js";
+import { registerAgentsPartialRoutes } from "./partials/agents.js";
+import { registerKnowledgeRoutes } from "./knowledge.js";
+import { registerKnowledgePartialRoutes } from "./partials/knowledge.js";
+import { registerSessionsRoutes } from "./sessions.js";
+import { registerSessionsPartialRoutes } from "./partials/sessions.js";
+import { registerEventsRoutes } from "./events.js";
+import { registerEventsPartialRoutes } from "./partials/events.js";
+import { registerWorklogRoutes } from "./worklog.js";
+import { registerWorklogPartialRoutes } from "./partials/worklog.js";
 import { registerChatRoutes } from "./chat-api.js";
 import { registerHealthPartialRoute } from "./partials/health.js";
 
@@ -25,6 +36,7 @@ export interface UIDependencies {
   sessionManager: SessionManager;
   diagnosticsStore: DiagnosticsStore;
   ingestionService?: IngestionService | undefined;
+  knowledgeStore?: KnowledgeStore | undefined;
 }
 
 export function registerUIRoutes(app: Hono<AppEnv>, deps: UIDependencies): void {
@@ -53,6 +65,43 @@ export function registerUIRoutes(app: Hono<AppEnv>, deps: UIDependencies): void 
   // Ingestion HTMX partials
   const ingestionPartials = registerIngestionPartialRoutes(deps);
   app.post("/ui/partials/ingestion/reingest", ingestionPartials.reingest);
+
+  // Agents
+  app.get("/ui/agents", registerAgentsRoutes(deps));
+
+  // Agents HTMX partials
+  const agentsPartials = registerAgentsPartialRoutes(deps);
+  app.get("/ui/partials/agents", agentsPartials.search);
+
+  // Knowledge
+  app.get("/ui/knowledge", registerKnowledgeRoutes(deps));
+
+  // Knowledge HTMX partials
+  const knowledgePartials = registerKnowledgePartialRoutes(deps);
+  app.get("/ui/partials/knowledge", knowledgePartials.search);
+  app.get("/ui/partials/knowledge/:id", knowledgePartials.detail);
+
+  // Sessions
+  app.get("/ui/sessions", registerSessionsRoutes(deps));
+
+  // Sessions HTMX partials
+  const sessionsPartials = registerSessionsPartialRoutes(deps);
+  app.get("/ui/partials/sessions", sessionsPartials.list);
+  app.get("/ui/partials/sessions/:sessionId", sessionsPartials.detail);
+
+  // Events
+  app.get("/ui/events", registerEventsRoutes(deps));
+
+  // Events HTMX partials
+  const eventsPartials = registerEventsPartialRoutes(deps);
+  app.get("/ui/partials/events", eventsPartials.list);
+
+  // Worklog
+  app.get("/ui/worklog", registerWorklogRoutes(deps));
+
+  // Worklog HTMX partials
+  const worklogPartials = registerWorklogPartialRoutes(deps);
+  app.get("/ui/partials/worklog", worklogPartials.list);
 
   // Chat API
   const chatRoutes = registerChatRoutes(deps);

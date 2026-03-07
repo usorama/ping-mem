@@ -9,6 +9,7 @@ import type { Context } from "hono";
 import { renderLayout, formatDate, escapeHtml, getCspNonce, getCsrfToken } from "./layout.js";
 import { statCard, card, eventTypeBadge, emptyState } from "./components.js";
 import type { UIDependencies } from "./routes.js";
+import { getAgentCount } from "./partials/agents.js";
 import { createLogger } from "../../util/logger.js";
 
 const log = createLogger("UI:Dashboard");
@@ -16,7 +17,7 @@ const log = createLogger("UI:Dashboard");
 export function registerDashboardRoutes(deps: UIDependencies) {
   return async (c: Context) => {
     try {
-      const { eventStore, sessionManager } = deps;
+      const { eventStore, sessionManager, knowledgeStore } = deps;
 
       // Gather stats
       const eventStats = eventStore.getStats();
@@ -31,7 +32,22 @@ export function registerDashboardRoutes(deps: UIDependencies) {
       ).get() as { cnt: number } | undefined;
       const memoryCount = memoryCountRow?.cnt ?? 0;
 
+      // Agent count
+      const agentCount = getAgentCount(eventStore);
+
+      // Knowledge count
+      let knowledgeCount = 0;
+      if (knowledgeStore) {
+        try {
+          const kStats = knowledgeStore.stats();
+          knowledgeCount = kStats.totalEntries;
+        } catch {
+          // knowledge store may not be initialized
+        }
+      }
+
       // Recent events HTML
+      const viewAllLink = `<a href="/ui/events" class="btn btn-ghost btn-sm" style="text-decoration:none">View All</a>`;
       let recentEventsHtml: string;
       if (recentEvents.length === 0) {
         recentEventsHtml = emptyState("No events yet");
@@ -60,9 +76,11 @@ export function registerDashboardRoutes(deps: UIDependencies) {
           ${statCard("Sessions", sessions.length, `${activeSessions.length} active`)}
           ${statCard("Events", eventStats.eventCount)}
           ${statCard("Checkpoints", eventStats.checkpointCount)}
+          ${statCard("Agents", agentCount, "registered")}
+          ${statCard("Knowledge", knowledgeCount, "entries")}
         </div>
 
-        ${card("Recent Events", recentEventsHtml)}
+        ${card("Recent Events", recentEventsHtml, viewAllLink)}
 
         <div class="mt-4 stats-grid">
           <a href="/ui/memories" class="stat-card" style="text-decoration:none;color:inherit">

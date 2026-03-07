@@ -26,7 +26,7 @@ const staticDir = process.env.PING_MEM_STATIC_DIR ?? path.resolve(process.cwd(),
 const SRI_HTMX = computeSri(path.join(staticDir, "htmx.min.js"));
 const SRI_CHAT = computeSri(path.join(staticDir, "chat.js"));
 
-export type UIRoute = "dashboard" | "memories" | "diagnostics" | "ingestion";
+export type UIRoute = "dashboard" | "memories" | "diagnostics" | "ingestion" | "agents" | "knowledge" | "sessions" | "events" | "worklog";
 
 interface LayoutOptions {
   title: string;
@@ -43,6 +43,11 @@ const NAV_ITEMS: Array<{ route: UIRoute; path: string; icon: string; label: stri
   { route: "memories", path: "/ui/memories", icon: "\u29C9", label: "Memories" },
   { route: "diagnostics", path: "/ui/diagnostics", icon: "\u2261", label: "Diagnostics" },
   { route: "ingestion", path: "/ui/ingestion", icon: "\u21BB", label: "Ingestion" },
+  { route: "agents", path: "/ui/agents", icon: "\u2295", label: "Agents" },
+  { route: "knowledge", path: "/ui/knowledge", icon: "\u25C8", label: "Knowledge" },
+  { route: "sessions", path: "/ui/sessions", icon: "\u25A1", label: "Sessions" },
+  { route: "events", path: "/ui/events", icon: "\u2261", label: "Events" },
+  { route: "worklog", path: "/ui/worklog", icon: "\u25F7", label: "Worklog" },
 ];
 
 export function renderLayout(options: LayoutOptions): string {
