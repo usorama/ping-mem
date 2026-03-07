@@ -11,6 +11,9 @@ import { renderLayout, escapeHtml, getCspNonce, getCsrfToken } from "./layout.js
 import { loadingIndicator } from "./components.js";
 import { renderMemoryTable } from "./partials/memories.js";
 import type { UIDependencies } from "./routes.js";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("UI:Memories");
 
 const CATEGORIES = ["task", "decision", "progress", "note", "error", "warning", "fact", "observation"];
 const PRIORITIES = ["high", "normal", "low"];
@@ -92,7 +95,7 @@ export function registerMemoryRoutes(deps: UIDependencies) {
     return c.html(html);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[Memories] Page render error:", errMsg);
+      log.error("Page render error", { error: errMsg });
       const nonce = getCspNonce(c);
       const csrfToken = getCsrfToken(c);
       return c.html(renderLayout({

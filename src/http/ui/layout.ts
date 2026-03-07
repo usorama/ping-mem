@@ -8,6 +8,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("UI:Layout");
 
 function computeSri(filePath: string): string {
   try {
@@ -252,7 +255,7 @@ export function getClientIp(c: { req: { header: (name: string) => string | undef
       // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy-load to avoid test/non-Bun failures
       _getConnInfo = require("hono/bun").getConnInfo;
     } catch (err) {
-      console.warn("[getClientIp] Failed to load hono/bun getConnInfo:", err instanceof Error ? err.message : err);
+      log.warn("Failed to load hono/bun getConnInfo", { error: err instanceof Error ? err.message : String(err) });
       _getConnInfo = false; // Mark as unavailable so we don't retry
     }
   }
@@ -261,7 +264,7 @@ export function getClientIp(c: { req: { header: (name: string) => string | undef
       const info = _getConnInfo(c);
       if (info?.remote?.address) return info.remote.address;
     } catch (err) {
-      console.warn("[getClientIp] conninfo call failed:", err instanceof Error ? err.message : err);
+      log.warn("conninfo call failed", { error: err instanceof Error ? err.message : String(err) });
     }
   }
   return "unknown";

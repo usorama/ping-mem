@@ -11,6 +11,9 @@ import type { ToolDefinition, ToolModule } from "../types.js";
 import type { SessionState } from "./shared.js";
 import { ProjectScanner } from "../../ingest/ProjectScanner.js";
 import { AdminStore } from "../../admin/AdminStore.js";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("CodebaseToolModule");
 import {
   ListProjectsSchema,
   type ListProjectsInput,
@@ -293,7 +296,7 @@ export class CodebaseToolModule implements ToolModule {
     const parseResult = ListProjectsSchema.safeParse(args);
     if (!parseResult.success) {
       // Log validation failure for debugging/security
-      console.error(`[PingMemServer] codebase_list_projects validation failed:`, {
+      log.error("codebase_list_projects validation failed", {
         receivedInput: args,
         validationErrors: parseResult.error.format(),
         sessionId: this.state.currentSessionId,
@@ -334,7 +337,7 @@ export class CodebaseToolModule implements ToolModule {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Log error before re-throwing for debugging
-      console.error(`[PingMemServer] codebase_list_projects failed:`, {
+      log.error("codebase_list_projects failed", {
         error: errorMessage,
         stack: error instanceof Error ? error.stack : undefined,
         input: validated,
@@ -353,7 +356,7 @@ export class CodebaseToolModule implements ToolModule {
     const parseResult = DeleteProjectSchema.safeParse(args);
     if (!parseResult.success) {
       // Log validation failure for debugging/security
-      console.error(`[PingMemServer] project_delete validation failed:`, {
+      log.error("project_delete validation failed", {
         receivedInput: args,
         validationErrors: parseResult.error.format(),
         sessionId: this.state.currentSessionId,
@@ -376,7 +379,7 @@ export class CodebaseToolModule implements ToolModule {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
 
-        console.error(`[ProjectDelete] Failed to scan project directory:`, {
+        log.error("ProjectDelete: Failed to scan project directory", {
           error: errorMessage,
           projectDir: normalized,
         });
@@ -402,7 +405,7 @@ export class CodebaseToolModule implements ToolModule {
       const sessionIds = this.state.eventStore.findSessionIdsByProjectDir(normalized);
 
       if (sessionIds.length > 0) {
-        console.log(`[ProjectDelete] Deleting ${sessionIds.length} sessions for project ${projectId}`);
+        log.info(`ProjectDelete: Deleting ${sessionIds.length} sessions for project ${projectId}`);
         this.state.eventStore.deleteSessions(sessionIds);
         sessionsDeleted = sessionIds.length;
       }
@@ -410,7 +413,7 @@ export class CodebaseToolModule implements ToolModule {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Log but don't fail - session cleanup is supplementary
-      console.error(`[ProjectDelete] Failed to delete sessions for project ${projectId}:`, {
+      log.error(`ProjectDelete: Failed to delete sessions for project ${projectId}`, {
         error: errorMessage,
         projectDir: normalized,
       });
@@ -425,7 +428,7 @@ export class CodebaseToolModule implements ToolModule {
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
 
-        console.error(`[ProjectDelete] Failed to delete manifest file:`, {
+        log.error("ProjectDelete: Failed to delete manifest file", {
           error: errorMessage,
           path: manifestPath,
           projectId,
@@ -445,7 +448,7 @@ export class CodebaseToolModule implements ToolModule {
         const errorMessage = error instanceof Error ? error.message : String(error);
 
         // Log admin cleanup failure - critical for diagnosing admin DB inconsistencies
-        console.error(`[ProjectDelete] Failed to cleanup admin store for project ${projectId}:`, {
+        log.error(`ProjectDelete: Failed to cleanup admin store for project ${projectId}`, {
           error: errorMessage,
           stack: error instanceof Error ? error.stack : undefined,
           adminDbPath,

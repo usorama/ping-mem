@@ -15,6 +15,9 @@ import { TemporalStore } from "../graph/TemporalStore.js";
 import { LineageEngine } from "../graph/LineageEngine.js";
 import { EvolutionEngine } from "../graph/EvolutionEngine.js";
 import { QdrantClientWrapper } from "../search/QdrantClient.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("Runtime");
 
 export interface RuntimeConfig {
   neo4j?: {
@@ -122,14 +125,14 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
         temporalStore: services.temporalStore,
         graphManager: services.graphManager,
       });
-      console.log("[Runtime] Neo4j connected");
+      log.info("Neo4j connected");
     } catch (err) {
-      console.warn(
-        `[Runtime] Neo4j connection failed (ingestion/graph features disabled): ${err instanceof Error ? err.message : String(err)}`
-      );
+      log.warn("Neo4j connection failed (ingestion/graph features disabled)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   } else {
-    console.log("[Runtime] Neo4j not configured (ingestion/graph features disabled)");
+    log.info("Neo4j not configured (ingestion/graph features disabled)");
   }
 
   // Connect to Qdrant if configured
@@ -144,14 +147,14 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
       });
       await qdrantClient.connect();
       services.qdrantClient = qdrantClient;
-      console.log("[Runtime] Qdrant connected");
+      log.info("Qdrant connected");
     } catch (err) {
-      console.warn(
-        `[Runtime] Qdrant connection failed (code search disabled): ${err instanceof Error ? err.message : String(err)}`
-      );
+      log.warn("Qdrant connection failed (code search disabled)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   } else {
-    console.log("[Runtime] Qdrant not configured (code search disabled)");
+    log.info("Qdrant not configured (code search disabled)");
   }
 
   return services;

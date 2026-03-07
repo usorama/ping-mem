@@ -17,6 +17,9 @@ import type { BM25Store } from "./BM25Store.js";
 import type { MemoryLookup } from "./MemoryLookup.js";
 import type { Reranker } from "./Reranker.js";
 import { SEARCH_PROFILES, detectProfile } from "./SearchProfiles.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("HybridSearchEngine");
 
 // ============================================================================
 // Error Classes
@@ -571,7 +574,7 @@ export class HybridSearchEngine {
       }
     } catch (error) {
       // Document may not exist in vector index — log for diagnostics
-      console.warn("[HybridSearchEngine] removeDocument vector deletion failed:", error instanceof Error ? error.message : String(error));
+      log.warn("removeDocument vector deletion failed", { error: error instanceof Error ? error.message : String(error) });
     }
 
     return removed;
@@ -729,7 +732,7 @@ export class HybridSearchEngine {
         }));
         fusedResults = reorderedResults;
       } else {
-        console.warn("[HybridSearchEngine] Reranking failed — returning results in default RRF order");
+        log.warn("Reranking failed, returning results in default RRF order");
       }
     }
 
@@ -1085,7 +1088,7 @@ export class HybridSearchEngine {
       try {
         meta = doc.metadata ? JSON.parse(doc.metadata) as Record<string, unknown> : undefined;
       } catch (e) {
-        console.warn("[HybridSearch] Corrupt BM25 metadata for", doc.memoryId, e instanceof Error ? e.message : e);
+        log.warn("Corrupt BM25 metadata", { memoryId: doc.memoryId, error: e instanceof Error ? e.message : String(e) });
       }
       this.bm25Index.addDocument(doc.memoryId, doc.sessionId, doc.content, doc.indexedAt, meta);
     }

@@ -24,6 +24,9 @@ import type {
   MemoryCategory,
 } from "../types/index.js";
 import * as crypto from "crypto";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("SessionManager");
 
 // ============================================================================
 // Session Manager Configuration
@@ -510,7 +513,7 @@ export class SessionManager {
           );
         } catch (error) {
           // Ignore errors in auto-checkpoint
-          console.error(`Auto-checkpoint failed for session ${sessionId}:`, error);
+          log.error("Auto-checkpoint failed", { sessionId, error: error instanceof Error ? error.message : String(error) });
         }
       }
     }, this.config.autoCheckpointInterval);

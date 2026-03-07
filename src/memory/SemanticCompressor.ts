@@ -10,6 +10,9 @@
  */
 
 import type { Memory } from "../types/index.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("SemanticCompressor");
 
 // ============================================================================
 // Types
@@ -96,7 +99,7 @@ export class SemanticCompressor {
     // Batch if too large
     if (inputTokens > this.maxBatchTokens) {
       if (memories.length <= 1) {
-        console.warn(`[SemanticCompressor] Single memory exceeds token limit (${inputTokens} > ${this.maxBatchTokens}), using heuristic fallback`);
+        log.warn(`Single memory exceeds token limit (${inputTokens} > ${this.maxBatchTokens}), using heuristic fallback`);
         return this.compressWithHeuristic(memories);
       }
       return this.compressInBatches(memories);
@@ -127,9 +130,7 @@ export class SemanticCompressor {
 
       if (!response.ok) {
         const body = await response.text().catch(() => "<unreadable>");
-        console.warn(
-          `[SemanticCompressor] LLM call failed (${response.status}): ${body.slice(0, 500)}, falling back to heuristic`
-        );
+        log.warn(`LLM call failed (${response.status}), falling back to heuristic`, { body: body.slice(0, 500) });
         return this.compressWithHeuristic(memories);
       }
 
@@ -140,7 +141,7 @@ export class SemanticCompressor {
       try {
         parsed = JSON.parse(content) as { facts?: unknown };
       } catch {
-        console.warn(`[SemanticCompressor] LLM returned invalid JSON, falling back to heuristic. Preview: ${content.slice(0, 200)}`);
+        log.warn("LLM returned invalid JSON, falling back to heuristic", { preview: content.slice(0, 200) });
         return this.compressWithHeuristic(memories);
       }
 
@@ -162,10 +163,9 @@ export class SemanticCompressor {
         },
       };
     } catch (error) {
-      console.error(
-        "[SemanticCompressor] LLM compression failed, falling back to heuristic:",
-        error instanceof Error ? error.message : "Unknown error"
-      );
+      log.error("LLM compression failed, falling back to heuristic", {
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
       return this.compressWithHeuristic(memories);
     }
   }

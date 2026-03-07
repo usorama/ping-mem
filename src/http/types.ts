@@ -12,6 +12,7 @@ import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
 import type { IngestionService } from "../ingest/IngestionService.js";
 import type { ApiKeyManager } from "../admin/ApiKeyManager.js";
 import type { AdminStore } from "../admin/AdminStore.js";
+import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 
 // ============================================================================
 // HTTP Server Types
@@ -50,6 +51,8 @@ export interface HTTPServerConfig {
   diagnosticsDbPath?: string | undefined;
   /** IngestionService for codebase tools (optional) */
   ingestionService?: IngestionService | undefined;
+  /** QdrantClientWrapper for health checks (optional) */
+  qdrantClient?: QdrantClientWrapper | undefined;
 }
 
 // Re-export PingMemServerConfig for convenience

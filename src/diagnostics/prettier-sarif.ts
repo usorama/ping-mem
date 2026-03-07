@@ -2,6 +2,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("prettier-sarif");
 
 interface Args {
   output?: string | undefined;
@@ -164,7 +167,7 @@ function main(): void {
 
   ensureDir(outputPath);
   fs.writeFileSync(outputPath, JSON.stringify(sarif, null, 2));
-  console.log(`SARIF written to ${outputPath}`);
+  log.info(`SARIF written to ${outputPath}`);
 }
 
 main();

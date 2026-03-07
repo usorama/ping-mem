@@ -21,6 +21,9 @@ import type {
   MemoryEventData,
   WorklogEventData,
 } from "../types/index.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("EventStore");
 
 // ============================================================================
 // Event Store Configuration
@@ -537,7 +540,7 @@ export class EventStore {
           matching.push(row.session_id as SessionId);
         }
       } catch (error) {
-        console.warn("[EventStore] findSessionIdsByProjectDir: failed to parse metadata for session", row.session_id, error instanceof Error ? error.message : String(error));
+        log.warn("findSessionIdsByProjectDir: failed to parse metadata for session", { sessionId: row.session_id, error: error instanceof Error ? error.message : String(error) });
         continue;
       }
     }
@@ -711,7 +714,7 @@ export class EventStore {
       this.db.prepare("SELECT 1").get();
       return true;
     } catch (error) {
-      console.warn("[EventStore] ping failed:", error instanceof Error ? error.message : String(error));
+      log.warn("ping failed", { error: error instanceof Error ? error.message : String(error) });
       return false;
     }
   }

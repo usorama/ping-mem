@@ -10,6 +10,9 @@ import { escapeHtml, formatDate } from "../layout.js";
 import { badge, emptyState, pagination } from "../components.js";
 import type { UIDependencies } from "../routes.js";
 import type { NormalizedFinding } from "../../../diagnostics/types.js";
+import { createLogger } from "../../../util/logger.js";
+
+const log = createLogger("UI:Diagnostics");
 
 // ============================================================================
 // Severity badge helper
@@ -154,7 +157,7 @@ export function registerDiagnosticsPartialRoutes(deps: UIDependencies) {
         return c.html(renderFindingsTable(findings, analysisId));
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error("[Diagnostics] Findings error:", errMsg);
+        log.error("Findings error", { error: errMsg });
         return c.html(`<div class="card" style="padding:16px;color:var(--error)">Failed to load findings: ${escapeHtml(errMsg)}</div>`);
       }
     },
@@ -177,7 +180,7 @@ export function registerDiagnosticsPartialRoutes(deps: UIDependencies) {
         return c.html(renderDiffView(diff, findingsA, findingsB, analysisIdA, analysisIdB));
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error("[Diagnostics] Diff error:", errMsg);
+        log.error("Diff error", { error: errMsg });
         return c.html(`<div class="card" style="padding:16px;color:var(--error)">Failed to load diff: ${escapeHtml(errMsg)}</div>`);
       }
     },

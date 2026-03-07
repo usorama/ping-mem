@@ -29,6 +29,7 @@ import type { LineageEngine } from "../graph/LineageEngine.js";
 import type { EvolutionEngine } from "../graph/EvolutionEngine.js";
 import type { CausalGraphManager } from "../graph/CausalGraphManager.js";
 import type { CausalDiscoveryAgent } from "../graph/CausalDiscoveryAgent.js";
+import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import type { LLMEntityExtractor } from "../graph/LLMEntityExtractor.js";
 import type { SessionId } from "../types/index.js";
 import { createRuntimeServices, loadRuntimeConfig } from "../config/runtime.js";
@@ -96,6 +97,8 @@ export interface PingMemServerConfig {
   causalGraphManager?: CausalGraphManager | undefined;
   /** Optional CausalDiscoveryAgent for LLM-based causal extraction */
   causalDiscoveryAgent?: CausalDiscoveryAgent | undefined;
+  /** Optional QdrantClientWrapper for health checks */
+  qdrantClient?: QdrantClientWrapper | undefined;
 }
 
 // ============================================================================
@@ -201,6 +204,7 @@ export class PingMemServer {
       causalDiscoveryAgent: config.causalDiscoveryAgent ?? null,
       pubsub: new MemoryPubSub(),
       knowledgeStore: new KnowledgeStore(this.eventStore.getDatabase()),
+      qdrantClient: config.qdrantClient ?? null,
     };
 
     // Register modules
@@ -357,6 +361,7 @@ export async function main(): Promise<void> {
     evolutionEngine: services.evolutionEngine,
     ingestionService,
     diagnosticsDbPath,
+    qdrantClient: services.qdrantClient,
   });
 
   // Handle shutdown gracefully

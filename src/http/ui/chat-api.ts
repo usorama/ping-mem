@@ -12,6 +12,9 @@ import { LLMProxy } from "../../llm/LLMProxy.js";
 import type { ChatMessage } from "../../llm/types.js";
 import type { UIDependencies } from "./routes.js";
 import { getClientIp } from "./layout.js";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("UI:Chat");
 
 const ChatRequestSchema = z.object({
   message: z.string().min(1, "Message is required").max(4096, "Message too long"),
@@ -65,7 +68,7 @@ export function registerChatRoutes(deps: UIDependencies) {
         }
         userMessage = parsed.data.message;
       } catch (err) {
-        console.warn("[Chat] Invalid request body:", err instanceof Error ? err.message : err);
+        log.warn("Invalid request body", { error: err instanceof Error ? err.message : String(err) });
         return c.json({ error: "Invalid request body" }, 400);
       }
 
@@ -96,7 +99,7 @@ export function registerChatRoutes(deps: UIDependencies) {
           );
         }
       } catch (err) {
-        console.error("[Chat] Memory search failed:", err instanceof Error ? err.message : err);
+        log.error("Memory search failed", { error: err instanceof Error ? err.message : String(err) });
       }
 
       // Build messages
@@ -129,7 +132,7 @@ export function registerChatRoutes(deps: UIDependencies) {
             }
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);
-            console.error("[Chat] Stream error:", errMsg);
+            log.error("Stream error", { error: errMsg });
             controller.enqueue(
               encoder.encode(
                 `data: ${JSON.stringify({ content: "", done: true, model: "error", provider: "error", error: "An internal error occurred. Please try again." })}\n\n`,

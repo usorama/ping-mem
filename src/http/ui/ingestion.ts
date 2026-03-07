@@ -12,6 +12,9 @@ import type { UIDependencies } from "./routes.js";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("UI:Ingestion");
 
 export function registerIngestionRoutes(deps: UIDependencies) {
   return async (c: Context) => {
@@ -30,7 +33,7 @@ export function registerIngestionRoutes(deps: UIDependencies) {
           .filter((l) => l.length > 0);
       }
     } catch (err) {
-      console.error("[Ingestion] Failed to read registered projects:", err instanceof Error ? err.message : err);
+      log.error("Failed to read registered projects", { error: err instanceof Error ? err.message : String(err) });
     }
 
     const statusBadge = available
@@ -132,7 +135,7 @@ export function registerIngestionRoutes(deps: UIDependencies) {
     }));
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[Ingestion] Page render error:", errMsg);
+      log.error("Page render error", { error: errMsg });
       const nonce = getCspNonce(c);
       const csrfToken = getCsrfToken(c);
       return c.html(renderLayout({

@@ -7,6 +7,9 @@
 import type { Context } from "hono";
 import type { UIDependencies } from "../routes.js";
 import { escapeHtml } from "../layout.js";
+import { createLogger } from "../../../util/logger.js";
+
+const log = createLogger("UI:Health");
 
 export function registerHealthPartialRoute(deps: UIDependencies) {
   return async (c: Context) => {
@@ -24,7 +27,7 @@ export function registerHealthPartialRoute(deps: UIDependencies) {
           await ingestionService.listProjects({ limit: 1 });
           hasIngestion = true;
         } catch (err) {
-          console.error("[Health] Ingestion probe failed:", err instanceof Error ? err.message : err);
+          log.error("Ingestion probe failed", { error: err instanceof Error ? err.message : String(err) });
           hasIngestion = false;
         }
       }
@@ -34,7 +37,7 @@ export function registerHealthPartialRoute(deps: UIDependencies) {
         // Quick probe: list runs with limit 1
         diagnosticsStore.listRuns({ limit: 1 });
       } catch (err) {
-        console.error("[Health] Diagnostics probe failed:", err instanceof Error ? err.message : err);
+        log.error("Diagnostics probe failed", { error: err instanceof Error ? err.message : String(err) });
         hasDiagnostics = false;
       }
 
@@ -54,7 +57,7 @@ export function registerHealthPartialRoute(deps: UIDependencies) {
           hx-get="/ui/partials/health" hx-trigger="every 30s" hx-swap="outerHTML"></span>`,
       );
     } catch (err) {
-      console.error("[Health] Partial render error:", err instanceof Error ? err.message : err);
+      log.error("Partial render error", { error: err instanceof Error ? err.message : String(err) });
       return c.html(`<span id="health-dot" class="health-dot red" title="Health check error"
         hx-get="/ui/partials/health" hx-trigger="every 30s" hx-swap="outerHTML"></span>`);
     }

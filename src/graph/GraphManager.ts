@@ -12,6 +12,9 @@
 import { randomUUID } from "crypto";
 import type { Neo4jClient } from "./Neo4jClient.js";
 import type { Entity, Relationship, EntityType, RelationshipType } from "../types/graph.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("GraphManager");
 
 // ============================================================================
 // Configuration
@@ -868,7 +871,7 @@ export class GraphManager {
     try {
       return JSON.parse(properties) as Record<string, unknown>;
     } catch (err) {
-      console.error("[GraphManager] Failed to parse entity properties:", err instanceof Error ? err.message : err);
+      log.error("Failed to parse entity properties", { error: err instanceof Error ? err.message : String(err) });
       return {};
     }
   }

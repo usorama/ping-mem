@@ -11,6 +11,9 @@ import { priorityBadge, categoryBadge, pagination, emptyState } from "../compone
 import type { EventStore } from "../../../storage/EventStore.js";
 import type { UIDependencies } from "../routes.js";
 import type { MemoryEventData } from "../../../types/index.js";
+import { createLogger } from "../../../util/logger.js";
+
+const log = createLogger("UI:Memories");
 
 // ============================================================================
 // Types
@@ -111,7 +114,7 @@ function queryMemories(
         metadata: (memData.metadata as Record<string, unknown>) ?? {},
       });
     } catch (err) {
-      console.warn("[Memories] Skipping corrupted memory payload:", err instanceof Error ? err.message : err);
+      log.warn("Skipping corrupted memory payload", { error: err instanceof Error ? err.message : String(err) });
       continue;
     }
   }
@@ -153,7 +156,7 @@ function getMemoryByKey(eventStore: EventStore, key: string): MemoryRow | null {
       metadata: (memData.metadata as Record<string, unknown>) ?? {},
     };
   } catch (err) {
-    console.warn("[Memories] Failed to parse memory payload for key:", key, err instanceof Error ? err.message : err);
+    log.warn("Failed to parse memory payload", { key, error: err instanceof Error ? err.message : String(err) });
     return null;
   }
 }
@@ -277,7 +280,7 @@ export function registerMemoryPartialRoutes(deps: UIDependencies) {
         return c.html(html);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        console.error("[Memories] Search error:", errMsg);
+        log.error("Search error", { error: errMsg });
         return c.html(`<div class="empty-state"><p style="color:var(--error)">Search failed</p></div>`);
       }
     },

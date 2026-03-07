@@ -12,12 +12,16 @@ import { SSEPingMemServer, createDefaultSSEConfig } from "./sse-server.js";
 import { RESTPingMemServer, createDefaultRESTConfig } from "./rest-server.js";
 import type { HTTPTransportType } from "./types.js";
 import { createRuntimeServices, loadRuntimeConfig } from "../config/runtime.js";
+import { validateEnv } from "../config/env-validation.js";
 import { IngestionService } from "../ingest/IngestionService.js";
 import { AdminStore } from "../admin/AdminStore.js";
 import { ApiKeyManager } from "../admin/ApiKeyManager.js";
 import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import { EventStore } from "../storage/EventStore.js";
 import { handleAdminRequest } from "./admin.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("HTTP Server");
 
 // ============================================================================
 // Server Factory
@@ -30,6 +34,8 @@ import { handleAdminRequest } from "./admin.js";
  * PING_MEM_TRANSPORT (sse, rest, or streamable-http).
  */
 export async function startHTTPServer(): Promise<void> {
+  validateEnv();
+
   const runtimeConfig = loadRuntimeConfig();
   const services = await createRuntimeServices();
 
@@ -58,8 +64,8 @@ export async function startHTTPServer(): Promise<void> {
   );
   const eventStore = new EventStore({ dbPath: runtimeConfig.pingMem.dbPath });
 
-  console.log(`[HTTP Server] Starting with transport: ${transport}`);
-  console.log(`[HTTP Server] Listening on ${host}:${port}`);
+  log.info(`Starting with transport: ${transport}`);
+  log.info(`Listening on ${host}:${port}`);
 
   // Create server instance based on transport type
   let serverInstance: SSEPingMemServer | RESTPingMemServer;
@@ -85,6 +91,7 @@ export async function startHTTPServer(): Promise<void> {
       lineageEngine: services.lineageEngine,
       evolutionEngine: services.evolutionEngine,
       ingestionService,
+      qdrantClient: services.qdrantClient,
     });
   } else {
     // SSE / Streamable HTTP mode
@@ -129,7 +136,7 @@ export async function startHTTPServer(): Promise<void> {
         return serverInstance.handleRequest(req, res);
       })
       .catch((error) => {
-      console.error("[HTTP Server] Unhandled error:", error);
+      log.error("Unhandled error", { error: error instanceof Error ? error.message : String(error) });
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(
@@ -144,23 +151,23 @@ export async function startHTTPServer(): Promise<void> {
 
   // Start listening
   httpServer.listen(port, host, () => {
-    console.log(`[HTTP Server] Server listening on http://${host}:${port}`);
-    console.log(`[HTTP Server] Transport: ${transport}`);
+    log.info(`Server listening on http://${host}:${port}`);
+    log.info(`Transport: ${transport}`);
     if (apiKey) {
-      console.log(`[HTTP Server] API key authentication enabled`);
+      log.info("API key authentication enabled");
     }
-    console.log(`[HTTP Server] Press Ctrl+C to stop`);
+    log.info("Press Ctrl+C to stop");
   });
 
   // Handle graceful shutdown
   const shutdown = async () => {
-    console.log("\n[HTTP Server] Shutting down...");
+    log.info("Shutting down...");
     httpServer.close();
     await serverInstance.stop();
     await eventStore.close();
     diagnosticsStore.close();
     adminStore.close();
-    console.log("[HTTP Server] Shutdown complete");
+    log.info("Shutdown complete");
     process.exit(0);
   };
 
@@ -174,7 +181,7 @@ export async function startHTTPServer(): Promise<void> {
 
 if (import.meta.main) {
   startHTTPServer().catch((error) => {
-    console.error("[HTTP Server] Failed to start:", error);
+    log.error("Failed to start", { error: error instanceof Error ? error.message : String(error) });
     process.exit(1);
   });
 }

@@ -34,6 +34,9 @@ import type {
 } from "../ingest/index.js";
 import type { ExtractedSymbol } from "../ingest/SymbolExtractor.js";
 import * as crypto from "crypto";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("TemporalCodeGraph");
 
 export interface TemporalCodeGraphOptions {
   neo4jClient: Neo4jClient;
@@ -322,7 +325,7 @@ export class TemporalCodeGraph {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Log with context for debugging
-      console.error(`[TemporalCodeGraph] Failed to list projects:`, {
+      log.error("Failed to list projects", {
         error: errorMessage,
         stack: error instanceof Error ? error.stack : undefined,
         filters: { projectId: options.projectId, limit: options.limit, sortBy: options.sortBy }

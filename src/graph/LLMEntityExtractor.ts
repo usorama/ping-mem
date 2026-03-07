@@ -12,6 +12,9 @@ import { randomUUID } from "crypto";
 import { EntityType, RelationshipType } from "../types/graph.js";
 import type { Entity, Relationship, EntityExtractResult } from "../types/graph.js";
 import type { EntityExtractor } from "./EntityExtractor.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("LLMEntityExtractor");
 
 // ============================================================================
 // Types
@@ -194,7 +197,7 @@ export class LLMEntityExtractor {
     try {
       return await this.extractWithLLM(text);
     } catch (error) {
-      console.warn("[LLMEntityExtractor] LLM extraction failed, falling back to regex:", error instanceof Error ? error.message : String(error));
+      log.warn("LLM extraction failed, falling back to regex", { error: error instanceof Error ? error.message : String(error) });
       return this.handleFallback(text);
     }
   }

@@ -9,6 +9,9 @@ import type { Context } from "hono";
 import { renderLayout, formatDate, escapeHtml, getCspNonce, getCsrfToken } from "./layout.js";
 import { statCard, card, eventTypeBadge, emptyState } from "./components.js";
 import type { UIDependencies } from "./routes.js";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("UI:Dashboard");
 
 export function registerDashboardRoutes(deps: UIDependencies) {
   return async (c: Context) => {
@@ -92,7 +95,7 @@ export function registerDashboardRoutes(deps: UIDependencies) {
     } catch (err) {
       const errName = err instanceof Error ? err.constructor.name : "Unknown";
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[Dashboard] Error:", errName, errMsg);
+      log.error("Error", { name: errName, message: errMsg });
       const nonce = getCspNonce(c);
       const csrfToken = getCsrfToken(c);
       return c.html(renderLayout({

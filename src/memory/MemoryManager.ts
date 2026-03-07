@@ -30,6 +30,9 @@ import { QuotaExhaustedError } from "../types/agent-errors.js";
 import type { RelevanceEngine } from "./RelevanceEngine.js";
 import type { MemoryPubSub } from "../pubsub/index.js";
 import * as crypto from "crypto";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("MemoryManager");
 
 // ============================================================================
 // Memory Manager Configuration
@@ -588,7 +591,7 @@ export class MemoryManager {
         try {
           this.relevanceEngine.ensureTracking(memoryId, memory.priority, memory.category);
         } catch (error) {
-          console.warn("[MemoryManager] Relevance tracking failed:", error instanceof Error ? error.message : String(error));
+          log.warn("Relevance tracking failed", { error: error instanceof Error ? error.message : String(error) });
         }
       }
 
@@ -930,7 +933,7 @@ export class MemoryManager {
       try {
         this.relevanceEngine.trackAccess(memory.id);
       } catch (error) {
-        console.warn("[MemoryManager] Relevance tracking failed:", error instanceof Error ? error.message : String(error));
+        log.warn("Relevance tracking failed", { error: error instanceof Error ? error.message : String(error) });
       }
     }
     return memory;
@@ -1321,7 +1324,7 @@ export class MemoryManager {
           scored.push({ memory: reconstructed, score });
         }
       } catch (error) {
-        console.warn("[MemoryManager] findRelatedAcrossSessions: skipping malformed event:", error instanceof Error ? error.message : String(error));
+        log.warn("findRelatedAcrossSessions: skipping malformed event", { error: error instanceof Error ? error.message : String(error) });
         continue;
       }
     }

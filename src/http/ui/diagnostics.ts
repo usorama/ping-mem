@@ -13,6 +13,9 @@ import type { UIDependencies } from "./routes.js";
 import * as nodeCrypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("UI:Diagnostics");
 
 const staticDir = process.env.PING_MEM_STATIC_DIR ?? path.resolve(process.cwd(), "src/static");
 function computeSriForChart(filePath: string): string {
@@ -169,7 +172,7 @@ export function registerDiagnosticsRoutes(deps: UIDependencies) {
     }));
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      console.error("[Diagnostics] Page render error:", errMsg);
+      log.error("Page render error", { error: errMsg });
       const nonce = getCspNonce(c);
       const csrfToken = getCsrfToken(c);
       return c.html(renderLayout({

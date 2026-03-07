@@ -23,6 +23,9 @@ import type {
 } from "../../types/index.js";
 import { createAgentId } from "../../types/index.js";
 import { checkEvidenceGate } from "../../validation/evidence-gates.js";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("ContextToolModule");
 
 // ============================================================================
 // Tool Schemas
@@ -279,9 +282,9 @@ export class ContextToolModule implements ToolModule {
       } catch (error) {
         // Don't fail session start if ingestion fails, but log the error
         const errorMessage = error instanceof Error ? error.message : "Unknown ingestion error";
-        console.error(`[AutoIngest] Failed to ingest project at ${args.projectDir}:`, errorMessage);
+        log.error(`AutoIngest: Failed to ingest project at ${args.projectDir}`, { error: errorMessage });
         if (error instanceof Error && error.stack) {
-          console.error(`[AutoIngest] Stack trace:`, error.stack);
+          log.error("AutoIngest: Stack trace", { stack: error.stack });
         }
         ingestResult = {
           ingestError: errorMessage,
@@ -403,12 +406,12 @@ export class ContextToolModule implements ToolModule {
               try {
                 await this.state.graphManager.createRelationship(rel);
               } catch (error) {
-                console.warn("[PingMemServer] Relationship storage failed:", error instanceof Error ? error.message : String(error));
+                log.warn("Relationship storage failed", { error: error instanceof Error ? error.message : String(error) });
               }
             }
           }
         } catch (error) {
-          console.warn("[PingMemServer] LLM entity extraction failed, falling back to regex:", error instanceof Error ? error.message : String(error));
+          log.warn("LLM entity extraction failed, falling back to regex", { error: error instanceof Error ? error.message : String(error) });
           // Fallback to regex extraction on LLM failure
           if (this.state.entityExtractor) {
             const extractionContext: { key: string; value: string; category?: string } = {
@@ -477,10 +480,7 @@ export class ContextToolModule implements ToolModule {
           this.state.knowledgeStore.ingest(knowledgeIngestEntry);
         }
       } catch (knowledgeError) {
-        console.warn(
-          "[ContextToolModule] Knowledge dual-write failed:",
-          knowledgeError instanceof Error ? knowledgeError.message : String(knowledgeError)
-        );
+        log.warn("Knowledge dual-write failed", { error: knowledgeError instanceof Error ? knowledgeError.message : String(knowledgeError) });
       }
     }
 
@@ -576,7 +576,7 @@ export class ContextToolModule implements ToolModule {
           result.relatedMemories = relatedMemories;
         }
       } catch (error) {
-        console.warn("[PingMemServer] Proactive recall failed:", error instanceof Error ? error.message : String(error));
+        log.warn("Proactive recall failed", { error: error instanceof Error ? error.message : String(error) });
       }
     }
 

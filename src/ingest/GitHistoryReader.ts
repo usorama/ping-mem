@@ -7,6 +7,9 @@
 
 import * as path from "path";
 import { SafeGit, createSafeGit } from "./SafeGit.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("GitHistoryReader");
 
 export interface GitCommit {
   hash: string; // Full SHA-1
@@ -57,7 +60,7 @@ export class GitHistoryReader {
 
     const maxCommits = options?.maxCommits ?? 200;
     const commits = await this.readCommits(gitRoot, maxCommits);
-    console.log(`  Found ${commits.length} commits, processing diffs...`);
+    log.info(`Found ${commits.length} commits, processing diffs...`);
     const fileChanges: GitFileChange[] = [];
     const hunks: GitDiffHunk[] = [];
 
@@ -65,7 +68,7 @@ export class GitHistoryReader {
     for (const commit of commits) {
       processed++;
       if (processed % 10 === 0 || processed === commits.length) {
-        console.log(`  Progress: ${processed}/${commits.length} commits`);
+        log.info(`Progress: ${processed}/${commits.length} commits`);
       }
 
       const changes = await this.readFileChanges(gitRoot, commit.hash);

@@ -15,6 +15,9 @@ import { CodeIndexer } from "../search/CodeIndexer.js";
 import { Neo4jClient } from "../graph/Neo4jClient.js";
 import { QdrantClientWrapper } from "../search/QdrantClient.js";
 import type { ProjectInfo } from "./types.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("IngestionService");
 
 export interface IngestionServiceOptions {
   neo4jClient: Neo4jClient;
@@ -234,7 +237,7 @@ export class IngestionService {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Log at service layer with context
-      console.error(`[IngestionService] listProjects failed:`, {
+      log.error("listProjects failed", {
         error: errorMessage,
         filters: options,
       });

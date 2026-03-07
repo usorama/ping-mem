@@ -13,6 +13,9 @@ import {
 } from "./diagnostics/index.js";
 import { EventStore } from "./storage/EventStore.js";
 import { SessionManager } from "./session/SessionManager.js";
+import { createLogger } from "./util/logger.js";
+
+const log = createLogger("cli");
 import type { WorklogEventData } from "./types/index.js";
 
 type ArgMap = Record<string, string | boolean>;
@@ -223,19 +226,12 @@ async function collectDiagnostics(args: ArgMap): Promise<void> {
 
   diagnosticsStore.close();
 
-  console.log(
-    JSON.stringify(
-      {
-        success: true,
-        projectId,
-        treeHash,
-        results,
-        totalFindings: results.reduce((sum, r) => sum + r.findingsCount, 0),
-      },
-      null,
-      2
-    )
-  );
+  log.info("Diagnostics collection complete", {
+    success: true,
+    projectId,
+    treeHash,
+    totalFindings: results.reduce((sum, r) => sum + r.findingsCount, 0),
+  });
 }
 
 async function main(): Promise<void> {
@@ -255,6 +251,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : "Unknown error");
+  log.error(error instanceof Error ? error.message : "Unknown error");
   process.exit(1);
 });

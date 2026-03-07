@@ -19,6 +19,10 @@ interface ContradictionDetectorConfig {
   confidenceThreshold?: number;
 }
 
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("ContradictionDetector");
+
 export interface ContradictionResult {
   isContradiction: boolean;
   conflict: string;
@@ -73,7 +77,7 @@ export class ContradictionDetector {
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
-        console.warn("[ContradictionDetector] LLM returned empty content for entity:", entityName);
+        log.warn("LLM returned empty content for entity", { entityName });
         return { isContradiction: false, conflict: "", confidence: 0 };
       }
 
@@ -97,7 +101,7 @@ export class ContradictionDetector {
       return { isContradiction: false, conflict: "", confidence };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("[ContradictionDetector] Detection failed:", message);
+      log.error("Detection failed", { error: message });
       return { isContradiction: false, conflict: "", confidence: 0, error: message };
     }
   }

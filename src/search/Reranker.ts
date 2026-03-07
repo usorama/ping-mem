@@ -66,6 +66,10 @@ interface CohereRerankResponse {
  * // results sorted by relevance: index 0 and 2 ranked higher than 1
  * ```
  */
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("Reranker");
+
 export class Reranker {
   private readonly apiKey: string;
   private readonly model: string;
@@ -107,9 +111,7 @@ export class Reranker {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(
-          `[Reranker] Reranking failed, returning un-reranked results: Cohere API error (${response.status}): ${errorText}`
-        );
+        log.error("Reranking failed, returning un-reranked results", { status: response.status, error: errorText });
         return null;
       }
 
@@ -122,9 +124,7 @@ export class Reranker {
         }))
         .sort((a, b) => b.relevanceScore - a.relevanceScore);
     } catch (error) {
-      console.error(
-        `[Reranker] Reranking failed, returning un-reranked results: ${error instanceof Error ? error.message : String(error)}`
-      );
+      log.error("Reranking failed, returning un-reranked results", { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }

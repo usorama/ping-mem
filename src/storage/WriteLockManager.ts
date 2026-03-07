@@ -12,6 +12,9 @@
 import type { Database } from "bun:sqlite";
 import { WriteLockConflictError } from "../types/agent-errors.js";
 import { createAgentId } from "../types/index.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("WriteLockManager");
 
 // ============================================================================
 // Types
@@ -247,10 +250,7 @@ export class WriteLockManager {
         try {
           return JSON.parse(row.metadata) as Record<string, unknown>;
         } catch (err) {
-          console.warn(
-            `[WriteLockManager] Corrupt metadata for lock '${row.lock_key}':`,
-            err instanceof Error ? err.message : String(err)
-          );
+          log.warn(`Corrupt metadata for lock '${row.lock_key}'`, { error: err instanceof Error ? err.message : String(err) });
           return {};
         }
       })(),

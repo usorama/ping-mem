@@ -10,6 +10,9 @@
 
 import type { CausalGraphManager } from "./CausalGraphManager.js";
 import type { GraphManager } from "./GraphManager.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("CausalDiscoveryAgent");
 
 // ============================================================================
 // Types
@@ -149,13 +152,13 @@ export class CausalDiscoveryAgent {
 
       const content = response.choices[0]?.message?.content;
       if (!content) {
-        console.warn("[CausalDiscoveryAgent] LLM returned empty content in discover()");
+        log.warn("LLM returned empty content in discover()");
         return [];
       }
 
       const parsed = this.parseResponse(content);
       if (!parsed) {
-        console.warn("[CausalDiscoveryAgent] Failed to parse LLM response in discover()");
+        log.warn("Failed to parse LLM response in discover()");
         return [];
       }
 
@@ -170,7 +173,7 @@ export class CausalDiscoveryAgent {
         }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error("[CausalDiscoveryAgent] Discovery failed:", message);
+      log.error("Discovery failed", { error: message });
       throw new Error(`Causal discovery failed: ${message}`);
     }
   }
@@ -227,7 +230,7 @@ export class CausalDiscoveryAgent {
 
       return { causal_links: validLinks };
     } catch (error) {
-      console.warn("[CausalDiscoveryAgent] parseResponse JSON parse failed:", error instanceof Error ? error.message : String(error));
+      log.warn("parseResponse JSON parse failed", { error: error instanceof Error ? error.message : String(error) });
       return null;
     }
   }

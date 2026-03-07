@@ -6,8 +6,14 @@
  */
 
 import { main } from "./PingMemServer.js";
+import { validateEnv } from "../config/env-validation.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("MCP CLI");
+
+validateEnv();
 
 main().catch((error) => {
-  console.error("Fatal error:", error);
+  log.error("Fatal error", { error: error instanceof Error ? error.message : String(error) });
   process.exit(1);
 });

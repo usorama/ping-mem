@@ -13,6 +13,9 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as crypto from "crypto";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("SSE Server");
 
 import { PingMemServer } from "../mcp/PingMemServer.js";
 
@@ -166,7 +169,7 @@ export class SSEPingMemServer {
       // Delegate to transport
       await this.transport.handleRequest(req, res, parsedBody);
     } catch (error) {
-      console.error("[SSE Server] Request handling error:", error);
+      log.error("Request handling error", { error: error instanceof Error ? error.message : String(error) });
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "application/json" });
         res.end(
@@ -215,7 +218,7 @@ export class SSEPingMemServer {
   async start(): Promise<void> {
     // Transport doesn't need explicit start for StreamableHTTP
     // It manages connections per-request
-    console.log("[SSE Server] Ready (waiting for HTTP requests)");
+    log.info("Ready (waiting for HTTP requests)");
   }
 
   /**
@@ -224,7 +227,7 @@ export class SSEPingMemServer {
   async stop(): Promise<void> {
     await this.transport.close();
     await this.toolServer.close();
-    console.log("[SSE Server] Stopped");
+    log.info("Stopped");
   }
 
   /**

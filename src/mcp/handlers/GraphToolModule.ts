@@ -481,12 +481,25 @@ export class GraphToolModule implements ToolModule {
       };
     }
 
-    // Check IngestionService (Qdrant) — mark as configured (no direct ping available)
-    if (this.state.ingestionService) {
-      (health.components as Record<string, unknown>).qdrant = {
-        status: "configured",
-        configured: true,
-      };
+    // Check Qdrant — actual health check ping
+    if (this.state.qdrantClient) {
+      try {
+        const healthy = await this.state.qdrantClient.healthCheck();
+        (health.components as Record<string, unknown>).qdrant = {
+          status: healthy ? "healthy" : "unhealthy",
+          configured: true,
+        };
+        if (!healthy) {
+          health.status = "degraded";
+        }
+      } catch (error) {
+        (health.components as Record<string, unknown>).qdrant = {
+          status: "unhealthy",
+          configured: true,
+          error: error instanceof Error ? error.message : "Unknown error",
+        };
+        health.status = "degraded";
+      }
     } else {
       (health.components as Record<string, unknown>).qdrant = {
         status: "not_configured",

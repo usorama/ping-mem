@@ -14,6 +14,9 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import * as path from "path";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("REST Server");
 
 import { SessionManager } from "../session/SessionManager.js";
 import { MemoryManager, type MemoryManagerConfig } from "../memory/MemoryManager.js";
@@ -69,6 +72,7 @@ import {
 } from "../validation/api-schemas.js";
 import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
 import { KnowledgeStore } from "../knowledge/index.js";
+import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 
 // ============================================================================
 // REST Server Class
@@ -105,6 +109,7 @@ export class RESTPingMemServer {
   private relevanceEngine: RelevanceEngine;
   private pubsub: MemoryPubSub;
   private knowledgeStore: KnowledgeStore;
+  private qdrantClient: QdrantClientWrapper | null = null;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -150,6 +155,9 @@ export class RESTPingMemServer {
     }
     if (config.hybridSearchEngine) {
       this.hybridSearchEngine = config.hybridSearchEngine;
+    }
+    if (config.qdrantClient) {
+      this.qdrantClient = config.qdrantClient;
     }
 
     // Initialize Hono app
@@ -235,7 +243,7 @@ export class RESTPingMemServer {
       this.app.use("/api/*", authMiddleware);
       this.app.use("/ui/*", authMiddleware);
     } else {
-      console.warn("[REST Server] WARNING: No API key configured. All routes are unauthenticated.");
+      log.warn("No API key configured. All routes are unauthenticated.");
     }
 
     // CSRF protection for browser-based UI routes
@@ -253,8 +261,8 @@ export class RESTPingMemServer {
    * Set up REST API routes
    */
   private setupRoutes(): void {
-    // Health check
-    this.app.get("/health", (c) => {
+    // Health check — per-component status
+    this.app.get("/health", async (c) => {
       // Auth is required for health check only when keys are configured
       const authRequired = this.config.apiKeyManager
         ? this.config.apiKeyManager.hasSeedKey()
@@ -278,7 +286,69 @@ export class RESTPingMemServer {
           );
         }
       }
-      return c.json({ status: "ok", timestamp: new Date().toISOString() });
+
+      let overallStatus: "ok" | "degraded" | "unhealthy" = "ok";
+      const components: Record<string, Record<string, unknown>> = {};
+
+      // SQLite health — run a lightweight query and measure latency
+      try {
+        const sqliteStart = performance.now();
+        this.eventStore.getDatabase().prepare("SELECT 1").get();
+        const sqliteLatency = performance.now() - sqliteStart;
+        components.sqlite = { status: "healthy", latencyMs: Math.round(sqliteLatency * 100) / 100 };
+      } catch (err) {
+        components.sqlite = {
+          status: "unhealthy",
+          error: err instanceof Error ? err.message : String(err),
+        };
+        overallStatus = "unhealthy";
+      }
+
+      // Neo4j health
+      if (this.graphManager) {
+        try {
+          await this.graphManager.getEntity("__health_check_nonexistent__");
+          components.neo4j = { status: "healthy", configured: true };
+        } catch (err) {
+          components.neo4j = {
+            status: "unhealthy",
+            configured: true,
+            error: err instanceof Error ? err.message : String(err),
+          };
+          overallStatus = overallStatus === "unhealthy" ? "unhealthy" : "degraded";
+        }
+      } else {
+        components.neo4j = { status: "not_configured", configured: false };
+      }
+
+      // Qdrant health — actual ping via healthCheck()
+      if (this.qdrantClient) {
+        try {
+          const healthy = await this.qdrantClient.healthCheck();
+          components.qdrant = {
+            status: healthy ? "healthy" : "unhealthy",
+            configured: true,
+          };
+          if (!healthy) {
+            overallStatus = overallStatus === "unhealthy" ? "unhealthy" : "degraded";
+          }
+        } catch (err) {
+          components.qdrant = {
+            status: "unhealthy",
+            configured: true,
+            error: err instanceof Error ? err.message : String(err),
+          };
+          overallStatus = overallStatus === "unhealthy" ? "unhealthy" : "degraded";
+        }
+      } else {
+        components.qdrant = { status: "not_configured", configured: false };
+      }
+
+      return c.json({
+        status: overallStatus,
+        timestamp: new Date().toISOString(),
+        components,
+      });
     });
 
     // ============================================================================
@@ -458,7 +528,7 @@ export class RESTPingMemServer {
             relatedMemories = await Promise.race([recallPromise, timeout]);
           } catch (error) {
             // Best-effort: don't block save
-            console.warn("[rest-server] Proactive recall failed:", error instanceof Error ? error.message : String(error));
+            log.warn("Proactive recall failed", { error: error instanceof Error ? error.message : String(error) });
           }
         }
 
@@ -520,7 +590,7 @@ export class RESTPingMemServer {
           try {
             sarifPayload = typeof body.sarif === "string" ? JSON.parse(body.sarif) : body.sarif;
           } catch (err) {
-            console.warn("[REST] SARIF parse error:", err instanceof Error ? err.message : String(err));
+            log.warn("SARIF parse error", { error: err instanceof Error ? err.message : String(err) });
             return c.json<RESTErrorResponse>(
               { error: "Bad Request", message: "Invalid JSON in sarif field" },
               400
@@ -1378,7 +1448,7 @@ export class RESTPingMemServer {
                 this.pubsub?.unsubscribe(subscriptionId);
                 clearInterval(heartbeat);
                 if (err instanceof TypeError && /closed|errored/i.test(String(err.message))) return;
-                console.error("[SSE] Failed to send event:", err instanceof Error ? err.message : String(err));
+                log.error("SSE failed to send event", { error: err instanceof Error ? err.message : String(err) });
               }
             }
           );
@@ -1391,7 +1461,7 @@ export class RESTPingMemServer {
               clearInterval(heartbeat);
               this.pubsub?.unsubscribe(subscriptionId);
               if (!(err instanceof TypeError && /closed|errored/i.test(String(err.message)))) {
-                console.error("[SSE] Heartbeat error:", err instanceof Error ? err.message : String(err));
+                log.error("SSE heartbeat error", { error: err instanceof Error ? err.message : String(err) });
               }
             }
           }, 30_000);
@@ -1405,7 +1475,7 @@ export class RESTPingMemServer {
             } catch (err) {
               // Stream already closed by client disconnect
               if (err instanceof Error && !/closed|errored/i.test(err.message)) {
-                console.error("[SSE] Cleanup error:", err.message);
+                log.error("SSE cleanup error", { error: err.message });
               }
             }
           });
@@ -1513,7 +1583,7 @@ export class RESTPingMemServer {
       // Security: prevent path traversal — canonicalize and compare with trailing separator
       const staticDirNorm = path.resolve(staticDir) + path.sep;
       if (!fullPath.startsWith(staticDirNorm) && fullPath !== path.resolve(staticDir)) {
-        console.warn("[Static] Path traversal attempt blocked:", filePath);
+        log.warn("Path traversal attempt blocked", { filePath });
         return c.text("Forbidden", 403);
       }
 
@@ -1527,7 +1597,7 @@ export class RESTPingMemServer {
           headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=3600" },
         });
       } catch (err) {
-        console.error("[Static] Error serving file:", filePath, err instanceof Error ? err.message : err);
+        log.error("Error serving static file", { filePath, error: err instanceof Error ? err.message : String(err) });
         return c.text("Internal Server Error", 500);
       }
     });
@@ -1551,14 +1621,14 @@ export class RESTPingMemServer {
 
     if (!isClientError) {
       const requestId = crypto.randomUUID().slice(0, 8);
-      console.error(`[REST Server] Error [${requestId}] ${c.req.method} ${c.req.path}:`, error);
+      log.error(`Error [${requestId}] ${c.req.method} ${c.req.path}`, { error: error instanceof Error ? error.message : String(error) });
       return c.json(
         { error: this.getErrorName(statusCode), message: `An internal error occurred (ref: ${requestId})` },
         statusCode as ContentfulStatusCode
       );
     }
 
-    console.error("[REST Server] Error:", message);
+    log.error("Error", { message });
     return c.json(
       { error: this.getErrorName(statusCode), message },
       statusCode as ContentfulStatusCode
@@ -1589,11 +1659,11 @@ export class RESTPingMemServer {
         /Memory|Agent|Quota|Lock|Evidence|Schema|Scope/.test(error.constructor.name);
       if (isDomainError) {
         if (error.message.includes("not found")) {
-          console.warn(`[REST Server] getStatusCode: message-based 404 for '${error.name}': ${error.message.slice(0, 80)}`);
+          log.warn(`getStatusCode: message-based 404 for '${error.name}': ${error.message.slice(0, 80)}`);
           return 404;
         }
         if (error.message.includes("invalid") || error.message.includes("required")) {
-          console.warn(`[REST Server] getStatusCode: message-based 400 for '${error.name}': ${error.message.slice(0, 80)}`);
+          log.warn(`getStatusCode: message-based 400 for '${error.name}': ${error.message.slice(0, 80)}`);
           return 400;
         }
       }
@@ -1745,7 +1815,7 @@ export class RESTPingMemServer {
    * Start the REST server
    */
   async start(): Promise<void> {
-    console.log("[REST Server] Started (ready to handle requests)");
+    log.info("Started (ready to handle requests)");
   }
 
   /**
@@ -1767,7 +1837,7 @@ export class RESTPingMemServer {
     // Clear cached memory managers
     this.memoryManagers.clear();
     this.managerPromises.clear();
-    console.log("[REST Server] Stopped");
+    log.info("Stopped");
   }
 
   /**

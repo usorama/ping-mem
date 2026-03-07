@@ -11,6 +11,9 @@ import * as fs from "fs";
 import { escapeHtml, getClientIp } from "../layout.js";
 import { badge } from "../components.js";
 import type { UIDependencies } from "../routes.js";
+import { createLogger } from "../../../util/logger.js";
+
+const log = createLogger("UI:Ingestion");
 
 // ============================================================================
 // Rate Limiting
@@ -60,7 +63,7 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
         const body = await c.req.parseBody();
         projectDir = String(body["projectDir"] ?? "");
       } catch (err) {
-        console.warn("[Ingestion] Failed to parse reingest request body:", err instanceof Error ? err.message : err);
+        log.warn("Failed to parse reingest request body", { error: err instanceof Error ? err.message : String(err) });
         return c.html(`<div class="card" style="margin-top:16px">
           <div style="padding:16px;color:var(--error)">Invalid request body</div>
         </div>`);
@@ -85,7 +88,7 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
         }
       } catch (err) {
         // Fail CLOSED: if we cannot read the allowlist, deny all requests
-        console.warn("[Ingestion] Failed to read registered-projects.txt:", err instanceof Error ? err.message : err);
+        log.warn("Failed to read registered-projects.txt", { error: err instanceof Error ? err.message : String(err) });
         return c.html(`<div class="card" style="margin-top:16px">
           <div style="padding:16px;color:var(--error)">
             ${badge("Forbidden", "error")} Unable to verify project allowlist. Access denied.
@@ -161,7 +164,7 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
         </div>`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        console.error("[Ingestion] Reingest failed for", projectDir, ":", message);
+        log.error("Reingest failed", { projectDir, error: message });
         return c.html(`<div class="card" style="margin-top:16px">
           <div style="padding:16px;color:var(--error)">
             ${badge("Error", "error")} Ingestion failed: ${escapeHtml(message)}
