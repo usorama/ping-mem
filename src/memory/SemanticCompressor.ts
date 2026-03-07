@@ -164,7 +164,7 @@ export class SemanticCompressor {
     } catch (error) {
       console.error(
         "[SemanticCompressor] LLM compression failed, falling back to heuristic:",
-        error
+        error instanceof Error ? error.message : "Unknown error"
       );
       return this.compressWithHeuristic(memories);
     }

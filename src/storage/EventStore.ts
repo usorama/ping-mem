@@ -372,7 +372,7 @@ export class EventStore {
         holder_id TEXT NOT NULL,
         acquired_at TEXT NOT NULL,
         expires_at TEXT NOT NULL,
-        metadata TEXT DEFAULT '{}'
+        metadata TEXT NOT NULL DEFAULT '{}'
       )`
     );
   }

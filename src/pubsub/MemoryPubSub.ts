@@ -75,9 +75,12 @@ export class MemoryPubSub {
       // Scope filtering: private memories only delivered to owning agent
       if (event.agentScope === "private" && event.agentId !== options.agentId) return;
 
-      // Role-scope filtering: role-scoped events only go to same-role subscribers
-      if (event.agentScope === "role" && event.agentRole && options.agentRole && event.agentRole !== options.agentRole) {
-        return; // Different role — block event entirely
+      // Role-scope filtering: role-scoped events only go to same-role subscribers.
+      // If subscriber has no role, block role-scoped events to prevent leak.
+      if (event.agentScope === "role") {
+        if (!options.agentRole || !event.agentRole || event.agentRole !== options.agentRole) {
+          return; // No role or different role — block event entirely
+        }
       }
 
       // Strip value from role/shared scope events for non-owner subscribers

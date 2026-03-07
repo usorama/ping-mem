@@ -956,7 +956,7 @@ export class RESTPingMemServer {
 
         if (!deleted) {
           return c.json<RESTErrorResponse>(
-            { error: "Not Found", message: `Memory with key '${key}' not found` },
+            { error: "Not Found", message: "Memory not found or not accessible" },
             404
           );
         }
@@ -1144,9 +1144,13 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/memory/consolidate", async (c) => {
       try {
-        const parseResult = MemoryConsolidateSchema.safeParse(
-          await c.req.json().catch(() => ({}))
-        );
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400);
+        }
+        const parseResult = MemoryConsolidateSchema.safeParse(body);
         if (!parseResult.success) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -1173,9 +1177,13 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/agents/register", async (c) => {
       try {
-        const parseResult = AgentRegisterSchema.safeParse(
-          await c.req.json().catch(() => ({}))
-        );
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400);
+        }
+        const parseResult = AgentRegisterSchema.safeParse(body);
         if (!parseResult.success) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -1202,11 +1210,14 @@ export class RESTPingMemServer {
 
         const db = this.eventStore.getDatabase();
 
-        // Enforce max-agents limit (exclude expired agents)
+        // Garbage collect expired agents before counting (aligned with MCP handler)
+        db.prepare("DELETE FROM agent_quotas WHERE expires_at IS NOT NULL AND expires_at < $now").run({ $now: new Date().toISOString() });
+
+        // Enforce max-agents limit
         const maxAgents = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10) || 100;
         const countRow = db.prepare(
-          "SELECT COUNT(*) as cnt FROM agent_quotas WHERE expires_at IS NULL OR expires_at >= $now"
-        ).get({ $now: new Date().toISOString() }) as { cnt: number };
+          "SELECT COUNT(*) as cnt FROM agent_quotas"
+        ).get() as { cnt: number };
         const existingRow = db.prepare("SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id").get({ $agent_id: agentId });
         if (!existingRow && countRow.cnt >= maxAgents) {
           return c.json<RESTErrorResponse>({ error: "Conflict", message: `Maximum agent registrations (${maxAgents}) reached` }, 409);
@@ -1223,7 +1234,6 @@ export class RESTPingMemServer {
            VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
            ON CONFLICT(agent_id) DO UPDATE SET
              role = $role, ttl_ms = $ttl_ms, expires_at = $expires_at,
-             quota_bytes = $quota_bytes, quota_count = $quota_count,
              updated_at = $updated_at, metadata = $metadata`
         ).run({
           $agent_id: agentId,
@@ -1322,6 +1332,22 @@ export class RESTPingMemServer {
       const channel = c.req.query("channel");
       const category = c.req.query("category");
       const agentId = c.req.query("agentId");
+
+      // Validate agentId exists and is not expired if provided
+      if (agentId) {
+        try {
+          const validId = createAgentId(agentId);
+          const db = this.eventStore.getDatabase();
+          const row = db.prepare(
+            "SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
+          ).get({ $agent_id: validId, $now: new Date().toISOString() });
+          if (!row) {
+            return c.json<RESTErrorResponse>({ error: "Forbidden", message: "Agent not registered or expired" }, 403);
+          }
+        } catch {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
+        }
+      }
 
       const stream = new ReadableStream({
         start: (controller) => {
@@ -1716,7 +1742,15 @@ export class RESTPingMemServer {
    * Stop the REST server
    */
   async stop(): Promise<void> {
+    // Destroy PubSub subscriptions first to stop event delivery
+    if (this.pubsub) {
+      this.pubsub.destroy();
+    }
+    // Close event store (SQLite)
     await this.eventStore.close();
+    // Clear cached memory managers
+    this.memoryManagers.clear();
+    this.managerPromises.clear();
     console.log("[REST Server] Stopped");
   }
 
