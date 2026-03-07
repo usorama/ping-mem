@@ -24,6 +24,8 @@ import type { SummaryGenerator } from "../../diagnostics/SummaryGenerator.js";
 import type { RelevanceEngine } from "../../memory/RelevanceEngine.js";
 import type { CausalGraphManager } from "../../graph/CausalGraphManager.js";
 import type { CausalDiscoveryAgent } from "../../graph/CausalDiscoveryAgent.js";
+import type { MemoryPubSub } from "../../pubsub/index.js";
+import type { KnowledgeStore } from "../../knowledge/index.js";
 
 /**
  * Mutable session state shared across all ToolModules by reference.
@@ -50,6 +52,8 @@ export interface SessionState {
   readonly relevanceEngine: RelevanceEngine | null;
   readonly causalGraphManager: CausalGraphManager | null;
   readonly causalDiscoveryAgent: CausalDiscoveryAgent | null;
+  readonly pubsub: MemoryPubSub | null;
+  readonly knowledgeStore: KnowledgeStore | null;
 }
 
 /**

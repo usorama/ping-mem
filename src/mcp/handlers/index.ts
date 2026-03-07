@@ -11,5 +11,7 @@ export { DiagnosticsToolModule } from "./DiagnosticsToolModule.js";
 export { CodebaseToolModule } from "./CodebaseToolModule.js";
 export { MemoryToolModule } from "./MemoryToolModule.js";
 export { CausalToolModule } from "./CausalToolModule.js";
+export { AgentToolModule } from "./AgentToolModule.js";
+export { KnowledgeToolModule } from "./KnowledgeToolModule.js";
 export type { SessionState } from "./shared.js";
 export { getActiveMemoryManager } from "./shared.js";

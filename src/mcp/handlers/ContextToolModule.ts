@@ -19,7 +19,10 @@ import type {
   MemoryCategory,
   MemoryPriority,
   MemoryQuery,
+  AgentMemoryScope,
 } from "../../types/index.js";
+import { createAgentId } from "../../types/index.js";
+import { checkEvidenceGate } from "../../validation/evidence-gates.js";
 
 // ============================================================================
 // Tool Schemas
@@ -37,6 +40,7 @@ export const CONTEXT_TOOLS: ToolDefinition[] = [
         continueFrom: { type: "string", description: "Session ID to continue from" },
         defaultChannel: { type: "string", description: "Default channel for memories" },
         autoIngest: { type: "boolean", description: "Automatically ingest project codebase when projectDir is provided (default: false)" },
+        agentId: { type: "string", description: "Agent identity for multi-agent scoping (stored in session metadata)" },
       },
       required: ["name"],
     },
@@ -78,6 +82,11 @@ export const CONTEXT_TOOLS: ToolDefinition[] = [
         skipProactiveRecall: {
           type: "boolean",
           description: "When true, skip proactive recall of related memories on save (default: false)",
+        },
+        agentScope: {
+          type: "string",
+          enum: ["private", "role", "shared", "public"],
+          description: "Visibility scope for multi-agent access control (default: public)",
         },
       },
       required: ["key", "value"],
@@ -214,6 +223,9 @@ export class ContextToolModule implements ToolModule {
     if (args.defaultChannel !== undefined) {
       sessionConfig.defaultChannel = args.defaultChannel as string;
     }
+    if (args.agentId !== undefined) {
+      sessionConfig.agentId = createAgentId(args.agentId as string);
+    }
 
     const session = await this.state.sessionManager.startSession(sessionConfig);
 
@@ -229,6 +241,14 @@ export class ContextToolModule implements ToolModule {
     }
     if (session.defaultChannel !== undefined) {
       memoryManagerConfig.defaultChannel = session.defaultChannel;
+    }
+    // Pass agentId from session metadata to MemoryManager for scope enforcement
+    if (session.metadata.agentId !== undefined) {
+      memoryManagerConfig.agentId = createAgentId(session.metadata.agentId as string);
+    }
+    // Pass agentRole from session metadata for role-scoped visibility
+    if (session.metadata.agentRole !== undefined) {
+      memoryManagerConfig.agentRole = session.metadata.agentRole as string;
     }
 
     const memoryManager = new MemoryManager(memoryManagerConfig);
@@ -317,6 +337,30 @@ export class ContextToolModule implements ToolModule {
     if (args.metadata !== undefined) {
       saveOptions.metadata = args.metadata as Record<string, unknown>;
     }
+    if (args.agentScope !== undefined) {
+      saveOptions.agentScope = args.agentScope as AgentMemoryScope;
+    }
+
+    // Evidence gate check — derive admin from agent_quotas if agentId present
+    const metadata = saveOptions.metadata ?? {};
+    let isAdmin = false;
+    const effectiveAgentId = memoryManager.getAgentId?.();
+    if (effectiveAgentId) {
+      const db = this.state.eventStore.getDatabase();
+      const adminRow = db.prepare("SELECT admin FROM agent_quotas WHERE agent_id = $id").get({ $id: effectiveAgentId }) as { admin: number } | null;
+      isAdmin = adminRow?.admin === 1;
+    }
+    const gateResult = checkEvidenceGate(
+      saveOptions.category,
+      metadata,
+      isAdmin
+    );
+    if (!gateResult.passed) {
+      const { EvidenceGateRejectionError } = await import("../../types/agent-errors.js");
+      const agentId = createAgentId(effectiveAgentId ?? "unregistered");
+      throw new EvidenceGateRejectionError(agentId, args.key as string, gateResult.warnings.join("; "));
+    }
+    const warnings: string[] = [...gateResult.warnings];
 
     const savedMemory = await memoryManager.save(args.key as string, args.value as string, saveOptions);
 
@@ -402,11 +446,54 @@ export class ContextToolModule implements ToolModule {
       }
     }
 
+    // Dual-write to KnowledgeStore when category is "knowledge_entry"
+    if (category === "knowledge_entry" && this.state.knowledgeStore) {
+      try {
+        const parsed = JSON.parse(value) as {
+          title?: string;
+          solution?: string;
+          symptoms?: string;
+          rootCause?: string;
+          tags?: string[];
+          projectId?: string;
+        };
+        if (parsed.title && parsed.solution) {
+          // Derive projectId from parsed value, session metadata, or fallback to key
+          const projectId = parsed.projectId ?? "default";
+
+          // Build ingest entry with only defined properties (exactOptionalPropertyTypes)
+          const knowledgeIngestEntry: Omit<import("../../knowledge/index.js").KnowledgeEntry, "id" | "createdAt" | "updatedAt"> = {
+            projectId,
+            title: parsed.title,
+            solution: parsed.solution,
+            tags: parsed.tags ?? [],
+          };
+          if (parsed.symptoms !== undefined) {
+            knowledgeIngestEntry.symptoms = parsed.symptoms;
+          }
+          if (parsed.rootCause !== undefined) {
+            knowledgeIngestEntry.rootCause = parsed.rootCause;
+          }
+          this.state.knowledgeStore.ingest(knowledgeIngestEntry);
+        }
+      } catch (knowledgeError) {
+        console.warn(
+          "[ContextToolModule] Knowledge dual-write failed:",
+          knowledgeError instanceof Error ? knowledgeError.message : String(knowledgeError)
+        );
+      }
+    }
+
     const result: Record<string, unknown> = {
       success: true,
       memoryId: savedMemory.id,
       key: args.key,
     };
+
+    // Surface evidence gate warnings
+    if (warnings.length > 0) {
+      result.warnings = warnings;
+    }
 
     // Include entityIds in response when extraction was performed
     if (shouldExtract) {

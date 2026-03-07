@@ -10,6 +10,8 @@
  */
 
 import { Database, Statement } from "bun:sqlite";
+import { SemanticCompressor } from "./SemanticCompressor.js";
+import type { Memory } from "../types/index.js";
 
 // ============================================================================
 // Types
@@ -478,11 +480,11 @@ export class RelevanceEngine {
    * Process:
    * 1. Find stale memories (low relevance + old enough)
    * 2. Group by channel/category (from event payloads)
-   * 3. Create digest entries (summary of archived memories)
+   * 3. Create digest entries using SemanticCompressor (LLM when available, heuristic fallback)
    * 4. Move originals to archived_memories table
    * 5. Remove from memory_relevance
    */
-  consolidate(options?: ConsolidateOptions): ConsolidationResult {
+  async consolidate(options?: ConsolidateOptions): Promise<ConsolidationResult> {
     const maxScore = options?.maxScore ?? this.config.staleThreshold;
     const minDaysOld = options?.minDaysOld ?? this.config.minDaysForConsolidation;
 
@@ -516,30 +518,62 @@ export class RelevanceEngine {
     let archivedCount = 0;
     let digestsCreated = 0;
 
-    const consolidateTransaction = this.db.transaction(() => {
-      for (const [groupKey, members] of groups.entries()) {
-        // Process in chunks of maxPerDigest
-        for (let i = 0; i < members.length; i += this.config.maxPerDigest) {
-          const chunk = members.slice(i, i + this.config.maxPerDigest);
-          const digestKey = `digest::${groupKey}::${new Date().toISOString()}::${i}`;
+    // Attempt LLM-powered compression via SemanticCompressor
+    const compressor = new SemanticCompressor();
 
-          // Build digest value from chunk
-          const digestParts: string[] = [];
-          for (const { payload } of chunk) {
-            const key = payload.key ?? "unknown";
-            const value = payload.value ?? "";
-            const truncatedValue =
-              value.length > 200 ? value.substring(0, 200) + "..." : value;
-            digestParts.push(`- ${key}: ${truncatedValue}`);
+    for (const [groupKey, members] of groups.entries()) {
+      // Process in chunks of maxPerDigest
+      for (let i = 0; i < members.length; i += this.config.maxPerDigest) {
+        const chunk = members.slice(i, i + this.config.maxPerDigest);
+        const digestKey = `digest::${groupKey}::${new Date().toISOString()}::${i}`;
+
+        // Build Memory-like objects from payloads for the compressor
+        const memoryLikes: Memory[] = chunk.map(({ stale, payload }) => {
+          const mem: Memory = {
+            id: stale.memoryId,
+            key: payload.key ?? "unknown",
+            value: payload.value ?? "",
+            sessionId: payload.sessionId ?? "unknown",
+            priority: (payload.priority ?? "normal") as Memory["priority"],
+            privacy: "session" as Memory["privacy"],
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            metadata: {},
+          };
+          if (typeof payload.category === "string") {
+            mem.category = payload.category;
           }
-
-          let digestValue = digestParts.join("\n");
-          if (digestValue.length > this.config.maxDigestLength) {
-            digestValue =
-              digestValue.substring(0, this.config.maxDigestLength - 3) + "...";
+          if (payload.channel !== undefined) {
+            mem.channel = payload.channel;
           }
+          return mem;
+        });
 
-          // Archive each memory in this chunk
+        let digestValue: string;
+
+        try {
+          const result = await compressor.compress(memoryLikes);
+          if (result.facts.length > 0) {
+            digestValue = result.facts.join("\n");
+          } else {
+            // Fallback to simple truncation if compressor returns no facts
+            digestValue = this.buildHeuristicDigest(chunk);
+          }
+        } catch (compressError) {
+          console.warn(
+            `[RelevanceEngine] Semantic compression failed, falling back to heuristic:`,
+            compressError instanceof Error ? compressError.message : String(compressError)
+          );
+          digestValue = this.buildHeuristicDigest(chunk);
+        }
+
+        if (digestValue.length > this.config.maxDigestLength) {
+          digestValue =
+            digestValue.substring(0, this.config.maxDigestLength - 3) + "...";
+        }
+
+        // Archive each memory in this chunk (synchronous SQLite transaction)
+        const archiveTransaction = this.db.transaction(() => {
           for (const { stale, payload } of chunk) {
             this.stmtInsertArchive.run({
               $memoryId: stale.memoryId,
@@ -554,15 +588,32 @@ export class RelevanceEngine {
             this.stmtDeleteRelevance.run({ $memoryId: stale.memoryId });
             archivedCount++;
           }
+        });
 
-          digestsCreated++;
-        }
+        archiveTransaction();
+        digestsCreated++;
       }
-    });
-
-    consolidateTransaction();
+    }
 
     return { archivedCount, digestsCreated };
+  }
+
+  /**
+   * Build a heuristic digest value by truncating memory payloads.
+   * Used as fallback when SemanticCompressor is unavailable or fails.
+   */
+  private buildHeuristicDigest(
+    chunk: Array<{ stale: StaleMemory; payload: ParsedMemoryPayload }>
+  ): string {
+    const digestParts: string[] = [];
+    for (const { payload } of chunk) {
+      const key = payload.key ?? "unknown";
+      const value = payload.value ?? "";
+      const truncatedValue =
+        value.length > 200 ? value.substring(0, 200) + "..." : value;
+      digestParts.push(`- ${key}: ${truncatedValue}`);
+    }
+    return digestParts.join("\n");
   }
 
   /**

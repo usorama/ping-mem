@@ -10,6 +10,7 @@
 
 import { EventStore, createInMemoryEventStore } from "../storage/EventStore.js";
 import { VectorIndex } from "../search/VectorIndex.js";
+import type { WriteLockManager } from "../storage/WriteLockManager.js";
 import type {
   Memory,
   MemoryId,
@@ -22,8 +23,12 @@ import type {
   SessionId,
   PingMemError,
   MemoryNotFoundError,
+  AgentId,
+  AgentMemoryScope,
 } from "../types/index.js";
+import { QuotaExhaustedError } from "../types/agent-errors.js";
 import type { RelevanceEngine } from "./RelevanceEngine.js";
+import type { MemoryPubSub } from "../pubsub/index.js";
 import * as crypto from "crypto";
 
 // ============================================================================
@@ -48,6 +53,14 @@ export interface MemoryManagerConfig {
   defaultPrivacy?: MemoryPrivacy;
   /** Optional relevance engine for automatic tracking (auto-calls ensureTracking/trackAccess) */
   relevanceEngine?: RelevanceEngine;
+  /** Agent identity for multi-agent scoping (optional — omit for legacy/unscoped usage) */
+  agentId?: AgentId;
+  /** Agent role for role-scoped memory visibility (optional) */
+  agentRole?: string;
+  /** Write lock manager for multi-agent concurrency control (optional) */
+  writeLockManager?: WriteLockManager;
+  /** PubSub bus for broadcasting memory change events (optional) */
+  pubsub?: MemoryPubSub;
 }
 
 /**
@@ -70,6 +83,10 @@ export interface SaveMemoryOptions {
   createdAt?: Date;
   /** Custom updatedAt timestamp (for migration, defaults to now) */
   updatedAt?: Date;
+  /** Agent identity for multi-agent ownership (overrides config agentId) */
+  agentId?: AgentId;
+  /** Visibility scope for multi-agent access control (defaults to "public") */
+  agentScope?: AgentMemoryScope;
 }
 
 /**
@@ -147,6 +164,12 @@ export class MemoryManager {
   private memoriesById: Map<MemoryId, Memory>;
   private relevanceEngine: RelevanceEngine | null;
 
+  // Multi-agent fields
+  private agentId: AgentId | undefined;
+  private agentRole: string | undefined;
+  private writeLockManager: WriteLockManager | undefined;
+  private pubsub: MemoryPubSub | undefined;
+
   constructor(config: MemoryManagerConfig) {
     if (!config.sessionId) {
       throw new InvalidSessionError("undefined");
@@ -161,6 +184,61 @@ export class MemoryManager {
     this.memories = new Map();
     this.memoriesById = new Map();
     this.relevanceEngine = config.relevanceEngine ?? null;
+    this.agentId = config.agentId;
+    this.agentRole = config.agentRole;
+    this.writeLockManager = config.writeLockManager;
+    this.pubsub = config.pubsub;
+  }
+
+  // ========== Multi-Agent Scope Helpers ==========
+
+  /**
+   * Check whether the current agent (identified by this.agentId and this.agentRole)
+   * is allowed to read a memory based on its agentScope.
+   *
+   * Scope rules:
+   * - "public" or undefined (no scope): visible to everyone (backward compat)
+   * - "shared": visible to all registered agents (requires this.agentId to be set, or legacy = pass)
+   * - "role": visible to agents with the same role as the memory owner
+   * - "private": visible only to the owning agentId
+   */
+  private isVisibleToCurrentAgent(memory: Memory): boolean {
+    const scope = memory.agentScope;
+
+    // No scope or "public" — visible to everyone (backward compat)
+    if (!scope || scope === "public") {
+      return true;
+    }
+
+    // If the current manager has no agentId (legacy usage), only see public/unscoped
+    if (!this.agentId) {
+      return false;
+    }
+
+    // Owner always sees their own memories regardless of scope
+    if (memory.agentId === this.agentId) {
+      return true;
+    }
+
+    switch (scope) {
+      case "shared":
+        // All registered agents can see shared memories (agentId is set = registered)
+        return true;
+
+      case "role": {
+        // Visible to agents with the same role. The memory's owner role is
+        // stored in metadata (set during save) or looked up from agent_quotas.
+        const memoryOwnerRole = memory.metadata?.agentRole as string | undefined;
+        return !!this.agentRole && !!memoryOwnerRole && this.agentRole === memoryOwnerRole;
+      }
+
+      case "private":
+        // Only the owning agent (already checked above)
+        return false;
+
+      default:
+        return false;
+    }
   }
 
   /**
@@ -209,6 +287,12 @@ export class MemoryManager {
             }
             if (payload.memory.embedding !== undefined) {
               memory.embedding = payload.memory.embedding;
+            }
+            if (payload.memory.agentId !== undefined) {
+              memory.agentId = payload.memory.agentId;
+            }
+            if (payload.memory.agentScope !== undefined) {
+              memory.agentScope = payload.memory.agentScope;
             }
 
             // Store in cache
@@ -299,105 +383,256 @@ export class MemoryManager {
    * Save a new memory
    */
   async save(key: string, value: string, options: SaveMemoryOptions = {}): Promise<Memory> {
-    // Check if key already exists
-    if (this.memories.has(key)) {
-      throw new MemoryKeyExistsError(key);
+    const effectiveAgentId = options.agentId ?? this.agentId;
+
+    // Acquire write lock BEFORE existence check to prevent TOCTOU race:
+    // Without the lock, another concurrent save could insert between has() and set().
+    if (this.writeLockManager && effectiveAgentId) {
+      this.writeLockManager.acquireLock(key, effectiveAgentId);
     }
 
-    const now = new Date();
-    const memoryId = this.generateUUID();
-
-    const memory: Memory = {
-      id: memoryId,
-      key,
-      value,
-      sessionId: this.sessionId,
-      priority: options.priority ?? this.defaultPriority,
-      privacy: options.privacy ?? this.defaultPrivacy,
-      createdAt: options.createdAt ?? now,
-      updatedAt: options.updatedAt ?? now,
-      metadata: options.metadata ?? {},
-    };
-
-    // Set optional properties only if defined
-    if (options.category !== undefined) {
-      memory.category = options.category;
-    }
-    if (options.channel !== undefined) {
-      memory.channel = options.channel;
-    } else if (this.defaultChannel !== undefined) {
-      memory.channel = this.defaultChannel;
-    }
-
-    if (options.embedding) {
-      memory.embedding = options.embedding;
-    }
-
-    // Store in cache
-    this.memories.set(key, memory);
-    this.memoriesById.set(memoryId, memory);
-
-    // Create event for audit trail with full memory data for hydration
-    const memoryData: Partial<Omit<Memory, "id">> = {
-      key,
-      value,
-      sessionId: this.sessionId,
-      priority: memory.priority,
-      privacy: memory.privacy,
-      createdAt: memory.createdAt,
-      updatedAt: memory.updatedAt,
-      metadata: memory.metadata,
-    };
-
-    // Only include optional properties if they're defined
-    if (memory.category !== undefined) {
-      memoryData.category = memory.category;
-    }
-    if (memory.channel !== undefined) {
-      memoryData.channel = memory.channel;
-    }
-
-    const eventData: MemoryEventData = {
-      memoryId,
-      key,
-      sessionId: this.sessionId,
-      operation: "save",
-      memory: memoryData,
-    };
-
-    await this.eventStore.createEvent(this.sessionId, "MEMORY_SAVED", eventData, {
-      category: options.category,
-      priority: memory.priority,
-      channel: memory.channel,
-    });
-
-    // Auto-track relevance if engine is available
-    if (this.relevanceEngine) {
-      try {
-        this.relevanceEngine.ensureTracking(memoryId, memory.priority, memory.category);
-      } catch (error) {
-        console.warn("[MemoryManager] Relevance tracking failed:", error instanceof Error ? error.message : String(error));
+    try {
+      // Check if key already exists inside the lock-protected section.
+      // Use raw Map check (not scope-aware) to prevent cross-agent key collision:
+      // If agentA has private key "foo", agentB's scope-aware has() would return false,
+      // but save() would overwrite agentA's memory in the Map. Raw check prevents this.
+      if (this.memories.has(key)) {
+        throw new MemoryKeyExistsError(key);
       }
-    }
 
-    // Store in vector index if embedding provided
-    if (this.vectorIndex && options.embedding) {
-      const vectorData: Parameters<typeof this.vectorIndex.storeVector>[0] = {
-        memoryId,
+      // Quota fast-fail check: read current usage to reject obviously over-quota requests early.
+      // The actual enforcement happens atomically after event creation (see atomic UPDATE below).
+      // hasQuotaRow tracks whether the agent is registered — unregistered agents bypass quotas.
+      let hasQuotaRow = false;
+      if (effectiveAgentId) {
+        const db = this.eventStore.getDatabase();
+        const quotaRow = db
+          .prepare(
+            "SELECT current_bytes, current_count, quota_bytes, quota_count FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
+          )
+          .get({ $agent_id: effectiveAgentId, $now: new Date().toISOString() }) as
+          | { current_bytes: number; current_count: number; quota_bytes: number; quota_count: number }
+          | undefined;
+
+        // If no quota row found and an agent was specified, the agent is expired or unregistered
+        if (!quotaRow) {
+          // Check if the agent exists but is expired (vs never registered — which has no quota row)
+          const expiredRow = db
+            .prepare(
+              "SELECT agent_id FROM agent_quotas WHERE agent_id = $agent_id"
+            )
+            .get({ $agent_id: effectiveAgentId }) as { agent_id: string } | undefined;
+          if (expiredRow) {
+            throw new MemoryManagerError(
+              `Agent "${effectiveAgentId}" registration has expired`,
+              "AGENT_EXPIRED",
+              { agentId: effectiveAgentId }
+            );
+          }
+          // Agent is not registered — no quota enforcement
+        }
+
+        if (quotaRow) {
+          hasQuotaRow = true;
+          const valueBytes = new TextEncoder().encode(value).byteLength;
+          if (quotaRow.current_bytes + valueBytes > quotaRow.quota_bytes) {
+            throw new QuotaExhaustedError(
+              effectiveAgentId,
+              "bytes",
+              quotaRow.current_bytes + valueBytes,
+              quotaRow.quota_bytes
+            );
+          }
+          if (quotaRow.current_count + 1 > quotaRow.quota_count) {
+            throw new QuotaExhaustedError(
+              effectiveAgentId,
+              "count",
+              quotaRow.current_count + 1,
+              quotaRow.quota_count
+            );
+          }
+        }
+      }
+
+      const now = new Date();
+      const memoryId = this.generateUUID();
+
+      const memory: Memory = {
+        id: memoryId,
+        key,
+        value,
         sessionId: this.sessionId,
-        embedding: options.embedding,
-        content: value,
+        priority: options.priority ?? this.defaultPriority,
+        privacy: options.privacy ?? this.defaultPrivacy,
+        createdAt: options.createdAt ?? now,
+        updatedAt: options.updatedAt ?? now,
+        metadata: options.metadata ?? {},
       };
-      if (options.category !== undefined) {
-        vectorData.category = options.category;
-      }
-      if (options.metadata !== undefined) {
-        vectorData.metadata = options.metadata;
-      }
-      await this.vectorIndex.storeVector(vectorData);
-    }
 
-    return memory;
+      // Set agent identity on the memory
+      if (effectiveAgentId !== undefined) {
+        memory.agentId = effectiveAgentId;
+      }
+      memory.agentScope = options.agentScope ?? "public";
+
+      // Store the agent role in metadata for role-scoped visibility checks
+      if (this.agentRole && effectiveAgentId) {
+        memory.metadata = { ...memory.metadata, agentRole: this.agentRole };
+      }
+
+      // Set optional properties only if defined
+      if (options.category !== undefined) {
+        memory.category = options.category;
+      }
+      if (options.channel !== undefined) {
+        memory.channel = options.channel;
+      } else if (this.defaultChannel !== undefined) {
+        memory.channel = this.defaultChannel;
+      }
+
+      if (options.embedding) {
+        memory.embedding = options.embedding;
+      }
+
+      // Atomic quota increment BEFORE event creation to prevent orphaned events.
+      // The WHERE clause ensures the update only succeeds if limits are not exceeded.
+      // If result.changes === 0, another concurrent save pushed us over quota.
+      // Only run when the agent has a registered quota row (unregistered agents bypass quotas).
+      if (effectiveAgentId && hasQuotaRow) {
+        const db = this.eventStore.getDatabase();
+        const valueBytes = new TextEncoder().encode(value).byteLength;
+        const result = db.prepare(
+          `UPDATE agent_quotas
+           SET current_bytes = current_bytes + $bytes, current_count = current_count + 1
+           WHERE agent_id = $agent_id
+             AND current_bytes + $bytes <= quota_bytes
+             AND current_count + 1 <= quota_count`
+        ).run({ $bytes: valueBytes, $agent_id: effectiveAgentId });
+
+        if (result.changes === 0) {
+          // Quota exceeded between fast-fail check and here — no in-memory state to rollback
+          // Re-read actual limits for the error message
+          const row = db.prepare(
+            "SELECT current_bytes, current_count, quota_bytes, quota_count FROM agent_quotas WHERE agent_id = $agent_id"
+          ).get({ $agent_id: effectiveAgentId }) as
+            | { current_bytes: number; current_count: number; quota_bytes: number; quota_count: number }
+            | undefined;
+          throw new QuotaExhaustedError(
+            effectiveAgentId,
+            "bytes",
+            (row?.current_bytes ?? 0) + valueBytes,
+            row?.quota_bytes ?? 0
+          );
+        }
+      }
+
+      // Create event for audit trail with full memory data for hydration
+      const memoryData: Partial<Omit<Memory, "id">> = {
+        key,
+        value,
+        sessionId: this.sessionId,
+        priority: memory.priority,
+        privacy: memory.privacy,
+        createdAt: memory.createdAt,
+        updatedAt: memory.updatedAt,
+        metadata: memory.metadata,
+      };
+
+      // Only include optional properties if they're defined
+      if (memory.category !== undefined) {
+        memoryData.category = memory.category;
+      }
+      if (memory.channel !== undefined) {
+        memoryData.channel = memory.channel;
+      }
+      if (memory.agentId !== undefined) {
+        memoryData.agentId = memory.agentId;
+      }
+      if (memory.agentScope !== undefined) {
+        memoryData.agentScope = memory.agentScope;
+      }
+
+      const eventData: MemoryEventData = {
+        memoryId,
+        key,
+        sessionId: this.sessionId,
+        operation: "save",
+        memory: memoryData,
+      };
+
+      try {
+        await this.eventStore.createEvent(this.sessionId, "MEMORY_SAVED", eventData, {
+          category: options.category,
+          priority: memory.priority,
+          channel: memory.channel,
+        });
+      } catch (eventError) {
+        // EventStore write failed — rollback the quota increment
+        if (effectiveAgentId && hasQuotaRow) {
+          const db = this.eventStore.getDatabase();
+          const valueBytes = new TextEncoder().encode(value).byteLength;
+          db.prepare(
+            "UPDATE agent_quotas SET current_bytes = MAX(0, current_bytes - $bytes), current_count = MAX(0, current_count - 1) WHERE agent_id = $agent_id"
+          ).run({ $bytes: valueBytes, $agent_id: effectiveAgentId });
+        }
+        throw eventError;
+      }
+
+      // Store in cache AFTER successful EventStore write and quota update
+      // to prevent cache inconsistency if either operation fails.
+      this.memories.set(key, memory);
+      this.memoriesById.set(memoryId, memory);
+
+      // Auto-track relevance if engine is available
+      if (this.relevanceEngine) {
+        try {
+          this.relevanceEngine.ensureTracking(memoryId, memory.priority, memory.category);
+        } catch (error) {
+          console.warn("[MemoryManager] Relevance tracking failed:", error instanceof Error ? error.message : String(error));
+        }
+      }
+
+      // Store in vector index if embedding provided
+      if (this.vectorIndex && options.embedding) {
+        const vectorData: Parameters<typeof this.vectorIndex.storeVector>[0] = {
+          memoryId,
+          sessionId: this.sessionId,
+          embedding: options.embedding,
+          content: value,
+        };
+        if (options.category !== undefined) {
+          vectorData.category = options.category;
+        }
+        if (options.metadata !== undefined) {
+          vectorData.metadata = options.metadata;
+        }
+        await this.vectorIndex.storeVector(vectorData);
+      }
+
+      // Publish memory save event via PubSub
+      if (this.pubsub) {
+        const pubsubEvent: import("../pubsub/index.js").MemoryEvent = {
+          type: "save",
+          key,
+          timestamp: new Date().toISOString(),
+          value,
+        };
+        if (options.category !== undefined) pubsubEvent.category = options.category;
+        const effectiveChannel = options.channel ?? this.defaultChannel;
+        if (effectiveChannel !== undefined) pubsubEvent.channel = effectiveChannel;
+        if (effectiveAgentId !== undefined) pubsubEvent.agentId = effectiveAgentId;
+        if (options.agentScope !== undefined) pubsubEvent.agentScope = options.agentScope;
+        if (this.agentRole !== undefined) pubsubEvent.agentRole = this.agentRole;
+        this.pubsub.publish(pubsubEvent);
+      }
+
+      return memory;
+    } finally {
+      // Release write lock if acquired
+      if (this.writeLockManager && effectiveAgentId) {
+        this.writeLockManager.releaseLock(key, effectiveAgentId);
+      }
+    }
   }
 
   /**
@@ -408,8 +643,7 @@ export class MemoryManager {
    * migration with --force will not preserve original timestamps on updates.
    */
   async saveOrUpdate(key: string, value: string, options: SaveMemoryOptions = {}): Promise<Memory> {
-    const existing = this.memories.get(key);
-    if (existing) {
+    if (this.has(key)) {  // scope-aware check
       return this.update(key, { value, ...options });
     }
     return this.save(key, value, options);
@@ -424,46 +658,114 @@ export class MemoryManager {
       throw new MemoryKeyNotFoundError(key);
     }
 
+    // Enforce write authorization: only owner or public memories can be updated
+    if (!this.isVisibleToCurrentAgent(existing)) {
+      throw new MemoryKeyNotFoundError(key);
+    }
+    // Prevent non-agent managers from modifying agent-owned memories
+    if (existing.agentId && !this.agentId) {
+      throw new MemoryKeyNotFoundError(key);
+    }
+    if (existing.agentId && this.agentId && existing.agentId !== this.agentId) {
+      throw new MemoryKeyNotFoundError(key); // Don't reveal existence to non-owner
+    }
+
+    // Acquire write lock for update operations
+    const lockHolder = this.agentId ?? existing.agentId;
+    if (this.writeLockManager && lockHolder) {
+      this.writeLockManager.acquireLock(key, lockHolder);
+    }
+
+    try {
+
+    // Quota delta check: if value is changing, verify byte quota allows growth
+    const encoder = new TextEncoder();
+    const oldBytes = encoder.encode(existing.value).byteLength;
+    const newBytes = options.value !== undefined ? encoder.encode(options.value).byteLength : oldBytes;
+    const bytesDelta = newBytes - oldBytes;
+
+    // Determine if agent has a quota row (unregistered agents bypass quotas)
+    let hasQuotaRow = false;
+    if (existing.agentId) {
+      const db = this.eventStore.getDatabase();
+      const quotaRow = db
+        .prepare(
+          "SELECT current_bytes, quota_bytes FROM agent_quotas WHERE agent_id = $agent_id"
+        )
+        .get({ $agent_id: existing.agentId }) as
+        | { current_bytes: number; quota_bytes: number }
+        | undefined;
+      if (quotaRow) {
+        hasQuotaRow = true;
+        if (bytesDelta > 0 && quotaRow.current_bytes + bytesDelta > quotaRow.quota_bytes) {
+          throw new QuotaExhaustedError(
+            existing.agentId,
+            "bytes",
+            quotaRow.current_bytes + bytesDelta,
+            quotaRow.quota_bytes
+          );
+        }
+      }
+    }
+
+    // Atomic quota adjustment BEFORE event creation to prevent phantom events.
+    // If quota guard fails, no event is written.
+    if (bytesDelta !== 0 && existing.agentId && hasQuotaRow) {
+      const db = this.eventStore.getDatabase();
+      if (bytesDelta > 0) {
+        // Growing: atomic guard to prevent exceeding quota
+        const result = db.prepare(
+          "UPDATE agent_quotas SET current_bytes = current_bytes + $delta WHERE agent_id = $agent_id AND current_bytes + $delta <= quota_bytes"
+        ).run({ $delta: bytesDelta, $agent_id: existing.agentId });
+        if (result.changes === 0) {
+          // Quota exceeded between fast-fail check and here
+          const row = db.prepare(
+            "SELECT current_bytes, quota_bytes FROM agent_quotas WHERE agent_id = $agent_id"
+          ).get({ $agent_id: existing.agentId }) as
+            | { current_bytes: number; quota_bytes: number }
+            | undefined;
+          throw new QuotaExhaustedError(
+            existing.agentId,
+            "bytes",
+            (row?.current_bytes ?? 0) + bytesDelta,
+            row?.quota_bytes ?? 0
+          );
+        }
+      } else {
+        // Shrinking: always allow, floor at 0
+        db.prepare(
+          "UPDATE agent_quotas SET current_bytes = MAX(0, current_bytes + $delta) WHERE agent_id = $agent_id"
+        ).run({ $delta: bytesDelta, $agent_id: existing.agentId });
+      }
+    }
+
     const now = new Date();
 
-    // Update fields
-    if (options.value !== undefined) {
-      existing.value = options.value;
-    }
-    if (options.category !== undefined) {
-      existing.category = options.category;
-    }
-    if (options.priority !== undefined) {
-      existing.priority = options.priority;
-    }
-    if (options.channel !== undefined) {
-      existing.channel = options.channel;
-    }
-    if (options.metadata !== undefined) {
-      existing.metadata = { ...existing.metadata, ...options.metadata };
-    }
-    if (options.embedding !== undefined) {
-      existing.embedding = options.embedding;
-    }
-    existing.updatedAt = now;
+    // Build new values without mutating existing — only apply after all writes succeed
+    const newValue = options.value !== undefined ? options.value : existing.value;
+    const newCategory = options.category !== undefined ? options.category : existing.category;
+    const newPriority = options.priority !== undefined ? options.priority : existing.priority;
+    const newChannel = options.channel !== undefined ? options.channel : existing.channel;
+    const newMetadata = options.metadata !== undefined ? { ...existing.metadata, ...options.metadata } : existing.metadata;
+    const newEmbedding = options.embedding !== undefined ? options.embedding : existing.embedding;
 
     // Create event for audit trail with updated memory data for hydration
     const memoryData: Partial<Omit<Memory, "id">> = {
-      value: existing.value,
-      priority: existing.priority,
-      updatedAt: existing.updatedAt,
-      metadata: existing.metadata,
+      value: newValue,
+      priority: newPriority,
+      updatedAt: now,
+      metadata: newMetadata,
     };
 
     // Only include optional properties if they're defined
-    if (existing.category !== undefined) {
-      memoryData.category = existing.category;
+    if (newCategory !== undefined) {
+      memoryData.category = newCategory;
     }
-    if (existing.channel !== undefined) {
-      memoryData.channel = existing.channel;
+    if (newChannel !== undefined) {
+      memoryData.channel = newChannel;
     }
-    if (existing.embedding !== undefined) {
-      memoryData.embedding = existing.embedding;
+    if (newEmbedding !== undefined) {
+      memoryData.embedding = newEmbedding;
     }
 
     const eventData: MemoryEventData = {
@@ -474,10 +776,30 @@ export class MemoryManager {
       memory: memoryData,
     };
 
-    await this.eventStore.createEvent(this.sessionId, "MEMORY_UPDATED", eventData, {
-      category: existing.category,
-      priority: existing.priority,
-    });
+    try {
+      await this.eventStore.createEvent(this.sessionId, "MEMORY_UPDATED", eventData, {
+        category: newCategory,
+        priority: newPriority,
+      });
+    } catch (eventError) {
+      // EventStore write failed — rollback the quota adjustment
+      if (bytesDelta !== 0 && existing.agentId && hasQuotaRow) {
+        const db = this.eventStore.getDatabase();
+        db.prepare(
+          "UPDATE agent_quotas SET current_bytes = MAX(0, current_bytes + $delta) WHERE agent_id = $agent_id"
+        ).run({ $delta: -bytesDelta, $agent_id: existing.agentId });
+      }
+      throw eventError;
+    }
+
+    // Apply changes to the in-memory object AFTER successful EventStore write
+    existing.value = newValue;
+    if (newCategory !== undefined) existing.category = newCategory;
+    existing.priority = newPriority;
+    if (newChannel !== undefined) existing.channel = newChannel;
+    existing.metadata = newMetadata;
+    if (newEmbedding !== undefined) existing.embedding = newEmbedding;
+    existing.updatedAt = now;
 
     // Update vector index if embedding changed
     if (this.vectorIndex && options.embedding) {
@@ -497,6 +819,12 @@ export class MemoryManager {
     }
 
     return existing;
+    } finally {
+      // Release write lock if acquired
+      if (this.writeLockManager && lockHolder) {
+        this.writeLockManager.releaseLock(key, lockHolder);
+      }
+    }
   }
 
   /**
@@ -508,29 +836,80 @@ export class MemoryManager {
       return false;
     }
 
-    // Remove from caches
-    this.memories.delete(key);
-    this.memoriesById.delete(existing.id);
-
-    // Create event for audit trail
-    const eventData: MemoryEventData = {
-      memoryId: existing.id,
-      key,
-      sessionId: this.sessionId,
-      operation: "delete",
-    };
-
-    await this.eventStore.createEvent(this.sessionId, "MEMORY_DELETED", eventData, {
-      category: existing.category,
-      priority: existing.priority,
-    });
-
-    // Remove from vector index
-    if (this.vectorIndex) {
-      await this.vectorIndex.deleteVector(existing.id);
+    // Enforce write authorization: only owner or public memories can be deleted
+    if (!this.isVisibleToCurrentAgent(existing)) {
+      return false;
+    }
+    // Prevent non-agent managers from deleting agent-owned memories
+    if (existing.agentId && !this.agentId) {
+      return false;
+    }
+    if (existing.agentId && this.agentId && existing.agentId !== this.agentId) {
+      return false; // Don't reveal existence to non-owner
     }
 
-    return true;
+    // Acquire write lock for delete operations
+    const lockHolder = this.agentId ?? existing.agentId;
+    if (this.writeLockManager && lockHolder) {
+      this.writeLockManager.acquireLock(key, lockHolder);
+    }
+
+    try {
+      // Create event for audit trail BEFORE cache mutation.
+      // If EventStore write fails, cache remains consistent with persisted state.
+      const eventData: MemoryEventData = {
+        memoryId: existing.id,
+        key,
+        sessionId: this.sessionId,
+        operation: "delete",
+      };
+
+      await this.eventStore.createEvent(this.sessionId, "MEMORY_DELETED", eventData, {
+        category: existing.category,
+        priority: existing.priority,
+      });
+
+      // Remove from caches AFTER successful EventStore write
+      this.memories.delete(key);
+      this.memoriesById.delete(existing.id);
+
+      // Remove from vector index
+      if (this.vectorIndex) {
+        await this.vectorIndex.deleteVector(existing.id);
+      }
+
+      // Decrement agent quota usage
+      if (existing.agentId) {
+        const db = this.eventStore.getDatabase();
+        const valueBytes = new TextEncoder().encode(existing.value).byteLength;
+        db.prepare(
+          "UPDATE agent_quotas SET current_bytes = MAX(0, current_bytes - $bytes), current_count = MAX(0, current_count - 1) WHERE agent_id = $agent_id"
+        ).run({ $bytes: valueBytes, $agent_id: existing.agentId });
+      }
+
+      // Publish memory delete event via PubSub
+      if (this.pubsub) {
+        const pubsubEvent: import("../pubsub/index.js").MemoryEvent = {
+          type: "delete",
+          key,
+          timestamp: new Date().toISOString(),
+        };
+        if (existing.category !== undefined) pubsubEvent.category = existing.category;
+        if (existing.channel !== undefined) pubsubEvent.channel = existing.channel;
+        if (existing.agentId !== undefined) pubsubEvent.agentId = existing.agentId;
+        if (existing.agentScope !== undefined) pubsubEvent.agentScope = existing.agentScope;
+        const ownerRole = existing.metadata?.agentRole as string | undefined;
+        if (ownerRole !== undefined) pubsubEvent.agentRole = ownerRole;
+        this.pubsub.publish(pubsubEvent);
+      }
+
+      return true;
+    } finally {
+      // Release write lock if acquired
+      if (this.writeLockManager && lockHolder) {
+        this.writeLockManager.releaseLock(key, lockHolder);
+      }
+    }
   }
 
   // ========== Read Operations ==========
@@ -540,6 +919,12 @@ export class MemoryManager {
    */
   get(key: string): Memory | null {
     const memory = this.memories.get(key) ?? null;
+
+    // Scope enforcement: filter out memories not visible to the current agent
+    if (memory && !this.isVisibleToCurrentAgent(memory)) {
+      return null;
+    }
+
     // Auto-track access for relevance
     if (memory && this.relevanceEngine) {
       try {
@@ -555,14 +940,20 @@ export class MemoryManager {
    * Get a memory by ID
    */
   getById(memoryId: MemoryId): Memory | null {
-    return this.memoriesById.get(memoryId) ?? null;
+    const memory = this.memoriesById.get(memoryId) ?? null;
+    if (memory && !this.isVisibleToCurrentAgent(memory)) {
+      return null;
+    }
+    return memory;
   }
 
   /**
    * Check if a memory exists
    */
   has(key: string): boolean {
-    return this.memories.has(key);
+    const memory = this.memories.get(key);
+    if (!memory) return false;
+    return this.isVisibleToCurrentAgent(memory);
   }
 
   /**
@@ -570,6 +961,9 @@ export class MemoryManager {
    */
   list(options: { limit?: number; category?: MemoryCategory; channel?: string } = {}): Memory[] {
     let memories = Array.from(this.memories.values());
+
+    // Scope enforcement: filter to only visible memories
+    memories = memories.filter((m) => this.isVisibleToCurrentAgent(m));
 
     // Filter by category
     if (options.category) {
@@ -603,7 +997,7 @@ export class MemoryManager {
     // Exact key match
     if (query.key) {
       const memory = this.memories.get(query.key);
-      if (memory) {
+      if (memory && this.isVisibleToCurrentAgent(memory)) {
         results.push({ memory, score: 1.0 });
       }
 
@@ -621,18 +1015,22 @@ export class MemoryManager {
 
     // Pattern matching
     if (query.keyPattern) {
-      const pattern = new RegExp(
-        query.keyPattern.replace(/\*/g, ".*").replace(/\?/g, ".")
-      );
+      const escaped = query.keyPattern
+        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, ".*")
+        .replace(/\?/g, ".");
+      const pattern = new RegExp(`^${escaped}$`);
       for (const memory of this.memories.values()) {
-        if (pattern.test(memory.key)) {
+        if (pattern.test(memory.key) && this.isVisibleToCurrentAgent(memory)) {
           results.push({ memory, score: 1.0 });
         }
       }
     } else {
-      // Get all memories for filtering
+      // Get all memories for filtering — apply scope enforcement
       for (const memory of this.memories.values()) {
-        results.push({ memory, score: 1.0 });
+        if (this.isVisibleToCurrentAgent(memory)) {
+          results.push({ memory, score: 1.0 });
+        }
       }
     }
 
@@ -732,7 +1130,7 @@ export class MemoryManager {
     // Map vector results to memory query results
     const results: MemoryQueryResult[] = [];
     for (const vr of vectorResults) {
-      const memory = this.memoriesById.get(vr.memoryId);
+      const memory = this.getById(vr.memoryId);
       if (memory) {
         results.push({
           memory,
@@ -794,6 +1192,8 @@ export class MemoryManager {
       }
       // Skip excluded keys
       if (excludeKeys.has(memory.key)) continue;
+      // Scope enforcement: skip memories not visible to current agent
+      if (!this.isVisibleToCurrentAgent(memory)) continue;
 
       // Score by keyword overlap
       const memoryText = `${memory.key} ${memory.value}`.toLowerCase();
@@ -908,6 +1308,16 @@ export class MemoryManager {
           if (memData.channel !== undefined) {
             reconstructed.channel = memData.channel;
           }
+          if (memData.agentId !== undefined) {
+            reconstructed.agentId = memData.agentId;
+          }
+          if (memData.agentScope !== undefined) {
+            reconstructed.agentScope = memData.agentScope;
+          }
+
+          // Scope enforcement: skip memories not visible to current agent
+          if (!this.isVisibleToCurrentAgent(reconstructed)) continue;
+
           scored.push({ memory: reconstructed, score });
         }
       } catch (error) {
@@ -983,6 +1393,11 @@ export class MemoryManager {
    */
   getEventStore(): EventStore {
     return this.eventStore;
+  }
+
+  /** Get the agent ID configured for this manager */
+  getAgentId(): AgentId | undefined {
+    return this.agentId;
   }
 
   /**

@@ -33,11 +33,12 @@ import {
   SummaryCache,
 } from "../diagnostics/index.js";
 import type { FindingInput } from "../diagnostics/types.js";
-import type {
-  SessionId,
-  MemoryCategory,
-  MemoryPriority,
-  MemoryPrivacy,
+import {
+  createAgentId,
+  type SessionId,
+  type MemoryCategory,
+  type MemoryPriority,
+  type MemoryPrivacy,
 } from "../types/index.js";
 
 import type {
@@ -49,6 +50,7 @@ import type {
   CheckpointRequest,
 } from "./types.js";
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
+import { MemoryPubSub } from "../pubsub/index.js";
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
@@ -61,7 +63,11 @@ import {
   DiagnosticsDiffSchema,
   DiagnosticsSummarizeSchema,
   MemoryConsolidateSchema,
+  AgentRegisterSchema,
+  KnowledgeSearchSchema,
+  KnowledgeIngestSchema,
 } from "../validation/api-schemas.js";
+import { KnowledgeStore } from "../knowledge/index.js";
 
 // ============================================================================
 // REST Server Class
@@ -89,12 +95,15 @@ export class RESTPingMemServer {
   private sessionManager: SessionManager;
   private vectorIndex: VectorIndex | null = null;
   private memoryManagers: Map<SessionId, MemoryManager> = new Map();
+  private managerPromises: Map<string, Promise<MemoryManager>> = new Map();
   private currentSessionId: SessionId | null = null;
   private graphManager: GraphManager | null = null;
   private hybridSearchEngine: HybridSearchEngine | null = null;
   private diagnosticsStore: DiagnosticsStore;
   private summaryGenerator: SummaryGenerator | null = null;
   private relevanceEngine: RelevanceEngine;
+  private pubsub: MemoryPubSub;
+  private knowledgeStore: KnowledgeStore;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -108,6 +117,8 @@ export class RESTPingMemServer {
     this.eventStore = new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
     this.sessionManager = new SessionManager({ eventStore: this.eventStore });
     this.relevanceEngine = new RelevanceEngine(this.eventStore.getDatabase());
+    this.pubsub = new MemoryPubSub();
+    this.knowledgeStore = new KnowledgeStore(this.eventStore.getDatabase());
     this.diagnosticsStore =
       this.config.diagnosticsStore ??
       new DiagnosticsStore({
@@ -296,6 +307,7 @@ export class RESTPingMemServer {
         const memoryConfig: MemoryManagerConfig = {
           eventStore: this.eventStore,
           sessionId: session.id,
+          pubsub: this.pubsub,
         };
 
         if (this.vectorIndex) {
@@ -342,7 +354,8 @@ export class RESTPingMemServer {
 
     this.app.get("/api/v1/session/list", async (c) => {
       try {
-        const limit = parseInt(c.req.query("limit") ?? "10");
+        const rawLimit = parseInt(c.req.query("limit") ?? "10", 10);
+        const limit = Number.isNaN(rawLimit) ? 10 : Math.min(Math.max(rawLimit, 1), 1000);
         const sessions = this.sessionManager.listSessions().slice(0, limit);
 
         return c.json<RESTSuccessResponse<typeof sessions>>({
@@ -379,7 +392,7 @@ export class RESTPingMemServer {
           );
         }
 
-        const memoryManager = this.getMemoryManager(sessionId);
+        const memoryManager = await this.getMemoryManager(sessionId);
 
         // Build options, excluding undefined values
         const options: Record<string, unknown> = {};
@@ -498,7 +511,8 @@ export class RESTPingMemServer {
           let sarifPayload: unknown;
           try {
             sarifPayload = typeof body.sarif === "string" ? JSON.parse(body.sarif) : body.sarif;
-          } catch {
+          } catch (err) {
+            console.warn("[REST] SARIF parse error:", err instanceof Error ? err.message : String(err));
             return c.json<RESTErrorResponse>(
               { error: "Bad Request", message: "Invalid JSON in sarif field" },
               400
@@ -586,133 +600,151 @@ export class RESTPingMemServer {
     // ============================================================================
 
     this.app.post("/api/v1/codebase/ingest", async (c) => {
-      if (!this.config.ingestionService) {
-        return c.json(
-          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
-          503
-        );
-      }
+      try {
+        if (!this.config.ingestionService) {
+          return c.json(
+            { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
 
-      const parseResult = CodebaseIngestSchema.safeParse(await c.req.json());
-      if (!parseResult.success) {
-        return c.json(
-          { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
-          400
-        );
-      }
-      const projectDir = path.resolve(parseResult.data.projectDir);
-      const forceReingest = parseResult.data.forceReingest;
+        const parseResult = CodebaseIngestSchema.safeParse(await c.req.json());
+        if (!parseResult.success) {
+          return c.json(
+            { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+        const projectDir = path.resolve(parseResult.data.projectDir);
+        const forceReingest = parseResult.data.forceReingest;
 
-      const result = await this.config.ingestionService.ingestProject({
-        projectDir,
-        forceReingest,
-      });
+        const result = await this.config.ingestionService.ingestProject({
+          projectDir,
+          forceReingest,
+        });
 
-      if (result) {
-        if (this.config.adminStore) {
+        if (result) {
+          if (this.config.adminStore) {
+            this.config.adminStore.upsertProject({
+              projectId: result.projectId,
+              projectDir,
+              treeHash: result.treeHash,
+              lastIngestedAt: result.ingestedAt,
+            });
+          }
+          return c.json({ data: result });
+        }
+
+        const verify = await this.config.ingestionService.verifyProject(projectDir);
+        if (verify.projectId && this.config.adminStore) {
           this.config.adminStore.upsertProject({
-            projectId: result.projectId,
+            projectId: verify.projectId,
             projectDir,
-            treeHash: result.treeHash,
-            lastIngestedAt: result.ingestedAt,
+            treeHash: verify.currentTreeHash ?? undefined,
+            lastIngestedAt: new Date().toISOString(),
           });
         }
-        return c.json({ data: result });
-      }
 
-      const verify = await this.config.ingestionService.verifyProject(projectDir);
-      if (verify.projectId && this.config.adminStore) {
-        this.config.adminStore.upsertProject({
-          projectId: verify.projectId,
-          projectDir,
-          treeHash: verify.currentTreeHash ?? undefined,
-          lastIngestedAt: new Date().toISOString(),
+        return c.json({
+          data: {
+            projectId: verify.projectId,
+            treeHash: verify.currentTreeHash,
+            filesIndexed: 0,
+            chunksIndexed: 0,
+            commitsIndexed: 0,
+            ingestedAt: new Date().toISOString(),
+            hadChanges: false,
+          },
         });
+      } catch (error) {
+        return this.handleError(c, error);
       }
-
-      return c.json({
-        data: {
-          projectId: verify.projectId,
-          treeHash: verify.currentTreeHash,
-          filesIndexed: 0,
-          chunksIndexed: 0,
-          commitsIndexed: 0,
-          ingestedAt: new Date().toISOString(),
-          hadChanges: false,
-        },
-      });
     });
 
     this.app.post("/api/v1/codebase/verify", async (c) => {
-      if (!this.config.ingestionService) {
-        return c.json(
-          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
-          503
-        );
+      try {
+        if (!this.config.ingestionService) {
+          return c.json(
+            { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
+        const parseResult = CodebaseVerifySchema.safeParse(await c.req.json());
+        if (!parseResult.success) {
+          return c.json(
+            { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+        const projectDir = path.resolve(parseResult.data.projectDir);
+        const result = await this.config.ingestionService.verifyProject(projectDir);
+        return c.json({ data: result });
+      } catch (error) {
+        return this.handleError(c, error);
       }
-      const parseResult = CodebaseVerifySchema.safeParse(await c.req.json());
-      if (!parseResult.success) {
-        return c.json(
-          { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
-          400
-        );
-      }
-      const projectDir = path.resolve(parseResult.data.projectDir);
-      const result = await this.config.ingestionService.verifyProject(projectDir);
-      return c.json({ data: result });
     });
 
     this.app.get("/api/v1/codebase/search", async (c) => {
-      if (!this.config.ingestionService) {
-        return c.json(
-          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
-          503
-        );
-      }
-      const query = c.req.query("query");
-      if (!query) {
-        return c.json({ error: "BadRequest", message: "query is required" }, 400);
-      }
-      const projectId = c.req.query("projectId");
-      const filePath = c.req.query("filePath");
-      const type = c.req.query("type") as "code" | "comment" | "docstring" | undefined;
-      const limit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
-      const searchOptions: {
-        projectId?: string;
-        filePath?: string;
-        type?: "code" | "comment" | "docstring";
-        limit?: number;
-      } = {};
-      if (projectId) searchOptions.projectId = projectId;
-      if (filePath) searchOptions.filePath = filePath;
-      if (type) searchOptions.type = type;
-      if (limit !== undefined) searchOptions.limit = limit;
+      try {
+        if (!this.config.ingestionService) {
+          return c.json(
+            { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
+        const query = c.req.query("query");
+        if (!query) {
+          return c.json({ error: "BadRequest", message: "query is required" }, 400);
+        }
+        const projectId = c.req.query("projectId");
+        const filePath = c.req.query("filePath");
+        const type = c.req.query("type") as "code" | "comment" | "docstring" | undefined;
+        const rawSearchLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
+        const limit = rawSearchLimit !== undefined ? (Number.isNaN(rawSearchLimit) ? 10 : Math.min(Math.max(rawSearchLimit, 1), 1000)) : undefined;
+        const searchOptions: {
+          projectId?: string;
+          filePath?: string;
+          type?: "code" | "comment" | "docstring";
+          limit?: number;
+        } = {};
+        if (projectId) searchOptions.projectId = projectId;
+        if (filePath) searchOptions.filePath = filePath;
+        if (type) searchOptions.type = type;
+        if (limit !== undefined) searchOptions.limit = limit;
 
-      const results = await this.config.ingestionService.searchCode(query, searchOptions);
-      return c.json({ data: { count: results.length, results } });
+        const results = await this.config.ingestionService.searchCode(query, searchOptions);
+        return c.json({ data: { count: results.length, results } });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
     });
 
     this.app.get("/api/v1/codebase/timeline", async (c) => {
-      if (!this.config.ingestionService) {
-        return c.json(
-          { error: "ServiceUnavailable", message: "Ingestion service not configured" },
-          503
-        );
-      }
-      const projectId = c.req.query("projectId");
-      if (!projectId) {
-        return c.json({ error: "BadRequest", message: "projectId is required" }, 400);
-      }
-      const filePath = c.req.query("filePath") ?? undefined;
-      const limit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
-      const timelineOptions: { projectId: string; filePath?: string; limit?: number } = {
-        projectId,
-      };
-      if (filePath) timelineOptions.filePath = filePath;
-      if (limit !== undefined) timelineOptions.limit = limit;
+      try {
+        if (!this.config.ingestionService) {
+          return c.json(
+            { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
+        const projectId = c.req.query("projectId");
+        if (!projectId) {
+          return c.json({ error: "BadRequest", message: "projectId is required" }, 400);
+        }
+        const filePath = c.req.query("filePath") ?? undefined;
+        const rawTimelineLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
+        const limit = rawTimelineLimit !== undefined ? (Number.isNaN(rawTimelineLimit) ? 50 : Math.min(Math.max(rawTimelineLimit, 1), 1000)) : undefined;
+        const timelineOptions: { projectId: string; filePath?: string; limit?: number } = {
+          projectId,
+        };
+        if (filePath) timelineOptions.filePath = filePath;
+        if (limit !== undefined) timelineOptions.limit = limit;
 
-      const results = await this.config.ingestionService.queryTimeline(timelineOptions);
-      return c.json({ data: results });
+        const results = await this.config.ingestionService.queryTimeline(timelineOptions);
+        return c.json({ data: results });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
     });
 
     this.app.get("/api/v1/diagnostics/latest", async (c) => {
@@ -870,7 +902,7 @@ export class RESTPingMemServer {
           );
         }
 
-        const memoryManager = this.getMemoryManager(sessionId);
+        const memoryManager = await this.getMemoryManager(sessionId);
 
         // Use recall to get memory by key
         const results = await memoryManager.recall({ key });
@@ -919,8 +951,15 @@ export class RESTPingMemServer {
           );
         }
 
-        const memoryManager = this.getMemoryManager(sessionId);
-        await memoryManager.delete(key);
+        const memoryManager = await this.getMemoryManager(sessionId);
+        const deleted = await memoryManager.delete(key);
+
+        if (!deleted) {
+          return c.json<RESTErrorResponse>(
+            { error: "Not Found", message: "Memory not found or not accessible" },
+            404
+          );
+        }
 
         return c.json<RESTSuccessResponse<{ message: string }>>({
           data: { message: "Memory deleted successfully" },
@@ -958,7 +997,7 @@ export class RESTPingMemServer {
           );
         }
 
-        const memoryManager = this.getMemoryManager(sessionId);
+        const memoryManager = await this.getMemoryManager(sessionId);
 
         // Build query params
         const queryParams: Record<string, unknown> = { query };
@@ -973,10 +1012,12 @@ export class RESTPingMemServer {
           queryParams.priority = c.req.query("priority") as MemoryPriority;
         }
         if (c.req.query("limit")) {
-          queryParams.limit = parseInt(c.req.query("limit")!);
+          const rawLim = parseInt(c.req.query("limit")!, 10);
+          queryParams.limit = Number.isNaN(rawLim) ? 10 : Math.min(Math.max(rawLim, 1), 1000);
         }
         if (c.req.query("offset")) {
-          queryParams.offset = parseInt(c.req.query("offset")!);
+          const rawOff = parseInt(c.req.query("offset")!, 10);
+          queryParams.offset = Number.isNaN(rawOff) ? 0 : Math.max(rawOff, 0);
         }
 
         const results = await memoryManager.recall(queryParams);
@@ -1103,9 +1144,13 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/memory/consolidate", async (c) => {
       try {
-        const parseResult = MemoryConsolidateSchema.safeParse(
-          await c.req.json().catch(() => ({}))
-        );
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400);
+        }
+        const parseResult = MemoryConsolidateSchema.safeParse(body);
         if (!parseResult.success) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -1119,8 +1164,326 @@ export class RESTPingMemServer {
         if (parseResult.data.minDaysOld !== undefined) {
           options.minDaysOld = parseResult.data.minDaysOld;
         }
-        const result = this.relevanceEngine.consolidate(options);
+        const result = await this.relevanceEngine.consolidate(options);
         return c.json({ data: result });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Agent Management Routes
+    // ============================================================================
+
+    this.app.post("/api/v1/agents/register", async (c) => {
+      try {
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400);
+        }
+        const parseResult = AgentRegisterSchema.safeParse(body);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const { agentId: rawId, role, ttlMs: rawTtlMs, quotaBytes, quotaCount, metadata } = parseResult.data;
+        // admin privilege must be granted via server config, not self-assignment
+        const admin = false;
+        let agentId: ReturnType<typeof createAgentId>;
+        try {
+          agentId = createAgentId(rawId);
+        } catch (err) {
+          if (err instanceof Error) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: err.message }, 400);
+          }
+          throw err;
+        }
+        // Clamp TTL: min 1 second, max 7 days
+        const ttlMs = Math.max(1000, Math.min(rawTtlMs, 604800000));
+        const now = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + ttlMs).toISOString();
+
+        const db = this.eventStore.getDatabase();
+
+        // Garbage collect expired agents before counting (aligned with MCP handler)
+        db.prepare("DELETE FROM agent_quotas WHERE expires_at IS NOT NULL AND expires_at < $now").run({ $now: new Date().toISOString() });
+
+        // Enforce max-agents limit
+        const maxAgents = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10) || 100;
+        const countRow = db.prepare(
+          "SELECT COUNT(*) as cnt FROM agent_quotas"
+        ).get() as { cnt: number };
+        const existingRow = db.prepare("SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id").get({ $agent_id: agentId });
+        if (!existingRow && countRow.cnt >= maxAgents) {
+          return c.json<RESTErrorResponse>({ error: "Conflict", message: `Maximum agent registrations (${maxAgents}) reached` }, 409);
+        }
+
+        // Enforce metadata size limit
+        const metadataStr = JSON.stringify(metadata ?? {});
+        if (metadataStr.length > 10_000) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "metadata exceeds 10KB size limit" }, 400);
+        }
+
+        db.prepare(
+          `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
+           VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
+           ON CONFLICT(agent_id) DO UPDATE SET
+             role = $role, ttl_ms = $ttl_ms, expires_at = $expires_at,
+             updated_at = $updated_at, metadata = $metadata`
+        ).run({
+          $agent_id: agentId,
+          $role: role,
+          $admin: admin ? 1 : 0,
+          $ttl_ms: ttlMs,
+          $expires_at: expiresAt,
+          $quota_bytes: quotaBytes,
+          $quota_count: quotaCount,
+          $created_at: now,
+          $updated_at: now,
+          $metadata: metadataStr,
+        });
+
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: { agentId, role, admin, ttlMs, expiresAt, quotaBytes, quotaCount },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/agents/quotas", async (c) => {
+      try {
+        const agentId = c.req.query("agentId");
+        const db = this.eventStore.getDatabase();
+
+        if (agentId) {
+          let validatedAgentId: ReturnType<typeof createAgentId>;
+          try {
+            validatedAgentId = createAgentId(agentId);
+          } catch (err) {
+            if (err instanceof Error && err.message.includes("Invalid agent ID")) {
+              return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
+            }
+            throw err;
+          }
+          const row = db.prepare(
+            "SELECT * FROM agent_quotas WHERE agent_id = $agent_id"
+          ).get({ $agent_id: validatedAgentId }) as Record<string, unknown> | undefined;
+
+          if (!row) {
+            return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${agentId}' not found` }, 404);
+          }
+          return c.json<RESTSuccessResponse<Record<string, unknown>>>({ data: row });
+        }
+
+        const rows = db.prepare("SELECT * FROM agent_quotas ORDER BY updated_at DESC").all();
+        return c.json<RESTSuccessResponse<{ agents: unknown[] }>>({ data: { agents: rows } });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.delete("/api/v1/agents/:agentId", async (c) => {
+      try {
+        const rawId = c.req.param("agentId");
+        if (!rawId) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "agentId is required" }, 400);
+        }
+        let agentId: ReturnType<typeof createAgentId>;
+        try {
+          agentId = createAgentId(rawId);
+        } catch (err) {
+          if (err instanceof Error && err.message.includes("Invalid agent ID")) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
+          }
+          throw err;
+        }
+        const db = this.eventStore.getDatabase();
+
+        const deleteResult = db.transaction(() => {
+          const lockResult = db.prepare("DELETE FROM write_locks WHERE holder_id = $agent_id").run({ $agent_id: agentId });
+          const quotaResult = db.prepare("DELETE FROM agent_quotas WHERE agent_id = $agent_id").run({ $agent_id: agentId });
+          return { lockResult, quotaResult };
+        })();
+        const { lockResult, quotaResult } = deleteResult;
+
+        if (quotaResult.changes === 0) {
+          return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${rawId}' not found` }, 404);
+        }
+
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: { agentId, quotaRowsDeleted: quotaResult.changes, lockRowsDeleted: lockResult.changes },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // SSE Event Stream (Memory PubSub)
+    // ============================================================================
+
+    this.app.get("/api/v1/events/stream", async (c) => {
+      const channel = c.req.query("channel");
+      const category = c.req.query("category");
+      const agentId = c.req.query("agentId");
+
+      // Validate agentId exists and is not expired if provided
+      if (agentId) {
+        try {
+          const validId = createAgentId(agentId);
+          const db = this.eventStore.getDatabase();
+          const row = db.prepare(
+            "SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
+          ).get({ $agent_id: validId, $now: new Date().toISOString() });
+          if (!row) {
+            return c.json<RESTErrorResponse>({ error: "Forbidden", message: "Agent not registered or expired" }, 403);
+          }
+        } catch {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
+        }
+      }
+
+      const stream = new ReadableStream({
+        start: (controller) => {
+          const encoder = new TextEncoder();
+          let heartbeat: ReturnType<typeof setInterval>;
+
+          const subscriptionId = this.pubsub.subscribe(
+            {
+              ...(channel ? { channel } : {}),
+              ...(category ? { category } : {}),
+              ...(agentId ? { agentId } : {}),
+            },
+            (event) => {
+              try {
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+              } catch (err) {
+                // Stream closed — clean up subscription and heartbeat
+                this.pubsub?.unsubscribe(subscriptionId);
+                clearInterval(heartbeat);
+                if (err instanceof TypeError && /closed|errored/i.test(String(err.message))) return;
+                console.error("[SSE] Failed to send event:", err instanceof Error ? err.message : String(err));
+              }
+            }
+          );
+
+          // Heartbeat every 30 seconds
+          heartbeat = setInterval(() => {
+            try {
+              controller.enqueue(encoder.encode(`: heartbeat\n\n`));
+            } catch (err) {
+              clearInterval(heartbeat);
+              this.pubsub?.unsubscribe(subscriptionId);
+              if (!(err instanceof TypeError && /closed|errored/i.test(String(err.message)))) {
+                console.error("[SSE] Heartbeat error:", err instanceof Error ? err.message : String(err));
+              }
+            }
+          }, 30_000);
+
+          // Clean up on abort
+          c.req.raw.signal.addEventListener("abort", () => {
+            clearInterval(heartbeat);
+            this.pubsub.unsubscribe(subscriptionId);
+            try {
+              controller.close();
+            } catch (err) {
+              // Stream already closed by client disconnect
+              if (err instanceof Error && !/closed|errored/i.test(err.message)) {
+                console.error("[SSE] Cleanup error:", err.message);
+              }
+            }
+          });
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "Connection": "keep-alive",
+        },
+      });
+    });
+
+    // ============================================================================
+    // Knowledge Endpoints
+    // ============================================================================
+
+    this.app.post("/api/v1/knowledge/search", async (c) => {
+      try {
+        const raw = await c.req.json();
+        const parsed = KnowledgeSearchSchema.safeParse(raw);
+        if (!parsed.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parsed.error.issues.map((i) => i.message).join("; ") },
+            400
+          );
+        }
+        const body = parsed.data;
+
+        // Build search options with only defined properties (exactOptionalPropertyTypes)
+        const searchOpts: import("../knowledge/index.js").KnowledgeSearchOptions = {
+          query: body.query,
+          crossProject: body.crossProject,
+          limit: body.limit,
+        };
+        if (body.projectId !== undefined) {
+          searchOpts.projectId = body.projectId;
+        }
+        if (body.tags !== undefined) {
+          searchOpts.tags = body.tags;
+        }
+
+        const results = this.knowledgeStore.search(searchOpts);
+
+        return c.json<RESTSuccessResponse<{ count: number; results: unknown[] }>>({
+          data: {
+            count: results.length,
+            results: results.map((r) => ({ ...r.entry, rank: r.rank })),
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.post("/api/v1/knowledge/ingest", async (c) => {
+      try {
+        const raw = await c.req.json();
+        const parsed = KnowledgeIngestSchema.safeParse(raw);
+        if (!parsed.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parsed.error.issues.map((i) => i.message).join("; ") },
+            400
+          );
+        }
+        const body = parsed.data;
+
+        // Build ingest entry with only defined properties (exactOptionalPropertyTypes)
+        const ingestEntry: Omit<import("../knowledge/index.js").KnowledgeEntry, "id" | "createdAt" | "updatedAt"> = {
+          projectId: body.projectId,
+          title: body.title,
+          solution: body.solution,
+          tags: body.tags,
+        };
+        if (body.symptoms !== undefined) {
+          ingestEntry.symptoms = body.symptoms;
+        }
+        if (body.rootCause !== undefined) {
+          ingestEntry.rootCause = body.rootCause;
+        }
+
+        const entry = this.knowledgeStore.ingest(ingestEntry);
+
+        return c.json<RESTSuccessResponse<{ entry: unknown }>>({
+          data: { entry },
+        });
       } catch (error) {
         return this.handleError(c, error);
       }
@@ -1172,16 +1535,22 @@ export class RESTPingMemServer {
    * Handle errors and return consistent error responses
    */
   private handleError(c: Context<AppEnv>, error: unknown): Response {
-    console.error("[REST Server] Error:", error);
-
-    const message = error instanceof Error ? error.message : "Unknown error";
     const statusCode = this.getStatusCode(error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    const isClientError = statusCode >= 400 && statusCode < 500;
 
+    if (!isClientError) {
+      const requestId = crypto.randomUUID().slice(0, 8);
+      console.error(`[REST Server] Error [${requestId}] ${c.req.method} ${c.req.path}:`, error);
+      return c.json(
+        { error: this.getErrorName(statusCode), message: `An internal error occurred (ref: ${requestId})` },
+        statusCode as ContentfulStatusCode
+      );
+    }
+
+    console.error("[REST Server] Error:", message);
     return c.json(
-      {
-        error: this.getErrorName(statusCode),
-        message,
-      },
+      { error: this.getErrorName(statusCode), message },
       statusCode as ContentfulStatusCode
     );
   }
@@ -1191,17 +1560,32 @@ export class RESTPingMemServer {
    */
   private getStatusCode(error: unknown): number {
     if (error instanceof Error) {
-      if (error.message.includes("not found")) {
-        return 404;
-      }
-      if (error.message.includes("unauthorized") || error.message.includes("authentication")) {
-        return 401;
-      }
-      if (error.message.includes("forbidden")) {
-        return 403;
-      }
-      if (error.message.includes("invalid") || error.message.includes("validation")) {
-        return 400;
+      // Use error class name or code property for reliable mapping
+      const name = error.name;
+      if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError") return 404;
+      if (name === "QuotaExhaustedError" || name === "WriteLockConflictError") return 409;
+      if (name === "EvidenceGateRejectionError" || name === "ScopeViolationError") return 403;
+      if (name === "MemoryKeyExistsError") return 409;
+      if (name === "SchemaValidationError" || name === "InvalidSessionError") return 400;
+      // Check for known error codes
+      const codeErr = error as { code?: string };
+      if (codeErr.code === "MEMORY_NOT_FOUND") return 404;
+      if (codeErr.code === "QUOTA_EXHAUSTED" || codeErr.code === "WRITE_LOCK_CONFLICT") return 409;
+      if (codeErr.code === "MEMORY_EXISTS") return 409;
+      if (codeErr.code === "INVALID_SESSION") return 400;
+      if (codeErr.code === "AGENT_EXPIRED") return 410;
+      // Fallback to message-based detection — only for known domain error types
+      const isDomainError = "code" in error ||
+        /Memory|Agent|Quota|Lock|Evidence|Schema|Scope/.test(error.constructor.name);
+      if (isDomainError) {
+        if (error.message.includes("not found")) {
+          console.warn(`[REST Server] getStatusCode: message-based 404 for '${error.name}': ${error.message.slice(0, 80)}`);
+          return 404;
+        }
+        if (error.message.includes("invalid") || error.message.includes("required")) {
+          console.warn(`[REST Server] getStatusCode: message-based 400 for '${error.name}': ${error.message.slice(0, 80)}`);
+          return 400;
+        }
       }
     }
     return 500;
@@ -1216,6 +1600,8 @@ export class RESTPingMemServer {
       401: "Unauthorized",
       403: "Forbidden",
       404: "Not Found",
+      409: "Conflict",
+      410: "Gone",
       500: "Internal Server Error",
       503: "Service Unavailable",
     };
@@ -1223,23 +1609,51 @@ export class RESTPingMemServer {
   }
 
   /**
-   * Get MemoryManager for session, creating if needed
+   * Get MemoryManager for session, creating if needed.
+   * Uses Promise-based deduplication to prevent TOCTOU races.
    */
-  private getMemoryManager(sessionId: SessionId): MemoryManager {
-    let manager = this.memoryManagers.get(sessionId);
-    if (!manager) {
-      const config: MemoryManagerConfig = {
-        eventStore: this.eventStore,
-        sessionId,
-      };
+  private getMemoryManager(sessionId: SessionId): Promise<MemoryManager> {
+    const cached = this.memoryManagers.get(sessionId);
+    if (cached) return Promise.resolve(cached);
 
-      if (this.vectorIndex) {
-        config.vectorIndex = this.vectorIndex;
-      }
-
-      manager = new MemoryManager(config);
-      this.memoryManagers.set(sessionId, manager);
+    let promise = this.managerPromises.get(sessionId);
+    if (!promise) {
+      promise = this.hydrateManager(sessionId).catch((err) => {
+        this.managerPromises.delete(sessionId);
+        throw err;
+      });
+      this.managerPromises.set(sessionId, promise);
     }
+    return promise;
+  }
+
+  private async hydrateManager(sessionId: SessionId): Promise<MemoryManager> {
+    const config: MemoryManagerConfig = {
+      eventStore: this.eventStore,
+      sessionId,
+      pubsub: this.pubsub,
+    };
+
+    if (this.vectorIndex) {
+      config.vectorIndex = this.vectorIndex;
+    }
+
+    // Propagate agent identity from session metadata
+    const session = this.sessionManager.getSession(sessionId);
+    if (session) {
+      const meta = session.metadata;
+      if (meta?.agentId && typeof meta.agentId === "string") {
+        config.agentId = createAgentId(meta.agentId);
+      }
+      if (meta?.agentRole && typeof meta.agentRole === "string") {
+        config.agentRole = meta.agentRole;
+      }
+    }
+
+    const manager = new MemoryManager(config);
+    await manager.hydrate();
+    this.memoryManagers.set(sessionId, manager);
+    this.managerPromises.delete(sessionId);
     return manager;
   }
 
@@ -1328,7 +1742,15 @@ export class RESTPingMemServer {
    * Stop the REST server
    */
   async stop(): Promise<void> {
+    // Destroy PubSub subscriptions first to stop event delivery
+    if (this.pubsub) {
+      this.pubsub.destroy();
+    }
+    // Close event store (SQLite)
     await this.eventStore.close();
+    // Clear cached memory managers
+    this.memoryManagers.clear();
+    this.managerPromises.clear();
     console.log("[REST Server] Stopped");
   }
 

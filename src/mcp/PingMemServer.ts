@@ -48,6 +48,8 @@ import {
   CodebaseToolModule,
   MemoryToolModule,
   CausalToolModule,
+  KnowledgeToolModule,
+  AgentToolModule,
 } from "./handlers/index.js";
 import { CONTEXT_TOOLS } from "./handlers/ContextToolModule.js";
 import { GRAPH_TOOLS } from "./handlers/GraphToolModule.js";
@@ -56,6 +58,10 @@ import { DIAGNOSTICS_TOOLS } from "./handlers/DiagnosticsToolModule.js";
 import { CODEBASE_TOOLS } from "./handlers/CodebaseToolModule.js";
 import { MEMORY_TOOLS } from "./handlers/MemoryToolModule.js";
 import { CAUSAL_TOOLS } from "./handlers/CausalToolModule.js";
+import { KNOWLEDGE_TOOLS } from "./handlers/KnowledgeToolModule.js";
+import { AGENT_TOOLS } from "./handlers/AgentToolModule.js";
+import { KnowledgeStore } from "../knowledge/index.js";
+import { MemoryPubSub } from "../pubsub/index.js";
 
 // ============================================================================
 // Server Configuration
@@ -105,6 +111,8 @@ export const TOOLS: ToolDefinition[] = [
   ...CODEBASE_TOOLS,
   ...MEMORY_TOOLS,
   ...CAUSAL_TOOLS,
+  ...KNOWLEDGE_TOOLS,
+  ...AGENT_TOOLS,
 ];
 
 // ============================================================================
@@ -191,6 +199,8 @@ export class PingMemServer {
       relevanceEngine,
       causalGraphManager: config.causalGraphManager ?? null,
       causalDiscoveryAgent: config.causalDiscoveryAgent ?? null,
+      pubsub: new MemoryPubSub(),
+      knowledgeStore: new KnowledgeStore(this.eventStore.getDatabase()),
     };
 
     // Register modules
@@ -202,6 +212,8 @@ export class PingMemServer {
       new CodebaseToolModule(this.state),
       new MemoryToolModule(this.state),
       new CausalToolModule(this.state),
+      new KnowledgeToolModule(this.state),
+      new AgentToolModule(this.state),
     ];
 
     // Initialize MCP server
