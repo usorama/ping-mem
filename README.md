@@ -2,10 +2,10 @@
 
 **Universal Memory Layer for AI Agents**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-ping-mem is a Model Context Protocol (MCP) server that provides persistent memory and knowledge graph capabilities for AI agents. It supports session management, context storage, semantic search, entity extraction, and relationship tracking.
+ping-mem is a Model Context Protocol (MCP) server that provides persistent memory, multi-agent orchestration, and knowledge graph capabilities for AI agents. It supports session management, context storage, semantic search, entity extraction, relationship tracking, a full-text knowledge base, and a real-time web dashboard for observability and administration.
 
 ## Features
 
@@ -19,6 +19,30 @@ ping-mem is a Model Context Protocol (MCP) server that provides persistent memor
 - **Evolution Queries** - Track entity changes over time
 - **Diagnostics System (v1.3.0)** - Multi-tool quality tracking with symbol attribution and LLM summaries
 - **HTTP Server** - REST and SSE endpoints for direct integration
+- **Multi-Agent Memory** - Agent registration, quotas, TTL-based lifecycle, scoped isolation
+- **Knowledge Base** - Full-text searchable knowledge entries with cross-project support
+- **Web Dashboard** - Real-time observability UI at `/ui` with 9 views
+- **Admin Panel** - API key management, project cleanup, LLM provider config at `/admin`
+- **Structured Logging** - JSON logging in production, human-readable in dev
+- **Rate Limiting** - Per-IP rate limiting with Retry-After headers on all endpoints
+- **CSRF Protection** - Double-submit cookie pattern for state-changing requests
+
+## Web UI
+
+ping-mem ships with a built-in web dashboard for observability and administration, powered by HTMX.
+
+| Route | View | Description |
+|-------|------|-------------|
+| `/ui` | Dashboard | Stats overview, recent events |
+| `/ui/memories` | Memory Explorer | Search, filter, paginate memories |
+| `/ui/diagnostics` | Diagnostics | SARIF runs, findings, diff |
+| `/ui/ingestion` | Ingestion Monitor | Project status, reingest |
+| `/ui/agents` | Agent Registry | Quotas, TTL, status |
+| `/ui/knowledge` | Knowledge Base | FTS search, detail |
+| `/ui/sessions` | Sessions | Timeline, events per session |
+| `/ui/events` | Event Log | Paginated, filterable by type |
+| `/ui/worklog` | Worklog | Entries by kind/session |
+| `/admin` | Admin Panel | API keys, projects, LLM config |
 
 ## Quick Start
 
@@ -99,6 +123,14 @@ const httpServer = createHttpServer({
 | `diagnostics_by_symbol` | Group findings by symbol/function |
 | `diagnostics_summarize` | LLM-powered summary with caching |
 
+### Agent & Knowledge Tools
+
+| Tool | Description |
+|------|-------------|
+| `agent_register` | Register agent with role, TTL, quotas |
+| `knowledge_ingest` | Ingest knowledge entry |
+| `knowledge_search` | Full-text knowledge search |
+
 See [examples/multi-tool-diagnostics](examples/multi-tool-diagnostics/) for usage.
 
 ## Configuration
@@ -124,6 +156,8 @@ See [examples/multi-tool-diagnostics](examples/multi-tool-diagnostics/) for usag
 | `PING_MEM_ADMIN_USER` | For admin UI | | Basic auth username for `/admin` |
 | `PING_MEM_ADMIN_PASS` | For admin UI | | Basic auth password for `/admin` |
 | `PING_MEM_SECRET_KEY` | For admin UI | | Secret used to encrypt stored LLM keys |
+| `PING_MEM_MAX_AGENTS` | No | `100` | Max registered agents |
+| `TRUST_PROXY` | No | `false` | Trust X-Forwarded-For headers |
 
 ### Admin UI
 
@@ -193,19 +227,23 @@ bun run start:rest      # REST mode (explicit)
 ```
 ping-mem/
 ├── src/
-│   ├── mcp/           # MCP server implementation
+│   ├── mcp/           # MCP server
 │   ├── http/          # HTTP server (REST/SSE)
-│   ├── graph/         # Knowledge graph layer
-│   │   ├── EntityExtractor.ts
-│   │   ├── GraphManager.ts
-│   │   └── RelationshipManager.ts
-│   ├── search/        # Search engines
-│   │   ├── VectorIndex.ts
-│   │   ├── HybridSearchEngine.ts
-│   │   ├── LineageEngine.ts
-│   │   └── EvolutionEngine.ts
+│   │   └── ui/        # Web dashboard (HTMX)
+│   ├── graph/         # Knowledge graph (Neo4j)
+│   ├── search/        # Vector search (Qdrant)
+│   ├── memory/        # Memory CRUD
+│   ├── session/       # Session lifecycle
+│   ├── storage/       # SQLite EventStore
+│   ├── admin/         # Admin panel + API keys
+│   ├── knowledge/     # Knowledge store
+│   ├── diagnostics/   # SARIF diagnostics
+│   ├── ingest/        # Code ingestion pipeline
+│   ├── config/        # Runtime config + env validation
+│   ├── util/          # Structured logger
 │   └── types/         # TypeScript definitions
 ├── docker-compose.yml
+├── docker-compose.prod.yml
 ├── Dockerfile
 └── package.json
 ```
@@ -214,6 +252,7 @@ ping-mem/
 
 - [Graphiti Integration](docs/GRAPHITI-INTEGRATION.md) - Detailed graph features
 - [API Reference](docs/API.md) - Full MCP tool documentation (coming soon)
+- [Deployment Architecture](docs/DEPLOYMENT_ARCHITECTURE.md) - Production deployment guide
 
 ## Testing
 

@@ -1,7 +1,7 @@
 # ping-mem Deployment Architecture
 
-**Version**: 1.2.0
-**Date**: 2026-01-29
+**Version**: 2.0.0
+**Date**: 2026-03-07
 **Status**: Production Ready
 
 ---
@@ -198,7 +198,7 @@ bun run diagnostics:collect --projectDir $CI_PROJECT_DIR
 | Port | Service | Protocol | Purpose |
 |------|---------|----------|---------|
 | 3000 | ping-mem | HTTP/SSE | Primary API |
-| 3001 | ping-mem-rest | HTTP | REST-only (optional) |
+| 3003 | ping-mem-rest | HTTP | REST-only (optional, profile: rest-api) |
 | 6333 | Qdrant | HTTP | Vector operations |
 | 6334 | Qdrant | gRPC | Vector operations |
 | 7474 | Neo4j | HTTP | Browser UI |
@@ -309,6 +309,97 @@ docker compose config | grep -A 5 volumes
 # Verify permissions
 ls -la /Users/you/Projects/project/.ping-mem/
 ```
+
+---
+
+## Backup & Restore
+
+### Backup
+
+```bash
+# Full backup (SQLite + Qdrant snapshot + Neo4j dump)
+./scripts/backup.sh [/path/to/backup-dir]
+
+# Default: /tmp/ping-mem-backup-YYYYMMDD-HHMMSS
+```
+
+The backup script:
+1. Copies SQLite databases from the Docker volume (`ping-mem.db`, `ping-mem-diagnostics.db`, `ping-mem-admin.db`)
+2. Creates a Qdrant collection snapshot via REST API
+3. Runs `neo4j-admin database dump` inside the Neo4j container
+4. Compresses everything into a timestamped `.tar.gz`
+
+### Restore
+
+```bash
+# Restore from backup (DESTRUCTIVE — overwrites existing data)
+./scripts/restore.sh /path/to/ping-mem-backup.tar.gz
+```
+
+The restore script:
+1. Validates the backup archive structure
+2. Prompts for confirmation (will overwrite existing data)
+3. Stops ping-mem containers
+4. Restores SQLite, Qdrant snapshot, and Neo4j dump
+5. Restarts containers and runs health check
+
+### Scheduled Backups
+
+```bash
+# Add to crontab for daily backups at 2 AM
+0 2 * * * /path/to/ping-mem/scripts/backup.sh /backups/ping-mem
+```
+
+---
+
+## Web UI (v2.0.0)
+
+ping-mem includes a server-rendered web dashboard at `/ui` with HTMX for dynamic updates.
+
+| Route | View | Description |
+|-------|------|-------------|
+| `/ui` | Dashboard | Stats overview, recent events |
+| `/ui/memories` | Memory Explorer | Search, filter, paginate memories |
+| `/ui/diagnostics` | Diagnostics | SARIF runs, findings, diff |
+| `/ui/ingestion` | Ingestion Monitor | Project status, reingest |
+| `/ui/agents` | Agent Registry | Quotas, TTL, status |
+| `/ui/knowledge` | Knowledge Base | FTS search, detail panel |
+| `/ui/sessions` | Sessions | Timeline, events per session |
+| `/ui/events` | Event Log | Paginated, filterable by type |
+| `/ui/worklog` | Worklog | Entries by kind/session |
+| `/admin` | Admin Panel | API keys, projects, LLM config |
+
+---
+
+## Health Checks
+
+The `/health` endpoint returns per-component status:
+
+```json
+{
+  "status": "ok",
+  "version": "2.0.0",
+  "components": {
+    "sqlite": { "status": "ok", "latencyMs": 1 },
+    "neo4j": { "status": "ok", "latencyMs": 12 },
+    "qdrant": { "status": "ok", "latencyMs": 5 }
+  }
+}
+```
+
+Docker health checks use this endpoint for container orchestration.
+
+---
+
+## Structured Logging
+
+ping-mem uses structured JSON logging in production (`NODE_ENV=production`) and human-readable format in development.
+
+```json
+{"level":"info","module":"REST","msg":"Server started","port":3000,"transport":"rest","timestamp":"2026-03-07T12:00:00.000Z"}
+```
+
+Log levels: `debug`, `info`, `warn`, `error`
 
 ---
 

@@ -1,9 +1,8 @@
 # CLAUDE.md - ping-mem
 
-**Version**: 1.4.1
-**Status**: Standalone Project (Production Deployment WIP)
-**Last Updated**: 2026-02-12
-**Project**: Universal Memory Layer for AI Agents + Deterministic Code Ingestion + Admin UI
+**Version**: 2.0.0
+**Last Updated**: 2026-03-07
+**Project**: Universal Memory Layer for AI Agents + Multi-Agent Orchestration + Web UI
 
 ---
 
@@ -180,41 +179,32 @@ For any project integrating with ping-mem:
 2. **Multi-Tool SARIF Integration**
  - Full SARIF 2.1.0 parser for standardized tool output
  - TypeScript SARIF generator (tsc-sarif)
- - ESLint SARIF generator (eslint-sarif) - NEW in v1.3.0
- - Prettier SARIF generator (prettier-sarif) - NEW in v1.3.0
- - Batch processing via `--sarifPaths` - NEW in v1.3.0
- - Normalized findings (cross-platform paths, whitespace, severity)
+ - ESLint SARIF generator (eslint-sarif) - Prettier SARIF generator (prettier-sarif) - Batch processing via `--sarifPaths` - Normalized findings (cross-platform paths, whitespace, severity)
 
-3. **Symbol-Level Attribution** - NEW in v1.3.0
- - AST-based symbol extraction (TypeScript/JavaScript)
+3. **Symbol-Level Attribution** - AST-based symbol extraction (TypeScript/JavaScript)
  - Regex-based extraction (Python)
  - Findings mapped to containing symbols (functions, classes, methods)
  - Neo4j persistence: `(Chunk)-[:CONTAINS_SYMBOL]->(Symbol)`
  - Query findings by symbol via `diagnostics_by_symbol`
 
-4. **LLM-Powered Summaries** - NEW in v1.3.0
- - Optional OpenAI-based summarization
+4. **LLM-Powered Summaries** - Optional OpenAI-based summarization
  - Content-addressable caching (same analysisId -> cached summary)
  - Cost tracking (tokens, USD)
  - Graceful fallback to raw findings
  - MCP tool: `diagnostics_summarize` with `useLLM` flag
 
-5. **Performance Benchmarks** - NEW in v1.3.0
- - Comprehensive test suite (100, 1k, 10k, 100k findings)
+5. **Performance Benchmarks** - Comprehensive test suite (100, 1k, 10k, 100k findings)
  - Memory usage benchmarks
  - CI integration with regression detection
  - Performance budgets documented
 
 6. **CLI Collector**
  - Automated diagnostics ingestion: `bun run diagnostics:collect`
- - Batch SARIF processing: `--sarifPaths` - NEW in v1.3.0
- - Computes configHash, environmentHash, tool identity
+ - Batch SARIF processing: `--sarifPaths` - Computes configHash, environmentHash, tool identity
  - Records DIAGNOSTICS_INGESTED events to EventStore
 
 7. **CI/CD Integration**
- - GitHub Actions workflow for all three tools - UPDATED in v1.3.0
- - Performance benchmark workflow - NEW in v1.3.0
- - REST API endpoints for non-MCP clients
+ - GitHub Actions workflow for all three tools - Performance benchmark workflow - REST API endpoints for non-MCP clients
  - Artifact uploads (SARIF files + diagnostics DB)
 
 8. **Worklog Events**
@@ -224,9 +214,9 @@ For any project integrating with ping-mem:
 
 ---
 
-## Admin System (v1.4.0 - WIP/Uncommitted)
+## Admin System (v1.4.0)
 
-**ping-mem now includes an admin panel and API key management system:**
+**Admin panel and API key management system:**
 
 ### Key Features
 1. **Admin Web UI** (`/admin`) - HTML-based admin panel with Basic Auth
@@ -235,20 +225,7 @@ For any project integrating with ping-mem:
 4. **LLM Provider Config** - Configure OpenAI, Anthropic, OpenRouter, etc. for LLM summaries
 5. **Production Docker Compose** (`docker-compose.prod.yml`) - Full stack with Neo4j, Qdrant, ping-mem
 
-### New Files (Uncommitted)
-- `src/admin/AdminStore.ts` - SQLite store for API keys, projects, LLM config
-- `src/admin/ApiKeyManager.ts` - API key validation wrapper
-- `src/admin/crypto.ts` - AES-256-GCM encryption for secrets
-- `src/http/admin.ts` - Admin routes and HTML UI
-- `docker-compose.prod.yml` - Production deployment config
-- `scripts/backup-r2.sh` - Cloudflare R2 backup script
-- `scripts/rotate-api-key.sh` - API key rotation script
-- `scripts/install-client.sh` - Client installation script
-- `scripts/smoke-test.sh` - Deployment smoke test
-- `docs/DEPLOYMENT_ARCHITECTURE.md` - Production deployment guide
-- `docs/INSTALLATION.md` - Installation guide
-
-### Environment Variables (New in v1.4.0)
+### Environment Variables (v1.4.0)
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PING_MEM_API_KEY` | For auth | | Seed API key for authentication |
@@ -256,7 +233,41 @@ For any project integrating with ping-mem:
 | `PING_MEM_ADMIN_PASS` | For admin | | Admin panel Basic Auth password |
 | `PING_MEM_SECRET_KEY` | For encryption | | Secret for AES-256-GCM key encryption |
 | `PING_MEM_ADMIN_DB_PATH` | No | `~/.ping-mem/admin.db` | Admin SQLite DB path |
-| `PING_MEM_DIAGNOSTICS_DB_PATH` | No | `~/.ping-mem/diagnostics.db` | Diagnostics SQLite DB path |
+| `PING_MEM_DIAGNOSTICS_DB_PATH` | No | `~/.ping-mem/diagnostics.db` | Diagnostics DB path |
+
+---
+
+## Multi-Agent Memory (v2.0.0)
+
+**Multi-agent orchestration with isolation, quotas, and knowledge sharing:**
+
+### Key Features
+1. **Agent Registration** - Register and deregister agents with configurable TTL
+2. **Per-Agent Quotas** - Byte and count limits per agent, enforced at write time
+3. **Agent-Scoped Memory Isolation** - Each agent's memory is isolated by agentId
+4. **Knowledge Store** - Cross-project FTS5 full-text search over structured knowledge entries
+5. **Causal Reasoning** - Graph-based lineage tracking and causal chain queries
+6. **Multi-Model Embedding** - Support for OpenAI, Gemini, and deterministic hash-based embeddings
+7. **Event-Driven Architecture** - MemoryPubSub real-time event bus with SessionManager integration
+
+---
+
+## Web UI (v2.0.0)
+
+**Server-rendered HTMX web interface for all ping-mem features:**
+
+| Route | Purpose |
+|-------|---------|
+| `/ui` | Dashboard (stats, recent events) |
+| `/ui/memories` | Memory Explorer (search, filter, detail) |
+| `/ui/diagnostics` | Diagnostics (SARIF runs, findings) |
+| `/ui/ingestion` | Ingestion Monitor (project status) |
+| `/ui/agents` | Agent Registry (quotas, TTL, status) |
+| `/ui/knowledge` | Knowledge Base (FTS search, detail) |
+| `/ui/sessions` | Sessions (timeline, events) |
+| `/ui/events` | Event Log (paginated, filterable) |
+| `/ui/worklog` | Worklog (entries by kind/session) |
+| `/admin` | Admin Panel (API keys, projects, LLM config) |
 
 ---
 
@@ -333,7 +344,7 @@ bun run diagnostics:tsc-sarif --output diagnostics/tsc.sarif
 bun run diagnostics:eslint-sarif --output diagnostics/eslint.sarif
 bun run diagnostics:prettier-sarif --output diagnostics/prettier.sarif
 
-# Collect diagnostics (batch mode - NEW in v1.3.0)
+# Collect diagnostics (batch mode)
 bun run diagnostics:collect \
  --projectDir . \
  --configHash $(sha256sum package.json tsconfig.json) \
@@ -361,21 +372,18 @@ diagnostics_diff({
  analysisIdB: "after-commit"
 })
 
-# Compare across tools (NEW in v1.3.0)
-diagnostics_compare_tools({
+# Compare across toolsdiagnostics_compare_tools({
  projectId: "ping-mem-abc123",
  treeHash: "deadbeef",
  toolNames: ["tsc", "eslint", "prettier"]
 })
 
-# Group findings by symbol (NEW in v1.3.0)
-diagnostics_by_symbol({
+# Group findings by symboldiagnostics_by_symbol({
  analysisId: "analysis-123",
  groupBy: "symbol"
 })
 
-# Get LLM summary (NEW in v1.3.0)
-diagnostics_summarize({
+# Get LLM summarydiagnostics_summarize({
  analysisId: "analysis-123",
  useLLM: true  // Requires OPENAI_API_KEY
 })
@@ -620,7 +628,7 @@ curl -X POST "$BASE/context/checkpoint" \
 │  └─────────────────────────────────────────────────────┘    │
 │                          │                                   │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │              Ingestion Layer (NEW)                  │    │
+│  │              Ingestion Layer                        │    │
 │  │  • ProjectScanner - Merkle tree + manifest          │    │
 │  │  • CodeChunker - Code vs comment separation         │    │
 │  │  • GitHistoryReader - Commit DAG + diffs            │    │
@@ -642,7 +650,7 @@ curl -X POST "$BASE/context/checkpoint" \
 ### Component Details
 
 #### 0. Ingestion Layer (`src/ingest/`, `src/search/`)
-**NEW in v1.1.0** - Deterministic code ingestion system
+Deterministic code ingestion system (v1.1.0)
 
 - **ProjectScanner** (`src/ingest/ProjectScanner.ts`)
   - Merkle tree hashing for project integrity
@@ -803,6 +811,7 @@ All tools are prefixed with `ping_mem_` when loaded in Claude Code:
 |------|---------|
 | `knowledge_ingest` | Ingest a knowledge entry (upsert by projectId + title) |
 | `knowledge_search` | Full-text search across knowledge entries with FTS5 |
+| `knowledge_get` | Retrieve a specific knowledge entry by ID |
 
 #### Memory PubSub Tools (v2.0.0)
 | Tool | Purpose |
@@ -890,11 +899,14 @@ bun install
 # Build TypeScript
 bun run build
 
-# Run tests (249 tests in rad-engineer, ping-mem tests TBD)
+# Run tests
 bun test
 
 # Type check (MUST pass with 0 errors)
 bun run typecheck
+
+# Lint
+bun run lint
 
 # Watch mode for development
 bun run dev
@@ -921,12 +933,13 @@ ping-mem/
 │   ├── http/              # HTTP server (REST/SSE)
 │   │   ├── rest-server.ts      # REST API
 │   │   ├── sse-server.ts       # SSE streaming
+│   │   ├── ui/                 # Web UI views and partials (HTMX server-rendered)
 │   │   └── types.ts            # HTTP types
 │   ├── client/            # Client SDK
 │   │   ├── rest-client.ts      # REST client
 │   │   ├── sse-client.ts       # SSE client
 │   │   └── types.ts            # Client types
-│   ├── ingest/            # Code ingestion system (NEW)
+│   ├── ingest/            # Code ingestion system
 │   │   ├── ProjectScanner.ts   # Merkle tree + manifest
 │   │   ├── ManifestStore.ts    # Manifest persistence
 │   │   ├── CodeChunker.ts      # Code vs comment separation
@@ -937,14 +950,14 @@ ping-mem/
 │   │   └── index.ts            # Exports
 │   ├── graph/             # Knowledge graph layer
 │   │   ├── Neo4jClient.ts      # Neo4j connection
-│   │   ├── TemporalCodeGraph.ts # Bi-temporal code graph (NEW)
+│   │   ├── TemporalCodeGraph.ts # Bi-temporal code graph
 │   │   ├── EntityExtractor.ts  # NER
 │   │   ├── GraphManager.ts     # Graph operations
 │   │   └── RelationshipManager.ts
 │   ├── search/            # Search engines
 │   │   ├── QdrantClient.ts     # Qdrant connection
-│   │   ├── CodeIndexer.ts      # Code search (NEW)
-│   │   ├── DeterministicVectorizer.ts # Hash-based vectors (NEW)
+│   │   ├── CodeIndexer.ts      # Code search
+│   │   ├── DeterministicVectorizer.ts # Hash-based vectors
 │   │   ├── VectorIndex.ts      # Vector search
 │   │   ├── HybridSearchEngine.ts
 │   │   ├── LineageEngine.ts
@@ -956,7 +969,7 @@ ping-mem/
 │   ├── storage/           # SQLite event store + WriteLockManager
 │   ├── types/             # TypeScript definitions + agent error classes
 │   └── validation/        # Input validation (Zod schemas)
-├── examples/              # Usage examples (NEW)
+├── examples/              # Usage examples
 │   └── resume-tracking/   # Resume tracking demo
 ├── dist/                  # Compiled JavaScript
 ├── package.json
@@ -1142,62 +1155,42 @@ ping-mem is designed as **universal infrastructure**. Potential consumers:
 
 ---
 
-## Roadmap & Pending Work
+## Release History
 
-### Completed (v1.3.0)
-- ✅ Multi-tool SARIF integration (ESLint, Prettier, TypeScript)
-- ✅ Symbol-level attribution (AST-based for TS, regex for Python)
-- ✅ LLM-powered summaries with OpenAI + caching
-- ✅ Performance benchmarks (100, 1k, 10k, 100k findings)
-- ✅ Batch SARIF processing via `--sarifPaths`
+### v2.0.0 (2026-03-07)
+- Multi-agent memory orchestration (registration, quotas, TTL, isolation)
+- Knowledge store with cross-project FTS5 search
+- Causal reasoning and graph-based lineage
+- Multi-model embedding support (OpenAI, Gemini, deterministic)
+- Web UI with HTMX server-rendered views (10 routes)
+- Event-driven architecture with MemoryPubSub
+- Memory compression (heuristic and LLM modes)
+- All 66 audit findings resolved (security, quality, features)
 
-### Completed (v1.2.0)
-- ✅ Deterministic Diagnostics + Worklog System
-- ✅ DiagnosticsStore with content-addressable IDs
-- ✅ SARIF 2.1.0 parser and tsc-sarif generator
-- ✅ CLI collector with configHash/environmentHash
-- ✅ REST API endpoints (/api/v1/diagnostics/*)
-- ✅ MCP tools: diagnostics_*, worklog_*
-- ✅ GitHub Actions CI integration
+### v1.4.0 (2026-02-18)
+- Admin web UI with Basic Auth
+- API key management (AES-256-GCM encrypted)
+- Project management and LLM provider config
+- Production Docker Compose deployment
 
-### Completed (v1.1.0)
-- ✅ Deterministic project scanning with Merkle tree hashing
-- ✅ Code chunking (code vs comments vs docstrings)
-- ✅ Git history ingestion (commit DAG + diffs)
-- ✅ Neo4j temporal code graph with bi-temporal queries
-- ✅ Deterministic vectorization (hash-based, no ML)
-- ✅ Qdrant code indexing with full provenance
-- ✅ MCP/REST APIs for ingest, search, timeline
+### v1.3.0 (2026-01-29)
+- Multi-tool SARIF integration (ESLint, Prettier, TypeScript)
+- Symbol-level attribution (AST-based for TS, regex for Python)
+- LLM-powered summaries with OpenAI + caching
+- Performance benchmarks
 
-### In Progress (v1.4.0 - Uncommitted)
-- 🔄 **Admin System** - Web UI, API key management, LLM provider config
-  - Files: `src/admin/`, `src/http/admin.ts`
-  - Status: Functional, uncommitted, needs security hardening
-- 🔄 **Production Deployment** - Docker Compose, backup scripts, smoke tests
-  - Files: `docker-compose.prod.yml`, `scripts/*.sh`, `docs/DEPLOYMENT_ARCHITECTURE.md`
-  - Status: Functional, uncommitted
+### v1.2.0 (2026-01-29)
+- Deterministic Diagnostics + Worklog System
+- DiagnosticsStore with content-addressable IDs
+- SARIF 2.1.0 parser, CLI collector, REST endpoints, MCP tools
 
-### Pending: Security Fixes (from Audit 2026-02-01)
-- ⏳ **P0: SQL injection in EventStore.deleteSessions()** - String interpolation → parameterized queries
-- ⏳ **P0: Command injection in GitHistoryReader** - Unsanitized commit hashes in execSync
-- ⏳ **P0: Admin timing attack** - Basic auth uses `===` instead of `crypto.timingSafeEqual`
-- ⏳ **P0: Unvalidated JSON parsing** - Admin endpoints + SARIF ingestion lack schema validation
+### v1.1.0 (2026-01-29)
+- Deterministic temporal code ingestion
+- ProjectScanner, CodeChunker, GitHistoryReader
+- Neo4j temporal code graph, Qdrant code indexing
 
-### Pending: Quality Improvements (from Audit 2026-02-01)
-- ⏳ **P1: Neo4j session leaks** - TemporalCodeGraph missing try-finally on sessions
-- ⏳ **P1: Race conditions** - MemoryManager save, SessionManager max-sessions check
-- ⏳ **P1: Missing rate limiting** - HTTP endpoints lack rate limits
-- ⏳ **P1: CORS too permissive** - Default `origin: "*"` with `credentials: true`
-- ⏳ **P1: `any` types (20+ occurrences)** - bun-sqlite.d.ts, admin.ts, SARIF generators, SSE client
-- ⏳ **P2: Missing test coverage** - HTTP (1 test file), Admin (0), Ingest (1)
-- ⏳ **P2: Resource cleanup** - DiagnosticsStore/AdminStore not closed on server stop
-- ⏳ **P2: No schema migrations** - SQLite schema changes require manual data migration
-
-### Pending: Feature Work
-- ⏳ **Differential queries** - "What changed between commit A and B?"
-- ⏳ **MemoryManager hydration** - Replay events from EventStore on startup (currently ephemeral)
-- ⏳ **Input validation** - Zod schemas for all API request bodies
-- ⏳ **Structured logging** - Replace console.log/error with proper logger
+### v1.0.0 (2026-01-27)
+- Initial standalone release
 
 ---
 
@@ -1267,10 +1260,11 @@ curl https://api.openai.com/v1/embeddings \
 
 | Version | Date | Changes |
 |---------|------|---------|
-| 1.4.0 | 2026-02-01 | **Admin + Production Deployment (WIP)** - Admin web UI, API key management (AES-256-GCM), LLM provider config, production Docker Compose, backup/smoke-test scripts, deployment architecture docs. Codebase audit completed (82 findings). |
-| 1.3.0 | 2026-01-29 | **Multi-Tool + Symbol Attribution + LLM Summaries + Performance** - ESLint/Prettier SARIF generators, batch SARIF ingestion, SymbolExtractor (AST-based for TS, regex for Python), symbol-level finding attribution, LLM-powered summaries with OpenAI, SummaryCache, diagnostics_compare_tools/by_symbol/summarize MCP tools, comprehensive performance benchmarks (45 tests total), PERFORMANCE.md documentation |
-| 1.2.0 | 2026-01-29 | **Deterministic Diagnostics + Worklog** - DiagnosticsStore (content-addressable analysis IDs), SARIF 2.1.0 parser, tsc-sarif generator, CLI collector, REST endpoints, MCP diagnostics/worklog tools, GitHub Actions CI integration, comprehensive determinism tests (14 pass, 0 fail) |
-| 1.1.0 | 2026-01-29 | **Deterministic Temporal Code Ingestion** - ProjectScanner, CodeChunker, GitHistoryReader, TemporalCodeGraph, DeterministicVectorizer, CodeIndexer, IngestionService, MCP codebase tools |
+| 2.0.0 | 2026-03-07 | **Multi-Agent Memory Orchestration** - Agent registration/quotas/TTL, knowledge store with FTS5, causal reasoning, multi-model embeddings, Web UI (HTMX), MemoryPubSub, memory compression, all 66 audit findings resolved |
+| 1.4.0 | 2026-02-18 | **Admin + Production Deployment** - Admin web UI, API key management (AES-256-GCM), LLM provider config, production Docker Compose, deployment architecture |
+| 1.3.0 | 2026-01-29 | **Multi-Tool + Symbol Attribution + LLM Summaries** - ESLint/Prettier SARIF, SymbolExtractor, LLM summaries with OpenAI, performance benchmarks |
+| 1.2.0 | 2026-01-29 | **Deterministic Diagnostics + Worklog** - DiagnosticsStore, SARIF 2.1.0 parser, CLI collector, REST endpoints, MCP tools |
+| 1.1.0 | 2026-01-29 | **Deterministic Temporal Code Ingestion** - ProjectScanner, CodeChunker, GitHistoryReader, TemporalCodeGraph, DeterministicVectorizer, CodeIndexer |
 | 1.0.0 | 2026-01-27 | Initial standalone release |
 
 ---
@@ -1281,39 +1275,13 @@ curl https://api.openai.com/v1/embeddings \
 
 ## Codebase Audit Summary (2026-02-01)
 
-### Health Status
-- **TypeScript**: 0 errors (`bun run typecheck` passes)
-- **Tests**: 772 pass, 8 skipped, 0 failures (33 test files, 1840 assertions)
-- **Uncommitted**: 16 modified + 12 new untracked files (v1.4.0 WIP)
+**Status: All 66 findings resolved in v2.0.0 (Waves 1-5)**
 
-### Audit Statistics
-| Priority | Count | Key Issues |
+### Original Audit Statistics (All Fixed)
+| Priority | Count | Resolution |
 |----------|-------|------------|
-| **P0 Critical** | 7 | SQL injection, command injection, timing attacks, unvalidated JSON |
-| **P1 High** | 19 | Session leaks, race conditions, CORS, `any` types, missing rate limiting |
-| **P2 Medium** | 22 | Missing tests, resource leaks, type safety, no schema migrations |
-| **P3 Low** | 18 | Logging, docs, code style, embedded HTML |
-| **Total** | **66** | Across 3 audit domains |
-
-### Test Coverage Gaps
-| Area | Test Files | Status |
-|------|-----------|--------|
-| MCP Server | 8 | Good |
-| Diagnostics | 9 | Good |
-| Memory/Session/Storage | 5 | Good |
-| Search/Graph | 5 | Moderate |
-| HTTP REST | 1 | Poor |
-| HTTP Admin | 0 | Missing |
-| Ingest Pipeline | 1 | Poor |
-
-### Top Priority Fixes
-1. Fix SQL injection in `EventStore.deleteSessions()` (P0)
-2. Sanitize commit hashes in `GitHistoryReader` (P0)
-3. Use `crypto.timingSafeEqual` in admin auth (P0)
-4. Add Zod validation for API request bodies (P0/P1)
-5. Add try-finally to Neo4j sessions in `TemporalCodeGraph` (P1)
-
----
-
-## Memories:
-current vision and plan: `/Users/umasankr/.cursor/plans/deterministic_temporal_ingestion_06e320ca.plan.md`
+| **P0 Critical** | 7 | Fixed: SQL injection, command injection, timing attacks, Zod validation |
+| **P1 High** | 19 | Fixed: Session leaks, race conditions, CORS, `any` types, rate limiting |
+| **P2 Medium** | 22 | Fixed: Test coverage, resource leaks, type safety |
+| **P3 Low** | 18 | Fixed: Logging, docs, code style |
+| **Total** | **66** | All resolved |
