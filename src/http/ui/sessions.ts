@@ -18,7 +18,7 @@ export function registerSessionsRoutes(deps: UIDependencies) {
   return async (c: Context) => {
     try {
       const statusFilter = c.req.query("status") ?? "";
-      const tableHtml = renderSessionsTable(deps.sessionManager, { status: statusFilter });
+      const tableHtml = await renderSessionsTable(deps.sessionManager, { status: statusFilter }, deps.eventStore);
 
       const content = `
         <div class="search-bar">

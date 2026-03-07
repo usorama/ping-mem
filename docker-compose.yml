@@ -88,11 +88,11 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     restart: unless-stopped
 
   # ping-mem REST API Server (optional second instance for REST-only clients)
-  # Uses same persistent DB via volume mount
+  # WARNING: Do not run simultaneously with ping-mem SSE container — they share SQLite
   ping-mem-rest:
     build:
       context: .
@@ -132,11 +132,11 @@ services:
       ping-mem-qdrant:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 3003 || exit 1"]
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     restart: unless-stopped
     profiles:
       - rest-api

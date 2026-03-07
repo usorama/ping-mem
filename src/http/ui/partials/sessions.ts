@@ -37,7 +37,11 @@ function sessionStatusBadge(status: SessionStatus): string {
   return badge(status, variants[status] ?? "muted");
 }
 
-export function renderSessionsTable(sessionManager: SessionManager, filters: SessionFilters): string {
+export async function renderSessionsTable(
+  sessionManager: SessionManager,
+  filters: SessionFilters,
+  eventStore?: import("../../../storage/EventStore.js").EventStore
+): Promise<string> {
   const filterOpts = filters.status
     ? { status: filters.status as SessionStatus }
     : undefined;
@@ -50,9 +54,22 @@ export function renderSessionsTable(sessionManager: SessionManager, filters: Ses
   // Sort by most recent first
   const sorted = [...sessions].sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime());
 
-  const rows = sorted.map((s) => {
+  const rows = await Promise.all(sorted.map(async (s) => {
     const nameShort = s.name.length > 30 ? s.name.slice(0, 30) + "..." : s.name;
     const idShort = s.id.slice(0, 8);
+
+    // Get accurate counts from EventStore if available
+    let eventCount = s.eventCount;
+    let memoryCount = s.memoryCount;
+    if (eventStore) {
+      try {
+        const events = await eventStore.getBySession(s.id as SessionId);
+        eventCount = events.length;
+        memoryCount = events.filter((e) => e.eventType === "MEMORY_SAVED").length;
+      } catch {
+        // Fall back to in-memory counts
+      }
+    }
 
     return `<tr class="clickable"
       hx-get="/ui/partials/sessions/${encodeURIComponent(s.id)}"
@@ -63,10 +80,10 @@ export function renderSessionsTable(sessionManager: SessionManager, filters: Ses
       <td title="${escapeHtml(s.name)}">${escapeHtml(nameShort)}</td>
       <td>${sessionStatusBadge(s.status)}</td>
       <td title="${escapeHtml(s.startedAt.toISOString())}">${timeAgo(s.startedAt)}</td>
-      <td>${s.memoryCount}</td>
-      <td>${s.eventCount}</td>
+      <td>${memoryCount}</td>
+      <td>${eventCount}</td>
     </tr>`;
-  }).join("\n");
+  }));
 
   return `
     <div class="table-wrap">
@@ -164,7 +181,7 @@ export function registerSessionsPartialRoutes(deps: UIDependencies) {
     list: async (c: Context) => {
       try {
         const status = c.req.query("status") ?? "";
-        const html = renderSessionsTable(deps.sessionManager, { status });
+        const html = await renderSessionsTable(deps.sessionManager, { status }, deps.eventStore);
         return c.html(html);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
@@ -191,7 +208,14 @@ export function registerSessionsPartialRoutes(deps: UIDependencies) {
           payload: e.payload,
         }));
 
-        return c.html(renderSessionDetail(session, eventData));
+        // Compute accurate counts from EventStore
+        const sessionWithCounts = {
+          ...session,
+          eventCount: events.length,
+          memoryCount: events.filter((e) => e.eventType === "MEMORY_SAVED").length,
+        };
+
+        return c.html(renderSessionDetail(sessionWithCounts, eventData));
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         log.error("Detail error", { error: errMsg });

@@ -197,7 +197,22 @@ export function formatDate(date: Date | string): string {
 
 export function timeAgo(date: Date | string): string {
   const d = typeof date === "string" ? new Date(date) : date;
-  const seconds = Math.floor((Date.now() - d.getTime()) / 1000);
+  const diff = Date.now() - d.getTime();
+
+  // Future dates
+  if (diff < 0) {
+    const seconds = Math.floor(-diff / 1000);
+    if (seconds < 60) return `in ${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `in ${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `in ${hours}h`;
+    const days = Math.floor(hours / 24);
+    return `in ${days}d`;
+  }
+
+  // Past dates
+  const seconds = Math.floor(diff / 1000);
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
@@ -265,11 +280,15 @@ export function getClientIp(c: { req: { header: (name: string) => string | undef
     }
   }
   if (_getConnInfo) {
-    try {
-      const info = _getConnInfo(c);
-      if (info?.remote?.address) return info.remote.address;
-    } catch (err) {
-      log.warn("conninfo call failed", { error: err instanceof Error ? err.message : String(err) });
+    // Guard: getConnInfo requires c.env to be an Object (set by Bun's serve adapter)
+    const ctx = c as Record<string, unknown>;
+    if (ctx.env && typeof ctx.env === "object") {
+      try {
+        const info = _getConnInfo(c);
+        if (info?.remote?.address) return info.remote.address;
+      } catch {
+        // Fall through to "unknown" — don't log per-request
+      }
     }
   }
   return "unknown";

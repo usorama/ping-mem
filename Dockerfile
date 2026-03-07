@@ -31,6 +31,9 @@ COPY --from=builder /build/dist ./dist
 COPY --from=builder /build/package.json ./
 COPY --from=builder /build/node_modules ./node_modules
 
+# Copy static assets for UI (htmx, styles, chart.js)
+COPY --from=builder /build/src/static ./src/static
+
 # Create data directory
 RUN mkdir -p /data
 
@@ -43,9 +46,9 @@ ENV NODE_ENV=production
 # Expose default port
 EXPOSE 3000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD bun --version || exit 1
+# Health check — tests actual HTTP connectivity
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
 
 # Run the server
 CMD ["bun", "run", "dist/http/server.js"]

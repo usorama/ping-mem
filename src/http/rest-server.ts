@@ -476,6 +476,11 @@ export class RESTPingMemServer {
 
         const savedMemory = await memoryManager.save(body.key, body.value, options);
 
+        // Update session memory count
+        if (sessionId) {
+          await this.sessionManager.incrementMemoryCount(sessionId as SessionId);
+        }
+
         // Track relevance for the new memory
         this.relevanceEngine.ensureTracking(
           savedMemory.id,
