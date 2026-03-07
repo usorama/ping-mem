@@ -62,6 +62,8 @@ export class SessionManager {
   private sessions: Map<SessionId, Session>;
   private activeSessionId: SessionId | null;
   private checkpointTimers: Map<SessionId, NodeJS.Timeout>;
+  /** Promise-chain mutex to serialize startSession and prevent TOCTOU races on max-sessions check */
+  private sessionMutex: Promise<void>;
 
   constructor(config?: SessionManagerConfig) {
     this.eventStore = config?.eventStore ?? createInMemoryEventStore();
@@ -69,6 +71,7 @@ export class SessionManager {
     this.sessions = new Map();
     this.activeSessionId = null;
     this.checkpointTimers = new Map();
+    this.sessionMutex = Promise.resolve();
   }
 
   /**
@@ -156,73 +159,89 @@ export class SessionManager {
 
   /**
    * Start a new session
+   *
+   * Uses a promise-chain mutex to serialize the max-sessions check and
+   * session insertion, preventing TOCTOU race conditions when multiple
+   * callers invoke startSession concurrently.
    */
   async startSession(config: SessionConfig): Promise<Session> {
-    // Check max sessions limit
-    const activeSessions = Array.from(this.sessions.values()).filter(
-      (s) => s.status === "active"
-    );
-    if (activeSessions.length >= this.config.maxActiveSessions) {
-      throw new Error(`Maximum active sessions (${this.config.maxActiveSessions}) reached`);
-    }
+    // Chain onto the mutex so that the check-and-create is atomic
+    const resultPromise = this.sessionMutex.then(async () => {
+      // Check max sessions limit (now serialized)
+      const activeSessions = Array.from(this.sessions.values()).filter(
+        (s) => s.status === "active"
+      );
+      if (activeSessions.length >= this.config.maxActiveSessions) {
+        throw new Error(`Maximum active sessions (${this.config.maxActiveSessions}) reached`);
+      }
 
-    const sessionId = this.generateUUID();
-    const now = new Date();
+      const sessionId = this.generateUUID();
+      const now = new Date();
 
-    // Merge agentId into metadata when provided (no mutable global state)
-    const metadata: Record<string, unknown> = config.metadata ? { ...config.metadata } : {};
-    if (config.agentId !== undefined) {
-      metadata.agentId = config.agentId;
-    }
+      // Merge agentId into metadata when provided (no mutable global state)
+      const metadata: Record<string, unknown> = config.metadata ? { ...config.metadata } : {};
+      if (config.agentId !== undefined) {
+        metadata.agentId = config.agentId;
+      }
 
-    const session: Session = {
-      id: sessionId,
-      name: config.name,
-      status: "active",
-      startedAt: now,
-      memoryCount: 0,
-      eventCount: 0,
-      lastActivityAt: now,
-      metadata,
-    };
-    if (config.projectDir !== undefined) {
-      session.projectDir = config.projectDir;
-    }
-    if (config.continueFrom !== undefined) {
-      session.parentSessionId = config.continueFrom;
-    }
-    if (config.defaultChannel !== undefined) {
-      session.defaultChannel = config.defaultChannel;
-    }
+      const session: Session = {
+        id: sessionId,
+        name: config.name,
+        status: "active",
+        startedAt: now,
+        memoryCount: 0,
+        eventCount: 0,
+        lastActivityAt: now,
+        metadata,
+      };
+      if (config.projectDir !== undefined) {
+        session.projectDir = config.projectDir;
+      }
+      if (config.continueFrom !== undefined) {
+        session.parentSessionId = config.continueFrom;
+      }
+      if (config.defaultChannel !== undefined) {
+        session.defaultChannel = config.defaultChannel;
+      }
 
-    // Store session
-    this.sessions.set(sessionId, session);
-    this.activeSessionId = sessionId;
+      // Store session (inside the mutex, so max-sessions check is consistent)
+      this.sessions.set(sessionId, session);
+      this.activeSessionId = sessionId;
 
-    // Create SESSION_STARTED event
-    const eventData: SessionEventData = {
-      sessionId,
-      name: config.name,
-      config,
-      reason: config.continueFrom ? "continued" : "new",
-    };
+      // Create SESSION_STARTED event
+      const eventData: SessionEventData = {
+        sessionId,
+        name: config.name,
+        config,
+        reason: config.continueFrom ? "continued" : "new",
+      };
 
-    await this.eventStore.createEvent(sessionId, "SESSION_STARTED", eventData, {
-      projectDir: config.projectDir,
-      continueFrom: config.continueFrom,
+      await this.eventStore.createEvent(sessionId, "SESSION_STARTED", eventData, {
+        projectDir: config.projectDir,
+        continueFrom: config.continueFrom,
+      });
+
+      // Auto-load context if requested
+      if (config.autoLoadContext && config.continueFrom) {
+        await this.loadContextFrom(sessionId, config.continueFrom);
+      }
+
+      // Setup auto-checkpoint if enabled
+      if (this.config.autoCheckpointInterval > 0) {
+        this.setupAutoCheckpoint(sessionId);
+      }
+
+      return session;
     });
 
-    // Auto-load context if requested
-    if (config.autoLoadContext && config.continueFrom) {
-      await this.loadContextFrom(sessionId, config.continueFrom);
-    }
+    // Update mutex: always resolve (even if the above threw) so the chain
+    // doesn't permanently block subsequent calls.
+    this.sessionMutex = resultPromise.then(
+      () => {},
+      () => {}
+    );
 
-    // Setup auto-checkpoint if enabled
-    if (this.config.autoCheckpointInterval > 0) {
-      this.setupAutoCheckpoint(sessionId);
-    }
-
-    return session;
+    return resultPromise;
   }
 
   /**

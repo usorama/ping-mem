@@ -165,6 +165,38 @@ export const diagnosticsIngestSchema = z
 
 export type DiagnosticsIngestInput = z.infer<typeof diagnosticsIngestSchema>;
 
+/**
+ * Base schema without refinements — used by the REST endpoint
+ * so that SARIF payloads (which carry toolName/toolVersion inside the SARIF
+ * body) can pass initial validation before the SARIF is parsed.
+ *
+ * The endpoint applies the toolName/toolVersion check manually after
+ * SARIF extraction.
+ */
+export const diagnosticsIngestBaseSchema = z.object({
+  // Required fields
+  projectId: z.string().min(1, "projectId is required").max(500),
+  treeHash: z.string().min(1, "treeHash is required").max(500),
+  configHash: z.string().min(1, "configHash is required").max(500),
+
+  // Optional fields with defaults
+  commitHash: commitHashSchema.optional(),
+  environmentHash: z.string().max(500).optional(),
+  status: toolStatusSchema.default("failed"),
+  durationMs: nonNegativeInt.max(3_600_000).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+
+  // Tool info (either explicit or extracted from SARIF)
+  toolName: z.string().min(1).max(100).optional(),
+  toolVersion: z.string().min(1).max(50).optional(),
+
+  // Findings input (either SARIF or array, at least one required)
+  sarif: z.union([z.string().max(10_000_000), z.unknown()]).optional(),
+  findings: z.array(findingSchema).max(100_000).optional(),
+});
+
+export type DiagnosticsIngestBaseInput = z.infer<typeof diagnosticsIngestBaseSchema>;
+
 // ============================================================================
 // Query Latest Schema
 // ============================================================================

@@ -40,6 +40,8 @@ export function rateLimiter(options: {
 
     entry.count++;
     if (entry.count > maxRequests) {
+      const retryAfterSeconds = Math.ceil((entry.resetAt - now) / 1000);
+      c.header("Retry-After", String(retryAfterSeconds));
       return c.json({ error: "Too Many Requests", message: "Rate limit exceeded" }, 429);
     }
     return next();

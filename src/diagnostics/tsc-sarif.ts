@@ -37,6 +37,23 @@ function getSarifLevel(category: ts.DiagnosticCategory): "error" | "warning" | "
   }
 }
 
+/** Typed SARIF physical location for safe property access in sort comparisons */
+interface SarifPhysicalLocation {
+  artifactLocation?: { uri?: string };
+  region?: { startLine?: number; startColumn?: number; endLine?: number; endColumn?: number };
+}
+
+interface SarifLocation {
+  physicalLocation?: SarifPhysicalLocation;
+}
+
+interface SarifResultEntry {
+  ruleId?: string;
+  level?: string;
+  message?: { text: string };
+  locations?: SarifLocation[];
+}
+
 function normalizePath(filePath: string): string {
   return filePath.split(path.sep).join(path.posix.sep);
 }
@@ -71,12 +88,12 @@ function main(): void {
   });
 
   const diagnostics = ts.getPreEmitDiagnostics(program);
-  const results = diagnostics
-    .map((diag) => {
+  const results: SarifResultEntry[] = diagnostics
+    .map((diag): SarifResultEntry => {
       const message = ts.flattenDiagnosticMessageText(diag.messageText, "\n");
       const ruleId = `TS${diag.code}`;
       const level = getSarifLevel(diag.category);
-      const result: Record<string, unknown> = {
+      const result: SarifResultEntry = {
         ruleId,
         level,
         message: { text: message },
@@ -109,14 +126,14 @@ function main(): void {
       return result;
     })
     .sort((a, b) => {
-      const locA = ((a.locations as any)?.[0]?.physicalLocation?.artifactLocation?.uri ?? "") as string;
-      const locB = ((b.locations as any)?.[0]?.physicalLocation?.artifactLocation?.uri ?? "") as string;
+      const locA = a.locations?.[0]?.physicalLocation?.artifactLocation?.uri ?? "";
+      const locB = b.locations?.[0]?.physicalLocation?.artifactLocation?.uri ?? "";
       if (locA !== locB) return locA.localeCompare(locB);
-      const lineA = ((a.locations as any)?.[0]?.physicalLocation?.region?.startLine ?? 0) as number;
-      const lineB = ((b.locations as any)?.[0]?.physicalLocation?.region?.startLine ?? 0) as number;
+      const lineA = a.locations?.[0]?.physicalLocation?.region?.startLine ?? 0;
+      const lineB = b.locations?.[0]?.physicalLocation?.region?.startLine ?? 0;
       if (lineA !== lineB) return lineA - lineB;
-      const ruleA = (a.ruleId as string) ?? "";
-      const ruleB = (b.ruleId as string) ?? "";
+      const ruleA = a.ruleId ?? "";
+      const ruleB = b.ruleId ?? "";
       return ruleA.localeCompare(ruleB);
     });
 

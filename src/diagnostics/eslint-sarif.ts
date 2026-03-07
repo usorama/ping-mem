@@ -36,6 +36,23 @@ function getSarifLevel(severity: number): "error" | "warning" | "note" | "info" 
   }
 }
 
+/** Typed SARIF physical location for safe property access in sort comparisons */
+interface SarifPhysicalLocation {
+  artifactLocation?: { uri?: string };
+  region?: { startLine?: number; startColumn?: number; endLine?: number; endColumn?: number };
+}
+
+interface SarifLocation {
+  physicalLocation?: SarifPhysicalLocation;
+}
+
+interface SarifResultEntry {
+  ruleId?: string;
+  level?: string;
+  message?: { text: string };
+  locations?: SarifLocation[];
+}
+
 function normalizePath(filePath: string): string {
   return filePath.split(path.sep).join(path.posix.sep);
 }
@@ -84,10 +101,11 @@ function main(): void {
       stdio: ["ignore", "pipe", "pipe"],
       maxBuffer: 10 * 1024 * 1024, // 10MB buffer
     }).toString();
-  } catch (error: any) {
+  } catch (error: unknown) {
     // ESLint exits with non-zero when it finds issues
     // But still outputs JSON to stdout
-    eslintOutput = error.stdout?.toString() ?? "[]";
+    const execError = error as { stdout?: Buffer | string };
+    eslintOutput = execError.stdout?.toString() ?? "[]";
   }
 
   const eslintResults = JSON.parse(eslintOutput) as Array<{
@@ -104,24 +122,24 @@ function main(): void {
   }>;
 
   // Convert ESLint JSON to SARIF 2.1.0
-  const results: Array<Record<string, unknown>> = [];
+  const results: SarifResultEntry[] = [];
 
   for (const file of eslintResults) {
     for (const msg of file.messages) {
       const ruleId = msg.ruleId ?? "unknown";
       const level = getSarifLevel(msg.severity);
-      
-      const result: Record<string, unknown> = {
+
+      const result: SarifResultEntry = {
         ruleId,
         level,
         message: { text: msg.message },
       };
 
       if (msg.line !== undefined) {
-        const region: Record<string, unknown> = {
+        const region: Record<string, number> = {
           startLine: msg.line,
         };
-        
+
         if (msg.column !== undefined) {
           region.startColumn = msg.column;
         }
@@ -154,20 +172,20 @@ function main(): void {
 
   // Sort results deterministically (file > line > column > rule)
   results.sort((a, b) => {
-    const locA = ((a.locations as any)?.[0]?.physicalLocation?.artifactLocation?.uri ?? "") as string;
-    const locB = ((b.locations as any)?.[0]?.physicalLocation?.artifactLocation?.uri ?? "") as string;
+    const locA = a.locations?.[0]?.physicalLocation?.artifactLocation?.uri ?? "";
+    const locB = b.locations?.[0]?.physicalLocation?.artifactLocation?.uri ?? "";
     if (locA !== locB) return locA.localeCompare(locB);
-    
-    const lineA = ((a.locations as any)?.[0]?.physicalLocation?.region?.startLine ?? 0) as number;
-    const lineB = ((b.locations as any)?.[0]?.physicalLocation?.region?.startLine ?? 0) as number;
+
+    const lineA = a.locations?.[0]?.physicalLocation?.region?.startLine ?? 0;
+    const lineB = b.locations?.[0]?.physicalLocation?.region?.startLine ?? 0;
     if (lineA !== lineB) return lineA - lineB;
-    
-    const colA = ((a.locations as any)?.[0]?.physicalLocation?.region?.startColumn ?? 0) as number;
-    const colB = ((b.locations as any)?.[0]?.physicalLocation?.region?.startColumn ?? 0) as number;
+
+    const colA = a.locations?.[0]?.physicalLocation?.region?.startColumn ?? 0;
+    const colB = b.locations?.[0]?.physicalLocation?.region?.startColumn ?? 0;
     if (colA !== colB) return colA - colB;
-    
-    const ruleA = (a.ruleId as string) ?? "";
-    const ruleB = (b.ruleId as string) ?? "";
+
+    const ruleA = a.ruleId ?? "";
+    const ruleB = b.ruleId ?? "";
     return ruleA.localeCompare(ruleB);
   });
 

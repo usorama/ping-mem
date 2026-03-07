@@ -375,7 +375,7 @@ export class VectorIndex {
 
     try {
       let stmt = this.searchStmt;
-      let params: any[] = [queryEmbedding, threshold, limit];
+      let params: unknown[] = [queryEmbedding, threshold, limit];
 
       // If filtering by session or category, use a different query
       if (options.sessionId || options.category) {
@@ -411,7 +411,15 @@ export class VectorIndex {
         `);
       }
 
-      const rows = stmt.all(...params) as any[];
+      const rows = stmt.all(...params) as Array<{
+        memory_id: string;
+        session_id: string;
+        content: string;
+        similarity: number;
+        distance: number;
+        indexed_at: string;
+        metadata: string | null;
+      }>;
 
       return rows.map((row) => ({
         memoryId: row.memory_id,
@@ -439,18 +447,29 @@ export class VectorIndex {
     }
 
     try {
-      const row = this.getStmt.get(memoryId) as any;
+      const row = this.getStmt.get(memoryId) as {
+        memory_id: string;
+        session_id: string;
+        content: string;
+        category: string | null;
+        metadata: string | null;
+      } | undefined;
       if (!row) {
         return null;
       }
 
-      return {
+      const result: Omit<VectorEmbedding, "embedding"> = {
         memoryId: row.memory_id,
         sessionId: row.session_id,
         content: row.content,
-        category: row.category || undefined,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
       };
+      if (row.category) {
+        result.category = row.category;
+      }
+      if (row.metadata) {
+        result.metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+      }
+      return result;
     } catch (error) {
       throw new VectorIndexError(
         `Failed to get vector: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -487,15 +506,28 @@ export class VectorIndex {
     }
 
     try {
-      const rows = this.listStmt.all(sessionId, limit) as any[];
+      const rows = this.listStmt.all(sessionId, limit) as Array<{
+        memory_id: string;
+        session_id: string;
+        content: string;
+        category: string | null;
+        metadata: string | null;
+      }>;
 
-      return rows.map((row) => ({
-        memoryId: row.memory_id,
-        sessionId: row.session_id,
-        content: row.content,
-        category: row.category || undefined,
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      }));
+      return rows.map((row) => {
+        const entry: Omit<VectorEmbedding, "embedding"> = {
+          memoryId: row.memory_id,
+          sessionId: row.session_id,
+          content: row.content,
+        };
+        if (row.category) {
+          entry.category = row.category;
+        }
+        if (row.metadata) {
+          entry.metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+        }
+        return entry;
+      });
     } catch (error) {
       throw new VectorIndexError(
         `Failed to list vectors: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -514,7 +546,7 @@ export class VectorIndex {
     dbPath: string;
   }> {
     try {
-      const result = this.db.prepare("SELECT COUNT(*) as count FROM vector_memories").get() as any;
+      const result = this.db.prepare("SELECT COUNT(*) as count FROM vector_memories").get() as { count: number };
 
       return {
         totalVectors: result.count,

@@ -77,24 +77,40 @@ export class UserProfileStore {
     const stmt = this.db.prepare(
       "SELECT * FROM user_profiles WHERE user_id = ?"
     );
-    const row = stmt.get(userId) as any;
+    const row = stmt.get(userId) as {
+      user_id: string;
+      name: string | null;
+      role: string | null;
+      active_projects: string;
+      expertise: string;
+      current_focus: string;
+      relevance_threshold: number;
+      auto_checkpoint_interval: number;
+      updated_at: string;
+      metadata: string;
+    } | undefined;
 
     if (!row) {
       return null;
     }
 
-    return {
+    const profile: UserProfile = {
       userId: row.user_id,
-      name: row.name ?? undefined,
-      role: row.role ?? undefined,
-      activeProjects: JSON.parse(row.active_projects),
-      expertise: JSON.parse(row.expertise),
-      currentFocus: JSON.parse(row.current_focus),
+      activeProjects: JSON.parse(row.active_projects) as string[],
+      expertise: JSON.parse(row.expertise) as string[],
+      currentFocus: JSON.parse(row.current_focus) as string[],
       relevanceThreshold: row.relevance_threshold,
       autoCheckpointInterval: row.auto_checkpoint_interval,
       updatedAt: new Date(row.updated_at),
-      metadata: JSON.parse(row.metadata),
+      metadata: JSON.parse(row.metadata) as Record<string, unknown>,
     };
+    if (row.name !== null) {
+      profile.name = row.name;
+    }
+    if (row.role !== null) {
+      profile.role = row.role;
+    }
+    return profile;
   }
 
   updateProfile(userId: string, update: UserProfileUpdate): UserProfile {

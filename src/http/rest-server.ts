@@ -67,6 +67,7 @@ import {
   KnowledgeSearchSchema,
   KnowledgeIngestSchema,
 } from "../validation/api-schemas.js";
+import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
 import { KnowledgeStore } from "../knowledge/index.js";
 
 // ============================================================================
@@ -480,31 +481,38 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/diagnostics/ingest", async (c) => {
       try {
-        const body = await c.req.json();
+        const rawBody = await c.req.json();
 
-        const projectId = body.projectId as string | undefined;
-        const treeHash = body.treeHash as string | undefined;
-        const configHash = body.configHash as string | undefined;
-        if (!projectId || !treeHash || !configHash) {
+        // Validate request body with Zod schema
+        const parseResult = diagnosticsIngestBaseSchema.safeParse(rawBody);
+        if (!parseResult.success) {
+          const messages = parseResult.error.issues.map(
+            (i) => `${i.path.join(".")}: ${i.message}`
+          );
           return c.json<RESTErrorResponse>(
             {
               error: "Bad Request",
-              message: "projectId, treeHash, and configHash are required",
+              message: messages.join("; "),
             },
             400
           );
         }
 
-        const commitHash = body.commitHash as string | undefined;
-        const environmentHash = body.environmentHash as string | undefined;
-        const status =
-          (body.status as "passed" | "failed" | "partial" | undefined) ?? "failed";
-        const durationMs = body.durationMs as number | undefined;
-        const metadata = (body.metadata as Record<string, unknown> | undefined) ?? {};
+        const body = parseResult.data;
+        const {
+          projectId,
+          treeHash,
+          configHash,
+          commitHash,
+          environmentHash,
+          status,
+          durationMs,
+        } = body;
+        const metadata = body.metadata ?? {};
 
         let findings: FindingInput[] = [];
-        let toolName = body.toolName as string | undefined;
-        let toolVersion = body.toolVersion as string | undefined;
+        let toolName = body.toolName;
+        let toolVersion = body.toolVersion;
         let rawSarif: string | undefined;
 
         if (body.sarif !== undefined) {
@@ -524,7 +532,9 @@ export class RESTPingMemServer {
           toolVersion = toolVersion ?? parsed.toolVersion;
           rawSarif = typeof body.sarif === "string" ? body.sarif : JSON.stringify(body.sarif);
         } else if (Array.isArray(body.findings)) {
-          findings = body.findings as FindingInput[];
+          // The Zod findingSchema validates structure; cast to the internal
+          // FindingInput type which normalizeFindings() expects (flat fields).
+          findings = body.findings as unknown as FindingInput[];
         } else {
           return c.json<RESTErrorResponse>(
             {
@@ -1748,6 +1758,12 @@ export class RESTPingMemServer {
     }
     // Close event store (SQLite)
     await this.eventStore.close();
+    // Close diagnostics store (SQLite)
+    this.diagnosticsStore.close();
+    // Close admin store (SQLite) if provided
+    if (this.config.adminStore) {
+      this.config.adminStore.close();
+    }
     // Clear cached memory managers
     this.memoryManagers.clear();
     this.managerPromises.clear();

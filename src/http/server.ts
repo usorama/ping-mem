@@ -158,6 +158,7 @@ export async function startHTTPServer(): Promise<void> {
     httpServer.close();
     await serverInstance.stop();
     await eventStore.close();
+    diagnosticsStore.close();
     adminStore.close();
     console.log("[HTTP Server] Shutdown complete");
     process.exit(0);

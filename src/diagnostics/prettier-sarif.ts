@@ -23,6 +23,23 @@ function parseArgs(argv: string[]): Args {
   return args;
 }
 
+/** Typed SARIF physical location for safe property access in sort comparisons */
+interface SarifPhysicalLocation {
+  artifactLocation?: { uri?: string };
+  region?: { startLine?: number; startColumn?: number; endLine?: number; endColumn?: number };
+}
+
+interface SarifLocation {
+  physicalLocation?: SarifPhysicalLocation;
+}
+
+interface SarifResultEntry {
+  ruleId?: string;
+  level?: string;
+  message?: { text: string };
+  locations?: SarifLocation[];
+}
+
 function normalizePath(filePath: string): string {
   return filePath.split(path.sep).join(path.posix.sep);
 }
@@ -73,14 +90,15 @@ function main(): void {
       maxBuffer: 10 * 1024 * 1024, // 10MB buffer
     });
     prettierOutput = "";
-  } catch (error: any) {
+  } catch (error: unknown) {
     // Prettier exits with non-zero when files need formatting
     // It outputs the list of files to stderr
-    prettierOutput = error.stderr?.toString() ?? error.stdout?.toString() ?? "";
+    const execError = error as { stderr?: Buffer | string; stdout?: Buffer | string };
+    prettierOutput = execError.stderr?.toString() ?? execError.stdout?.toString() ?? "";
     hasIssues = true;
   }
 
-  const results: Array<Record<string, unknown>> = [];
+  const results: SarifResultEntry[] = [];
 
   if (hasIssues && prettierOutput) {
     // Parse the file list from Prettier output
@@ -89,14 +107,14 @@ function main(): void {
       .map(line => line.trim())
       .filter(line => {
         // Filter out non-file lines (headers, empty lines, etc.)
-        return line.length > 0 && 
-               !line.startsWith("[") && 
+        return line.length > 0 &&
+               !line.startsWith("[") &&
                !line.startsWith("Checking") &&
                !line.includes("Code style issues");
       });
 
     for (const filePath of files) {
-      const result: Record<string, unknown> = {
+      const result: SarifResultEntry = {
         ruleId: "prettier/prettier",
         level: "warning",
         message: { text: "File is not formatted according to Prettier rules" },
@@ -123,8 +141,8 @@ function main(): void {
 
   // Sort results deterministically (file path)
   results.sort((a, b) => {
-    const locA = ((a.locations as any)?.[0]?.physicalLocation?.artifactLocation?.uri ?? "") as string;
-    const locB = ((b.locations as any)?.[0]?.physicalLocation?.artifactLocation?.uri ?? "") as string;
+    const locA = a.locations?.[0]?.physicalLocation?.artifactLocation?.uri ?? "";
+    const locB = b.locations?.[0]?.physicalLocation?.artifactLocation?.uri ?? "";
     return locA.localeCompare(locB);
   });
 

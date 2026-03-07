@@ -47,7 +47,7 @@ export class SSEPingMemClient implements PingMemClient {
   private currentSessionId: SessionId | undefined;
   private eventSource: EventSource | null = null;
   private messageQueue: Map<string, {
-    resolve: (value: any) => void;
+    resolve: (value: unknown) => void;
     reject: (error: Error) => void;
     timeout: NodeJS.Timeout;
   }> = new Map();
@@ -291,8 +291,12 @@ export class SSEPingMemClient implements PingMemClient {
         reject(new NetworkError(`Request timeout after ${this.config.timeout}ms`));
       }, this.config.timeout);
 
-      // Store pending request
-      this.messageQueue.set(requestId, { resolve, reject, timeout });
+      // Store pending request (widen resolve type for the generic map)
+      this.messageQueue.set(requestId, {
+        resolve: resolve as (value: unknown) => void,
+        reject,
+        timeout,
+      });
 
       // Send request via HTTP POST
       const messageUrl = new URL("/messages", this.config.baseUrl);
@@ -352,7 +356,11 @@ export class SSEPingMemClient implements PingMemClient {
   /**
    * Create an error from an MCP error response
    */
-  private createErrorFromResponse(response: any): Error {
+  private createErrorFromResponse(response: {
+    content?: Array<{ text?: string }>;
+    error?: { code?: string; message?: string; details?: Record<string, unknown> };
+    status?: number;
+  }): Error {
     const message =
       response.content?.[0]?.text ||
       response.error?.message ||
