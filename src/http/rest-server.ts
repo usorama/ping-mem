@@ -293,29 +293,29 @@ export class RESTPingMemServer {
         }
       }
 
-      const snapshot = await probeSystemHealth({
-        eventStore: this.eventStore,
-        ...(this.graphManager ? { graphManager: this.graphManager } : {}),
-        ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
-        diagnosticsStore: this.diagnosticsStore,
-      });
+      try {
+        const snapshot = await probeSystemHealth({
+          eventStore: this.eventStore,
+          ...(this.graphManager ? { graphManager: this.graphManager } : {}),
+          ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
+          diagnosticsStore: this.diagnosticsStore,
+        });
 
-      return c.json({
-        status: snapshot.status,
-        timestamp: snapshot.timestamp,
-        components: snapshot.components,
-      });
+        return c.json({
+          status: snapshot.status,
+          timestamp: snapshot.timestamp,
+          components: snapshot.components,
+        });
+      } catch (error) {
+        log.error("Health probe failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return c.json({ status: "unhealthy", error: "Health probe failed" }, 500);
+      }
     });
 
     this.app.get("/api/v1/observability/status", async (c) => {
       try {
-        if (!this.config.ingestionService) {
-          return c.json<RESTErrorResponse>(
-            { error: "Service Unavailable", message: "Ingestion service not configured" },
-            503
-          );
-        }
-
         const snapshot = await probeSystemHealth({
           eventStore: this.eventStore,
           ...(this.graphManager ? { graphManager: this.graphManager } : {}),

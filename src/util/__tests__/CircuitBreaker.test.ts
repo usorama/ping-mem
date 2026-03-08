@@ -153,6 +153,26 @@ describe("CircuitBreaker", () => {
     expect(states).toContain("closed");
   });
 
+  test("does not treat 'connection closed' as transient (avoids retry on intentional shutdown)", async () => {
+    let callCount = 0;
+    const policy = createServicePolicy({
+      name: "test-closed",
+      consecutiveFailures: 5,
+      maxRetries: 2,
+      timeoutMs: 100,
+    });
+
+    await expect(
+      policy.execute(async () => {
+        callCount++;
+        throw new Error("connection closed");
+      })
+    ).rejects.toThrow();
+
+    // Should NOT retry — "connection closed" is not transient
+    expect(callCount).toBe(1);
+  });
+
   test("name property returns configured name", () => {
     const policy = createServicePolicy({ name: "my-service" });
     expect(policy.name).toBe("my-service");

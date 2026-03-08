@@ -33,7 +33,6 @@ function isTransient(err: unknown): boolean {
     message.includes("timeout") ||
     message.includes("connection refused") ||
     message.includes("connection reset") ||
-    message.includes("connection closed") ||
     message.includes("socket hang up")
   );
 }

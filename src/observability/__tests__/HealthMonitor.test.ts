@@ -229,4 +229,60 @@ describe("HealthMonitor", () => {
 
     expect(monitor.getStatus().activeAlerts.length).toBe(0);
   });
+
+  test("severity escalation (warn→critical) bypasses dedup window", () => {
+    const monitor = makeMonitor();
+    const internals = getInternals(monitor);
+
+    // Fire warning alert
+    internals.checkThresholds({
+      source: "sqlite",
+      status: "healthy",
+      metrics: [{ name: "wal_size_bytes", value: 60_000_000, unit: "bytes" }],
+    });
+
+    const warnAlert = monitor.getStatus().activeAlerts.find((a) => a.key === "sqlite:wal_size_bytes");
+    expect(warnAlert?.severity).toBe("warning");
+
+    // Escalate to critical within same dedup window — should bypass
+    internals.checkThresholds({
+      source: "sqlite",
+      status: "healthy",
+      metrics: [{ name: "wal_size_bytes", value: 250_000_000, unit: "bytes" }],
+    });
+
+    const critAlert = monitor.getStatus().activeAlerts.find((a) => a.key === "sqlite:wal_size_bytes");
+    expect(critAlert?.severity).toBe("critical");
+  });
+
+  test("same severity within dedup window is still suppressed", () => {
+    const monitor = makeMonitor();
+    const internals = getInternals(monitor);
+
+    // Fire warning alert
+    internals.checkThresholds({
+      source: "sqlite",
+      status: "healthy",
+      metrics: [{ name: "wal_size_bytes", value: 60_000_000, unit: "bytes" }],
+    });
+
+    const firstAlert = monitor.getStatus().activeAlerts.find((a) => a.key === "sqlite:wal_size_bytes");
+    expect(firstAlert).toBeDefined();
+    const firstTimestamp = firstAlert?.timestamp;
+
+    // Same severity within dedup window — should be suppressed (timestamp unchanged)
+    internals.checkThresholds({
+      source: "sqlite",
+      status: "healthy",
+      metrics: [{ name: "wal_size_bytes", value: 70_000_000, unit: "bytes" }],
+    });
+
+    const secondAlert = monitor.getStatus().activeAlerts.find((a) => a.key === "sqlite:wal_size_bytes");
+    expect(secondAlert?.timestamp).toBe(firstTimestamp);
+  });
+
+  test("lastQualityTickAt is null before qualityTick runs", () => {
+    const monitor = makeMonitor();
+    expect(monitor.getStatus().lastQualityTickAt).toBeNull();
+  });
 });

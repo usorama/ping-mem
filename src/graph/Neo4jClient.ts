@@ -291,10 +291,15 @@ export class Neo4jClient {
     cypher: string,
     params?: Record<string, unknown>
   ): Promise<T[]> {
-    const session = this.getSession(neo4j.session.READ);
-
     try {
-      const result = await this.servicePolicy.execute(() => session.run(cypher, params));
+      const result = await this.servicePolicy.execute(async () => {
+        const session = this.getSession(neo4j.session.READ);
+        try {
+          return await session.run(cypher, params);
+        } finally {
+          await session.close();
+        }
+      });
 
       return result.records.map((record: Neo4jRecord) => {
         const obj: Record<string, unknown> = {};
@@ -319,8 +324,6 @@ export class Neo4jClient {
         errorCode,
         error instanceof Error ? error : undefined
       );
-    } finally {
-      await session.close();
     }
   }
 
@@ -344,10 +347,15 @@ export class Neo4jClient {
     cypher: string,
     params?: Record<string, unknown>
   ): Promise<T> {
-    const session = this.getSession(neo4j.session.WRITE);
-
     try {
-      const result = await this.servicePolicy.execute(() => session.run(cypher, params));
+      const result = await this.servicePolicy.execute(async () => {
+        const session = this.getSession(neo4j.session.WRITE);
+        try {
+          return await session.run(cypher, params);
+        } finally {
+          await session.close();
+        }
+      });
 
       // If there are records, return the first one
       if (result.records.length > 0) {
@@ -387,8 +395,6 @@ export class Neo4jClient {
         errorCode,
         error instanceof Error ? error : undefined
       );
-    } finally {
-      await session.close();
     }
   }
 

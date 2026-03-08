@@ -49,12 +49,11 @@ function getWalSizeBytes(eventStore: EventStore): number {
     return 0;
   }
 
-  const walPath = `${dbPath}-wal`;
-  if (!fs.existsSync(walPath)) {
+  try {
+    return fs.statSync(`${dbPath}-wal`).size;
+  } catch {
     return 0;
   }
-
-  return fs.statSync(walPath).size;
 }
 
 function getFreelistRatio(eventStore: EventStore): number {

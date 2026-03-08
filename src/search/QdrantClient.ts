@@ -521,10 +521,12 @@ export class QdrantClientWrapper {
     }
 
     try {
-      await this.client.delete(this.config.collectionName, {
-        wait: true,
-        points: [memoryId],
-      });
+      await this.servicePolicy.execute(() =>
+        this.client!.delete(this.config.collectionName, {
+          wait: true,
+          points: [memoryId],
+        })
+      );
       return true;
     } catch (error) {
       log.warn("deleteVector failed", {

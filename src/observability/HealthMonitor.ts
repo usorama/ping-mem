@@ -159,20 +159,24 @@ export class HealthMonitor {
             { name: "integrity_ok", value: sqliteMetrics.integrity_ok ?? 0, unit: "boolean" },
           ],
         });
-
-        if ((sqliteMetrics.wal_size_bytes ?? 0) > 50_000_000) {
-          this.deps.eventStore.getDatabase().exec("PRAGMA wal_checkpoint(TRUNCATE)");
-          log.info("SQLite WAL checkpoint executed", { walSizeBytes: sqliteMetrics.wal_size_bytes ?? 0 });
-        }
       }
     } catch (error) {
-      log.error("Fast tick failed", { error: error instanceof Error ? error.message : String(error) });
+      log.error("Fast tick probe failed", { error: error instanceof Error ? error.message : String(error) });
+    }
+
+    // WAL checkpoint in separate try-catch so probe data is preserved even if checkpoint fails
+    try {
+      const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
+      if (walSize > 50_000_000) {
+        this.deps.eventStore.getDatabase().exec("PRAGMA wal_checkpoint(TRUNCATE)");
+        log.info("SQLite WAL checkpoint completed", { walSizeBytes: walSize });
+      }
+    } catch (error) {
+      log.warn("WAL checkpoint failed", { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
   private async qualityTick(): Promise<void> {
-    this.lastQualityTickAt = new Date().toISOString();
-
     if (this.deps.services.neo4jClient && this.deps.services.neo4jClient.isConnected()) {
       try {
         const nullRows = await this.deps.services.neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.nullProperties);
@@ -219,6 +223,8 @@ export class HealthMonitor {
         log.warn("Qdrant quality tick failed", { error: error instanceof Error ? error.message : String(error) });
       }
     }
+
+    this.lastQualityTickAt = new Date().toISOString();
   }
 
   private componentToProbeStatus(status: HealthSnapshot["components"]["sqlite"]["status"]): "healthy" | "degraded" | "unhealthy" {
@@ -260,7 +266,14 @@ export class HealthMonitor {
   private alert(severity: AlertSeverity, key: string, source: ProbeSource, message: string): void {
     const now = Date.now();
     const previous = this.lastAlerts.get(key) ?? 0;
-    if (now - previous < this.dedupWindowMs) {
+
+    // Allow severity escalation (warn→critical) to bypass dedup window
+    const existingAlert = this.activeAlerts.get(key);
+    const isSeverityEscalation = existingAlert !== undefined
+      && existingAlert.severity === "warning"
+      && severity === "critical";
+
+    if (!isSeverityEscalation && now - previous < this.dedupWindowMs) {
       return;
     }
 

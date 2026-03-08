@@ -200,14 +200,14 @@ export async function startHTTPServer(): Promise<void> {
   });
   process.on("uncaughtException", (error) => {
     log.error("Uncaught exception", { error: error.message, stack: error.stack });
-    void shutdown("uncaughtException").finally(() => process.exit(1));
+    void shutdown("uncaughtException");
   });
   process.on("unhandledRejection", (reason) => {
     log.error("Unhandled rejection", {
       error: reason instanceof Error ? reason.message : String(reason),
       stack: reason instanceof Error ? reason.stack : undefined,
     });
-    void shutdown("unhandledRejection").finally(() => process.exit(1));
+    void shutdown("unhandledRejection");
   });
 }
 
