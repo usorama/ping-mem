@@ -50,7 +50,7 @@ export class TemporalCodeGraph {
     this.neo4j = options.neo4jClient;
   }
 
-  private static readonly BATCH_SIZE = 500;
+  private static readonly BATCH_SIZE = 100;
   private static readonly ALLOWED_SORT_VALUES = new Set(["lastIngestedAt", "filesCount", "rootPath"]);
 
   /**

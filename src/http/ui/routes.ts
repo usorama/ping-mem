@@ -30,6 +30,7 @@ import { registerEventsRoutes } from "./events.js";
 import { registerEventsPartialRoutes } from "./partials/events.js";
 import { registerWorklogRoutes } from "./worklog.js";
 import { registerWorklogPartialRoutes } from "./partials/worklog.js";
+import { registerCodebaseRoutes } from "./codebase.js";
 import { registerChatRoutes } from "./chat-api.js";
 import { registerHealthPartialRoute } from "./partials/health.js";
 
@@ -106,6 +107,9 @@ export function registerUIRoutes(app: Hono<AppEnv>, deps: UIDependencies): void 
   // Worklog HTMX partials
   const worklogPartials = registerWorklogPartialRoutes(deps);
   app.get("/ui/partials/worklog", worklogPartials.list);
+
+  // Codebase Architecture Diagram
+  app.get("/ui/codebase", registerCodebaseRoutes(deps));
 
   // Chat API
   const chatRoutes = registerChatRoutes(deps);

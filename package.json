@@ -1,6 +1,6 @@
 {
   "name": "ping-mem",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Universal Memory Layer for AI Agents",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

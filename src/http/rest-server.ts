@@ -362,11 +362,25 @@ export class RESTPingMemServer {
           );
         }
         const body = parseResult.data;
+
+        // Resolve agent identity: body field takes priority, then X-Agent-ID header
+        const agentId = body.agentId ?? c.req.header("x-agent-id");
+        const agentRole = c.req.header("x-agent-role");
+
         const session = await this.sessionManager.startSession({
           name: body.name,
           ...(body.projectDir !== undefined ? { projectDir: body.projectDir } : {}),
           ...(body.continueFrom !== undefined ? { continueFrom: body.continueFrom } : {}),
           ...(body.defaultChannel !== undefined ? { defaultChannel: body.defaultChannel } : {}),
+          ...(agentId !== undefined ? { agentId: createAgentId(agentId) } : {}),
+          ...(agentId !== undefined || agentRole !== undefined
+            ? {
+                metadata: {
+                  ...(agentId !== undefined ? { agentId } : {}),
+                  ...(agentRole !== undefined ? { agentRole } : {}),
+                },
+              }
+            : {}),
         });
 
         this.currentSessionId = session.id;
@@ -380,6 +394,14 @@ export class RESTPingMemServer {
 
         if (this.vectorIndex) {
           memoryConfig.vectorIndex = this.vectorIndex;
+        }
+
+        // Propagate agent identity to memory manager
+        if (agentId) {
+          memoryConfig.agentId = createAgentId(agentId);
+        }
+        if (agentRole) {
+          memoryConfig.agentRole = agentRole;
         }
 
         const memoryManager = new MemoryManager(memoryConfig);
@@ -457,6 +479,15 @@ export class RESTPingMemServer {
               message: "No active session. Call /api/v1/session/start first.",
             },
             400
+          );
+        }
+
+        // Validate session exists before proceeding
+        const existingSession = this.sessionManager.getSession(sessionId as SessionId);
+        if (!existingSession) {
+          return c.json<RESTErrorResponse>(
+            { error: "Not Found", message: `Session not found: ${sessionId}` },
+            404
           );
         }
 
@@ -984,6 +1015,15 @@ export class RESTPingMemServer {
           );
         }
 
+        // Validate session exists
+        const existingSession = this.sessionManager.getSession(sessionId as SessionId);
+        if (!existingSession) {
+          return c.json<RESTErrorResponse>(
+            { error: "Not Found", message: `Session not found: ${sessionId}` },
+            404
+          );
+        }
+
         const memoryManager = await this.getMemoryManager(sessionId);
 
         // Use recall to get memory by key
@@ -1033,6 +1073,15 @@ export class RESTPingMemServer {
           );
         }
 
+        // Validate session exists
+        const existingSession = this.sessionManager.getSession(sessionId as SessionId);
+        if (!existingSession) {
+          return c.json<RESTErrorResponse>(
+            { error: "Not Found", message: `Session not found: ${sessionId}` },
+            404
+          );
+        }
+
         const memoryManager = await this.getMemoryManager(sessionId);
         const deleted = await memoryManager.delete(key);
 
@@ -1076,6 +1125,15 @@ export class RESTPingMemServer {
               message: "No active session",
             },
             400
+          );
+        }
+
+        // Validate session exists
+        const existingSession = this.sessionManager.getSession(sessionId as SessionId);
+        if (!existingSession) {
+          return c.json<RESTErrorResponse>(
+            { error: "Not Found", message: `Session not found: ${sessionId}` },
+            404
           );
         }
 
@@ -1181,9 +1239,11 @@ export class RESTPingMemServer {
           ? await this.sessionManager.getSession(this.currentSessionId)
           : null;
 
+        const eventStoreStats = this.eventStore.getStats();
         const stats = {
           eventStore: {
-            totalEvents: 0, // EventStore doesn't expose getEventCount publicly
+            totalEvents: eventStoreStats.eventCount,
+            checkpoints: eventStoreStats.checkpointCount,
           },
           sessions: {
             total: this.sessionManager.listSessions().length,

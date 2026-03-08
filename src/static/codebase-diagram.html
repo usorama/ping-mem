@@ -1,0 +1,1431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ping-mem — Codebase Overview</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --font-body: 'IBM Plex Sans', system-ui, sans-serif;
+      --font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+      --font-serif: 'IBM Plex Serif', Georgia, serif;
+
+      --bg: #08111f;
+      --surface: #0d1a2e;
+      --surface-elevated: #122038;
+      --surface-high: #172843;
+      --border: rgba(255,255,255,0.07);
+      --border-bright: rgba(255,255,255,0.14);
+
+      --text: #e2e8f0;
+      --text-dim: #64748b;
+      --text-mid: #94a3b8;
+
+      --teal: #2dd4bf;
+      --teal-dim: rgba(45,212,191,0.1);
+      --teal-mid: rgba(45,212,191,0.2);
+      --amber: #fbbf24;
+      --amber-dim: rgba(251,191,36,0.1);
+      --amber-mid: rgba(251,191,36,0.2);
+      --rose: #fb7185;
+      --rose-dim: rgba(251,113,133,0.1);
+      --green: #4ade80;
+      --green-dim: rgba(74,222,128,0.1);
+      --slate: #38bdf8;
+      --slate-dim: rgba(56,189,248,0.1);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      background-image:
+        radial-gradient(ellipse at 30% 0%, rgba(45,212,191,0.06) 0%, transparent 60%),
+        radial-gradient(circle, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 100% 100%, 28px 28px;
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+      font-size: 14px;
+    }
+
+    /* NAV */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(8,17,31,0.92);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-bright);
+      padding: 0 2rem;
+      display: flex;
+      align-items: center;
+      gap: 0;
+      height: 48px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    nav::-webkit-scrollbar { display: none; }
+    .nav-brand {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--teal);
+      margin-right: 2rem;
+      white-space: nowrap;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+    nav a {
+      font-size: 12px;
+      color: var(--text-dim);
+      text-decoration: none;
+      padding: 0 0.75rem;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      white-space: nowrap;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+      font-weight: 400;
+    }
+    nav a:hover { color: var(--text); border-bottom-color: var(--border-bright); }
+
+    /* LAYOUT */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    /* HERO */
+    .hero {
+      padding: 4rem 2rem 3rem;
+      max-width: 1200px;
+      margin: 0 auto;
+      border-bottom: 1px solid var(--border);
+    }
+    .hero-tag {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--teal);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .hero-tag::before {
+      content: '';
+      width: 24px;
+      height: 1px;
+      background: var(--teal);
+    }
+    h1 {
+      font-family: var(--font-mono);
+      font-size: clamp(2.2rem, 5vw, 3.5rem);
+      font-weight: 500;
+      color: var(--text);
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+      margin-bottom: 0.75rem;
+    }
+    h1 span { color: var(--teal); }
+    .hero-sub {
+      font-size: 1rem;
+      color: var(--text-mid);
+      max-width: 640px;
+      margin-bottom: 1.5rem;
+      line-height: 1.7;
+    }
+    .hero-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+    .badge {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 3px;
+      border: 1px solid var(--border-bright);
+      color: var(--text-dim);
+      background: var(--surface);
+      white-space: nowrap;
+    }
+    .badge.teal { border-color: var(--teal-mid); color: var(--teal); background: var(--teal-dim); }
+    .badge.amber { border-color: var(--amber-mid); color: var(--amber); background: var(--amber-dim); }
+
+    /* SECTIONS */
+    section {
+      padding: 3rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    section:last-child { border-bottom: none; }
+
+    .section-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .section-label .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: 0.6;
+    }
+    h2 {
+      font-family: var(--font-mono);
+      font-size: 1.25rem;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 1.5rem;
+      letter-spacing: -0.01em;
+    }
+    h3 {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--text-mid);
+      margin-bottom: 0.5rem;
+      letter-spacing: 0.02em;
+    }
+
+    /* CARDS */
+    .ve-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1.25rem;
+    }
+    .ve-card--elevated {
+      background: var(--surface-elevated);
+      border-color: var(--border-bright);
+    }
+    .ve-card--teal { border-left: 3px solid var(--teal); }
+    .ve-card--amber { border-left: 3px solid var(--amber); }
+    .ve-card--rose { border-left: 3px solid var(--rose); }
+    .ve-card--green { border-left: 3px solid var(--green); }
+    .ve-card--slate { border-left: 3px solid var(--slate); }
+
+    .card-icon {
+      width: 32px; height: 32px;
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 0.75rem;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .card-icon.teal { background: var(--teal-dim); color: var(--teal); border: 1px solid var(--teal-mid); }
+    .card-icon.amber { background: var(--amber-dim); color: var(--amber); border: 1px solid var(--amber-mid); }
+    .card-icon.rose { background: var(--rose-dim); color: var(--rose); border: 1px solid rgba(251,113,133,0.25); }
+    .card-icon.green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(74,222,128,0.25); }
+    .card-icon.slate { background: var(--slate-dim); color: var(--slate); border: 1px solid rgba(56,189,248,0.25); }
+
+    .card-title {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 0.35rem;
+    }
+    .card-desc {
+      font-size: 12px;
+      color: var(--text-mid);
+      line-height: 1.6;
+    }
+    .card-list {
+      list-style: none;
+      margin-top: 0.75rem;
+    }
+    .card-list li {
+      font-size: 12px;
+      color: var(--text-mid);
+      padding: 3px 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+    }
+    .card-list li::before {
+      content: '—';
+      color: var(--text-dim);
+      flex-shrink: 0;
+      margin-top: 0.5px;
+    }
+    code {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 1px 5px;
+      color: var(--teal);
+    }
+
+    /* GRIDS */
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+    .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+    .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; }
+
+    /* MERMAID */
+    .mermaid-wrap {
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--border-bright);
+      border-radius: 6px;
+      padding: 1.5rem;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .mermaid-controls {
+      position: absolute;
+      top: 8px; right: 8px;
+      display: flex; gap: 4px;
+      z-index: 10;
+    }
+    .mermaid-controls button {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border-bright);
+      color: var(--text-dim);
+      padding: 3px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+    }
+    .mermaid-controls button:hover { color: var(--text); background: var(--surface-high); }
+    .mermaid-content { width: 100%; display: flex; justify-content: center; cursor: zoom-in; transition: transform 0.2s; }
+    .mermaid { max-width: 100%; }
+
+    /* TABLES */
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+    thead { background: var(--surface-elevated); }
+    thead th {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-bright);
+      white-space: nowrap;
+    }
+    tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: rgba(255,255,255,0.02); }
+    tbody td {
+      padding: 9px 14px;
+      color: var(--text-mid);
+      vertical-align: top;
+    }
+    tbody td:first-child { color: var(--text); }
+    .method-get { color: var(--green); font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+    .method-post { color: var(--amber); font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+    .method-del { color: var(--rose); font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+    .sev-p0 { color: var(--rose); font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+    .sev-p1 { color: var(--amber); font-family: var(--font-mono); font-size: 11px; font-weight: 500; }
+
+    /* CALLOUT */
+    .callout {
+      background: rgba(251,113,133,0.06);
+      border: 1px solid rgba(251,113,133,0.2);
+      border-left: 3px solid var(--rose);
+      border-radius: 6px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .callout-warn {
+      background: rgba(251,191,36,0.06);
+      border-color: rgba(251,191,36,0.2);
+      border-left-color: var(--amber);
+    }
+    .callout-note {
+      background: rgba(45,212,191,0.06);
+      border-color: rgba(45,212,191,0.2);
+      border-left-color: var(--teal);
+    }
+    .callout-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--rose);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 0.35rem;
+    }
+    .callout-warn .callout-title { color: var(--amber); }
+    .callout-note .callout-title { color: var(--teal); }
+    .callout p { font-size: 12.5px; color: var(--text-mid); line-height: 1.6; }
+
+    /* PIPE STEP */
+    .pipeline {
+      display: flex;
+      align-items: flex-start;
+      gap: 0;
+      flex-wrap: wrap;
+    }
+    .pipe-step {
+      flex: 1;
+      min-width: 160px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      position: relative;
+    }
+    .pipe-step + .pipe-step { margin-left: -1px; border-radius: 0; }
+    .pipe-step:first-child { border-radius: 6px 0 0 6px; }
+    .pipe-step:last-child { border-radius: 0 6px 6px 0; }
+    .pipe-num {
+      font-family: var(--font-mono);
+      font-size: 20px;
+      font-weight: 500;
+      color: var(--border-bright);
+      margin-bottom: 0.35rem;
+    }
+    .pipe-name {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text);
+      font-weight: 500;
+      margin-bottom: 0.25rem;
+    }
+    .pipe-detail { font-size: 11px; color: var(--text-dim); line-height: 1.5; }
+
+    /* ROUTE GRID */
+    .route-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      background: var(--surface-elevated);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 10px;
+      color: var(--text-mid);
+      white-space: nowrap;
+    }
+    .route-pill .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--teal); flex-shrink: 0; }
+
+    /* TOOL CHIP */
+    .tool-chip {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 3px;
+      background: var(--teal-dim);
+      border: 1px solid var(--teal-mid);
+      color: var(--teal);
+      white-space: nowrap;
+    }
+
+    /* FADE-IN ANIMATION */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .fade-up { animation: fadeUp 0.5s ease-out both; }
+    .fade-up:nth-child(1) { animation-delay: 0.05s; }
+    .fade-up:nth-child(2) { animation-delay: 0.10s; }
+    .fade-up:nth-child(3) { animation-delay: 0.15s; }
+    .fade-up:nth-child(4) { animation-delay: 0.20s; }
+    .fade-up:nth-child(5) { animation-delay: 0.25s; }
+    .fade-up:nth-child(6) { animation-delay: 0.30s; }
+    @media (prefers-reduced-motion: reduce) { .fade-up { animation: none; } }
+
+    /* TWO-COL LAYOUT */
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+    @media (max-width: 720px) {
+      .two-col { grid-template-columns: 1fr; }
+      .pipeline { flex-direction: column; }
+      .pipe-step { margin-left: 0 !important; border-radius: 6px !important; }
+    }
+
+    /* SPACER */
+    .spacer { height: 0.75rem; }
+
+    /* TOOLS WRAP */
+    .tools-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    /* PORT LABEL */
+    .port-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+    .port-label .port {
+      color: var(--amber);
+      font-weight: 500;
+    }
+
+    /* STATUS DOT */
+    .status-ok { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; }
+    .status-warn { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); display: inline-block; }
+    .status-err { width: 7px; height: 7px; border-radius: 50%; background: var(--rose); display: inline-block; }
+
+    pre {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-x: auto;
+      color: var(--text-mid);
+      white-space: pre;
+    }
+    pre .hl { color: var(--teal); }
+    pre .kw { color: var(--amber); }
+    pre .cm { color: var(--text-dim); }
+
+    /* SECTION SEPARATOR */
+    .sep {
+      width: 40px; height: 2px;
+      background: linear-gradient(90deg, var(--teal), transparent);
+      margin: 0.5rem 0 1.25rem;
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="nav-brand">ping-mem</span>
+  <a href="#features">Features</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#humans">Human Usage</a>
+  <a href="#agents">Agent Usage</a>
+  <a href="#ingestion">Ingestion</a>
+  <a href="#storage">Storage</a>
+  <a href="#api">REST API</a>
+  <a href="#issues">Known Issues</a>
+</nav>
+
+<!-- HERO -->
+<div class="hero fade-up">
+  <div class="hero-tag">Universal Memory Layer · v2.0.0</div>
+  <h1>ping<span>-mem</span></h1>
+  <p class="hero-sub">
+    Persistent, intelligent, contextually-aware memory for AI agents across sessions, tools, and applications.
+    Acts as shared infrastructure — any agent or app reads/writes through one consistent layer.
+  </p>
+  <div class="hero-badges">
+    <span class="badge teal">Bun + TypeScript</span>
+    <span class="badge teal">SQLite · Neo4j · Qdrant</span>
+    <span class="badge teal">MCP + REST + HTMX</span>
+    <span class="badge amber">REST :3003</span>
+    <span class="badge amber">SSE/MCP :3000</span>
+    <span class="badge">76+ audit findings resolved</span>
+    <span class="badge">11 Web UI routes</span>
+  </div>
+</div>
+
+<div class="container">
+
+<!-- FEATURES -->
+<section id="features" style="padding-top:2.5rem">
+  <div class="section-label"><span class="dot" style="background:var(--green)"></span>Capabilities</div>
+  <h2>Feature Map</h2>
+
+  <div class="grid-3" style="margin-bottom:1rem">
+    <div class="ve-card ve-card--teal fade-up">
+      <div class="card-icon teal">01</div>
+      <div class="card-title">Persistent Memory</div>
+      <div class="card-desc">Key/value memory with metadata (category, priority, tags). Survives across sessions. Full CRUD via MCP tools or REST API. FTS + fuzzy search.</div>
+    </div>
+    <div class="ve-card ve-card--teal fade-up">
+      <div class="card-icon teal">02</div>
+      <div class="card-title">Session Management</div>
+      <div class="card-desc">Isolated sessions per agent or conversation. Start/end lifecycle, session-scoped memory, cross-session queries. Checkpoint and restore for crash recovery.</div>
+    </div>
+    <div class="ve-card ve-card--teal fade-up">
+      <div class="card-icon teal">03</div>
+      <div class="card-title">Event Sourcing</div>
+      <div class="card-desc">Immutable append-only EventStore logs every mutation (SESSION_STARTED, CONTEXT_SAVED, CHECKPOINT_CREATED, etc.). Full audit trail with replay capability.</div>
+    </div>
+    <div class="ve-card ve-card--amber fade-up">
+      <div class="card-icon amber">04</div>
+      <div class="card-title">Code Ingestion</div>
+      <div class="card-desc">Deterministic codebase understanding — Merkle-tree scanning, AST-aware chunking, git history extraction. Produces temporal code graph (Neo4j) + vector index (Qdrant).</div>
+    </div>
+    <div class="ve-card ve-card--amber fade-up">
+      <div class="card-icon amber">05</div>
+      <div class="card-title">Semantic Code Search</div>
+      <div class="card-desc">Search ingested code by natural language query. Hash-based deterministic vectors (no ML required) or optional OpenAI/Gemini embeddings. Filter by project, file, chunk type.</div>
+    </div>
+    <div class="ve-card ve-card--amber fade-up">
+      <div class="card-icon amber">06</div>
+      <div class="card-title">Temporal Code Graph</div>
+      <div class="card-desc">Neo4j bi-temporal model — query files at a point in time, trace file history, walk commit timeline. Nodes: Project, File, Chunk, Commit. Explicit "why" from commit messages.</div>
+    </div>
+    <div class="ve-card ve-card--slate fade-up">
+      <div class="card-icon slate">07</div>
+      <div class="card-title">Multi-Agent Orchestration</div>
+      <div class="card-desc">Register agents with configurable TTL. Per-agent byte and count quotas enforced at write time. Memory isolation by agentId. Admin can list, revoke, and manage agents.</div>
+    </div>
+    <div class="ve-card ve-card--slate fade-up">
+      <div class="card-icon slate">08</div>
+      <div class="card-title">Knowledge Store</div>
+      <div class="card-desc">Structured knowledge entries (title, solution, symptoms, root cause, tags). Cross-project FTS5 full-text search. Upsert by projectId + title. Surfaces institutional learnings.</div>
+    </div>
+    <div class="ve-card ve-card--slate fade-up">
+      <div class="card-icon slate">09</div>
+      <div class="card-title">Memory PubSub</div>
+      <div class="card-desc">Real-time event bus — MEMORY_CHANGED, SESSION events published to subscribers. SSE stream at <code>/api/v1/events/stream</code>. Powers live Web UI updates.</div>
+    </div>
+    <div class="ve-card ve-card--green fade-up">
+      <div class="card-icon green">10</div>
+      <div class="card-title">Diagnostics &amp; SARIF</div>
+      <div class="card-desc">Ingest SARIF 2.1.0 from TypeScript, ESLint, Prettier. Content-addressable analysis IDs. Diff two runs, compare tools, group by symbol. Optional LLM summaries.</div>
+    </div>
+    <div class="ve-card ve-card--green fade-up">
+      <div class="card-icon green">11</div>
+      <div class="card-title">Memory Compression</div>
+      <div class="card-desc">Compact older memory items into digest facts. Heuristic mode (no LLM) or LLM-powered summarization. Keeps context windows lean while preserving key decisions.</div>
+    </div>
+    <div class="ve-card ve-card--rose fade-up">
+      <div class="card-icon rose">12</div>
+      <div class="card-title">Web UI + Admin</div>
+      <div class="card-desc">10 HTMX server-rendered routes — dashboard, memories, agents, knowledge, sessions, events, diagnostics, ingestion, worklog. Admin panel with API key management (AES-256-GCM).</div>
+    </div>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section id="architecture">
+  <div class="section-label"><span class="dot" style="background:var(--teal)"></span>System Design</div>
+  <h2>Architecture Overview</h2>
+
+  <div class="mermaid-wrap" id="arch-wrap">
+    <div class="mermaid-controls">
+      <button onclick="zoomMermaid('arch-content', -0.2)">−</button>
+      <button onclick="zoomMermaid('arch-content', 0)">reset</button>
+      <button onclick="zoomMermaid('arch-content', 0.2)">+</button>
+      <button onclick="openMermaidInNewTab('arch-wrap')">⛶</button>
+    </div>
+    <div class="mermaid-content" id="arch-content">
+      <div class="mermaid">
+%%{init: {"theme": "base", "themeVariables": {
+  "primaryColor": "#122038",
+  "primaryTextColor": "#e2e8f0",
+  "primaryBorderColor": "#2dd4bf",
+  "lineColor": "#2dd4bf",
+  "secondaryColor": "#0d1a2e",
+  "tertiaryColor": "#172843",
+  "background": "#08111f",
+  "mainBkg": "#122038",
+  "nodeBorder": "#2dd4bf",
+  "clusterBkg": "#0d1a2e",
+  "clusterBorder": "rgba(255,255,255,0.12)",
+  "titleColor": "#e2e8f0",
+  "edgeLabelBackground": "#0d1a2e",
+  "fontFamily": "IBM Plex Mono, monospace",
+  "fontSize": "13px"
+}, "flowchart": {"curve": "basis", "padding": 20}}}%%
+flowchart TD
+    CLI["Humans & Agents<br/>(Browser · REST · MCP)"]
+
+    subgraph Iface["Interfaces"]
+        MCP["MCP Server<br/>:3000 stdio"]
+        REST["REST API<br/>:3003"]
+        WUI["Web UI<br/>HTMX /ui"]
+        ADM["Admin<br/>/admin"]
+    end
+
+    subgraph Core["Core Layer"]
+        MM["MemoryManager<br/>CRUD + search"]
+        SM["SessionManager<br/>lifecycle + isolation"]
+        ES["EventStore<br/>append-only log"]
+        PS2["MemoryPubSub<br/>event bus"]
+        KS["KnowledgeStore<br/>FTS5 search"]
+    end
+
+    subgraph Ingest["Ingestion (Neo4j + Qdrant required)"]
+        SC["ProjectScanner<br/>Merkle tree"]
+        CC["CodeChunker<br/>code vs comments"]
+        GH["GitHistoryReader<br/>commit DAG + diffs"]
+        IS["IngestionService<br/>orchestrator"]
+    end
+
+    subgraph Store["Storage"]
+        SQ[("SQLite<br/>core memory")]
+        NJ[("Neo4j<br/>:7687<br/>temporal graph")]
+        QD[("Qdrant<br/>:6333<br/>vector search")]
+    end
+
+    CLI --> Iface
+    Iface --> Core
+    Core --> SQ
+    IS --> NJ
+    IS --> QD
+    Core --> Ingest
+    SC & CC & GH --> IS
+      </div>
+    </div>
+  </div>
+
+  <div class="spacer"></div>
+  <div class="spacer"></div>
+
+  <div class="two-col">
+    <div>
+      <div class="callout callout-note">
+        <div class="callout-title">Path-Independent Project IDs</div>
+        <p>ProjectId = SHA-256(remoteUrl + "::" + relativeToGitRoot). Same project produces the same ID on any machine, in any Docker container, at any path. Docker maps <code>/Users/umasankr/Projects</code> → <code>/projects</code>.</p>
+      </div>
+      <div class="callout callout-warn">
+        <div class="callout-title">Ingestion Requires Neo4j + Qdrant</div>
+        <p>Core memory (CRUD, sessions) works with SQLite only. Code ingestion endpoints return <strong>503</strong> if Neo4j/Qdrant are not running. Stale <code>.ping-mem/manifest.json</code> blocks re-ingestion — delete to force reingest.</p>
+      </div>
+    </div>
+    <div>
+      <h3>Ingestion Pipeline Order</h3>
+      <div class="spacer"></div>
+      <div class="pipeline">
+        <div class="pipe-step">
+          <div class="pipe-num">01</div>
+          <div class="pipe-name">IngestionOrchestrator</div>
+          <div class="pipe-detail">Scan + chunk + extract git history. Shows progress N/M.</div>
+        </div>
+        <div class="pipe-step">
+          <div class="pipe-num">02</div>
+          <div class="pipe-name">TemporalCodeGraph</div>
+          <div class="pipe-detail">Persist to Neo4j. Slowest phase — sequential commit processing.</div>
+        </div>
+        <div class="pipe-step">
+          <div class="pipe-num">03</div>
+          <div class="pipe-name">CodeIndexer</div>
+          <div class="pipe-detail">Vector index into Qdrant. Starts only after Neo4j completes.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HUMAN USAGE -->
+<section id="humans">
+  <div class="section-label"><span class="dot" style="background:var(--amber)"></span>Human Interfaces</div>
+  <h2>How Humans Use ping-mem</h2>
+
+  <div class="grid-3">
+    <div class="ve-card ve-card--elevated ve-card--amber fade-up">
+      <div class="card-icon amber">UI</div>
+      <div class="card-title">Web UI (HTMX, :3000)</div>
+      <div class="card-desc">Server-rendered interface for exploring all ping-mem data. No JS framework — pure HTMX.</div>
+      <ul class="card-list">
+        <li><code>/ui</code> — dashboard, recent events, stats</li>
+        <li><code>/ui/memories</code> — search + filter memories</li>
+        <li><code>/ui/agents</code> — registry, quotas, TTL</li>
+        <li><code>/ui/knowledge</code> — FTS search knowledge base</li>
+        <li><code>/ui/sessions</code> — timeline + events</li>
+        <li><code>/ui/diagnostics</code> — SARIF runs + findings</li>
+        <li><code>/ui/ingestion</code> — project ingest status</li>
+        <li><code>/ui/events</code> — paginated event log</li>
+        <li><code>/ui/worklog</code> — worklog by kind/session</li>
+      </ul>
+    </div>
+    <div class="ve-card ve-card--elevated ve-card--rose fade-up">
+      <div class="card-icon rose">ADM</div>
+      <div class="card-title">Admin Panel (/admin)</div>
+      <div class="card-desc">HTML-based admin panel with Basic Auth. Only accessible with <code>PING_MEM_ADMIN_USER</code> + <code>PING_MEM_ADMIN_PASS</code>.</div>
+      <ul class="card-list">
+        <li>API key management — rotate, deactivate, seed (AES-256-GCM encrypted)</li>
+        <li>Project management — list/delete ingested projects with full cleanup</li>
+        <li>LLM provider config — OpenAI, Anthropic, OpenRouter</li>
+        <li>Health + diagnostics overview</li>
+      </ul>
+      <div class="spacer"></div>
+      <div class="callout callout-warn" style="margin-bottom:0;padding:0.6rem 0.85rem">
+        <div class="callout-title" style="margin-bottom:0.1rem">Timing Attack Risk</div>
+        <p>Admin auth uses <code>===</code> not <code>timingSafeEqual</code> — known P0 issue.</p>
+      </div>
+    </div>
+    <div class="ve-card ve-card--elevated ve-card--slate fade-up">
+      <div class="card-icon slate">API</div>
+      <div class="card-title">REST API (:3003)</div>
+      <div class="card-desc">HTTP endpoints for direct integration. Consumer projects call these from any language.</div>
+      <ul class="card-list">
+        <li>Codebase ingest + search + timeline</li>
+        <li>Agent registration + quota management</li>
+        <li>Knowledge ingest + full-text search</li>
+        <li>SSE event stream <code>GET /api/v1/events/stream</code></li>
+        <li>Health check always returns 200 if server up</li>
+      </ul>
+      <div class="spacer"></div>
+      <div style="display:flex;align-items:center;gap:0.5rem">
+        <span class="port-label"><span class="port">:3003</span> ping-mem-rest</span>
+        <span style="color:var(--text-dim);font-size:11px">Docker container</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- AGENT USAGE -->
+<section id="agents">
+  <div class="section-label"><span class="dot" style="background:var(--teal)"></span>Agent Interfaces</div>
+  <h2>How AI Agents Use ping-mem</h2>
+
+  <div class="two-col">
+    <div>
+      <div class="ve-card ve-card--teal fade-up" style="margin-bottom:1rem">
+        <div class="card-title">MCP Server (stdio, :3000)</div>
+        <div class="card-desc" style="margin-bottom:0.75rem">Claude Code integration. All tools available as <code>ping_mem_*</code> in Claude Code. Add to <code>~/.claude/mcp.json</code>.</div>
+        <pre style="padding:0.75rem;margin-bottom:0.75rem"><span class="hl">bun run</span> /Users/umasankr/Projects/ping-mem/<span class="hl">dist/mcp/cli.js</span></pre>
+        <div class="card-title" style="margin-bottom:0.35rem;margin-top:0.75rem">Session Start (REQUIRED)</div>
+        <pre><span class="kw">context_session_start</span>({
+  name: <span class="hl">"agent-session"</span>,
+  projectDir: <span class="hl">"/Users/umasankr/Projects/ping-mem"</span>,
+  autoIngest: <span class="hl">true</span>
+})</pre>
+      </div>
+
+      <div class="ve-card fade-up">
+        <div class="card-title">REST Client (any language)</div>
+        <div class="card-desc">Consumer projects call the REST API directly. Node.js, Python, curl, etc. Port 3003.</div>
+        <ul class="card-list">
+          <li>Register project: <code>echo "path" >> ~/.ping-mem/registered-projects.txt</code></li>
+          <li>Auto-ingest on git commit (global hook)</li>
+          <li>launchd periodic job every 10 minutes</li>
+          <li>Manual: <code>bun run scripts/force-ingest.ts &lt;dir&gt;</code></li>
+        </ul>
+      </div>
+    </div>
+    <div>
+      <div class="ve-card ve-card--elevated fade-up">
+        <div class="card-title" style="margin-bottom:0.75rem">MCP Tool Categories</div>
+
+        <div style="margin-bottom:0.75rem">
+          <div class="section-label" style="margin-bottom:0.4rem"><span class="dot"></span>Context (Core)</div>
+          <div class="tools-wrap">
+            <span class="tool-chip">context_save</span>
+            <span class="tool-chip">context_get</span>
+            <span class="tool-chip">context_search</span>
+            <span class="tool-chip">context_checkpoint</span>
+            <span class="tool-chip">context_restore</span>
+            <span class="tool-chip">context_status</span>
+            <span class="tool-chip">context_link</span>
+            <span class="tool-chip">context_hybrid_search</span>
+            <span class="tool-chip">context_get_lineage</span>
+          </div>
+        </div>
+
+        <div style="margin-bottom:0.75rem">
+          <div class="section-label" style="margin-bottom:0.4rem"><span class="dot" style="background:var(--amber)"></span>Codebase</div>
+          <div class="tools-wrap">
+            <span class="tool-chip" style="background:var(--amber-dim);border-color:var(--amber-mid);color:var(--amber)">codebase_ingest</span>
+            <span class="tool-chip" style="background:var(--amber-dim);border-color:var(--amber-mid);color:var(--amber)">codebase_search</span>
+            <span class="tool-chip" style="background:var(--amber-dim);border-color:var(--amber-mid);color:var(--amber)">codebase_verify</span>
+            <span class="tool-chip" style="background:var(--amber-dim);border-color:var(--amber-mid);color:var(--amber)">codebase_timeline</span>
+          </div>
+        </div>
+
+        <div style="margin-bottom:0.75rem">
+          <div class="section-label" style="margin-bottom:0.4rem"><span class="dot" style="background:var(--slate)"></span>Agent v2.0</div>
+          <div class="tools-wrap">
+            <span class="tool-chip" style="background:var(--slate-dim);border-color:rgba(56,189,248,0.25);color:var(--slate)">agent_register</span>
+            <span class="tool-chip" style="background:var(--slate-dim);border-color:rgba(56,189,248,0.25);color:var(--slate)">agent_quota_status</span>
+            <span class="tool-chip" style="background:var(--slate-dim);border-color:rgba(56,189,248,0.25);color:var(--slate)">agent_deregister</span>
+            <span class="tool-chip" style="background:var(--slate-dim);border-color:rgba(56,189,248,0.25);color:var(--slate)">knowledge_ingest</span>
+            <span class="tool-chip" style="background:var(--slate-dim);border-color:rgba(56,189,248,0.25);color:var(--slate)">knowledge_search</span>
+            <span class="tool-chip" style="background:var(--slate-dim);border-color:rgba(56,189,248,0.25);color:var(--slate)">memory_compress</span>
+            <span class="tool-chip" style="background:var(--slate-dim);border-color:rgba(56,189,248,0.25);color:var(--slate)">memory_subscribe</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="section-label" style="margin-bottom:0.4rem"><span class="dot" style="background:var(--green)"></span>Diagnostics + Worklog</div>
+          <div class="tools-wrap">
+            <span class="tool-chip" style="background:var(--green-dim);border-color:rgba(74,222,128,0.25);color:var(--green)">diagnostics_ingest</span>
+            <span class="tool-chip" style="background:var(--green-dim);border-color:rgba(74,222,128,0.25);color:var(--green)">diagnostics_diff</span>
+            <span class="tool-chip" style="background:var(--green-dim);border-color:rgba(74,222,128,0.25);color:var(--green)">diagnostics_summarize</span>
+            <span class="tool-chip" style="background:var(--green-dim);border-color:rgba(74,222,128,0.25);color:var(--green)">worklog_record</span>
+            <span class="tool-chip" style="background:var(--green-dim);border-color:rgba(74,222,128,0.25);color:var(--green)">worklog_list</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="spacer"></div>
+
+  <!-- Agent Sequence -->
+  <h3 style="margin-bottom:0.75rem;color:var(--text)">Typical Agent Session Flow</h3>
+  <div class="mermaid-wrap" id="seq-wrap">
+    <div class="mermaid-controls">
+      <button onclick="zoomMermaid('seq-content', -0.2)">−</button>
+      <button onclick="zoomMermaid('seq-content', 0)">reset</button>
+      <button onclick="zoomMermaid('seq-content', 0.2)">+</button>
+      <button onclick="openMermaidInNewTab('seq-wrap')">⛶</button>
+    </div>
+    <div class="mermaid-content" id="seq-content">
+      <div class="mermaid">
+%%{init: {"theme": "base", "themeVariables": {
+  "primaryColor": "#122038",
+  "primaryTextColor": "#e2e8f0",
+  "primaryBorderColor": "#2dd4bf",
+  "lineColor": "#2dd4bf",
+  "secondaryColor": "#0d1a2e",
+  "tertiaryColor": "#172843",
+  "background": "#08111f",
+  "mainBkg": "#122038",
+  "actorBkg": "#122038",
+  "actorBorder": "#2dd4bf",
+  "actorTextColor": "#e2e8f0",
+  "signalColor": "#2dd4bf",
+  "signalTextColor": "#94a3b8",
+  "labelBoxBkgColor": "#0d1a2e",
+  "labelBoxBorderColor": "rgba(255,255,255,0.1)",
+  "labelTextColor": "#94a3b8",
+  "loopTextColor": "#94a3b8",
+  "noteBkgColor": "#172843",
+  "noteTextColor": "#e2e8f0",
+  "fontFamily": "IBM Plex Mono, monospace",
+  "fontSize": "12px"
+}}}%%
+sequenceDiagram
+    participant A as Agent
+    participant MCP as MCP Server :3000
+    participant DB as SQLite
+    participant ES as EventStore
+    participant PB as MemoryPubSub
+
+    A->>MCP: context_session_start(name, projectDir)
+    MCP->>DB: create session record
+    MCP->>ES: emit SESSION_STARTED
+    MCP-->>A: {sessionId}
+
+    A->>MCP: context_save(key, value, category)
+    MCP->>DB: upsert memory item
+    MCP->>ES: emit CONTEXT_SAVED
+    MCP->>PB: publish MEMORY_CHANGED event
+    MCP-->>A: {success: true}
+
+    A->>MCP: context_search(query, limit)
+    MCP->>DB: FTS + fuzzy match
+    MCP-->>A: [{key, value, relevance}]
+
+    A->>MCP: context_checkpoint(name)
+    MCP->>DB: snapshot session state
+    MCP->>ES: emit CHECKPOINT_CREATED
+    MCP-->>A: {checkpointId}
+
+    Note over A,PB: Session ends (or compaction triggered)
+    A->>MCP: memory_compress(sessionId)
+    MCP->>DB: summarize + compact older items
+    MCP-->>A: {compressed: N, retained: M}
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- INGESTION -->
+<section id="ingestion">
+  <div class="section-label"><span class="dot" style="background:var(--green)"></span>Code Intelligence</div>
+  <h2>Code Ingestion System (v1.1.0)</h2>
+
+  <div class="grid-3">
+    <div class="ve-card ve-card--green fade-up">
+      <div class="card-icon green">PS</div>
+      <div class="card-title">ProjectScanner</div>
+      <div class="card-desc"><code>src/ingest/ProjectScanner.ts</code></div>
+      <ul class="card-list">
+        <li>Merkle tree hashing for project integrity</li>
+        <li>Content-addressable project/file IDs (SHA-256)</li>
+        <li>Manifest storage at <code>.ping-mem/manifest.json</code></li>
+        <li>Change detection for incremental updates</li>
+        <li>Path-independent projectId from git remote</li>
+      </ul>
+    </div>
+    <div class="ve-card ve-card--green fade-up">
+      <div class="card-icon green">CC</div>
+      <div class="card-title">CodeChunker</div>
+      <div class="card-desc"><code>src/ingest/CodeChunker.ts</code></div>
+      <ul class="card-list">
+        <li>Separates code vs comments vs docstrings</li>
+        <li>TypeScript/JS: <code>//</code> and <code>/* */</code> comments</li>
+        <li>Python: <code>#</code> and <code>"""</code>/<code>'''</code> docstrings</li>
+        <li>Deterministic chunk IDs (SHA-256)</li>
+        <li>Line number tracking for provenance</li>
+      </ul>
+    </div>
+    <div class="ve-card ve-card--green fade-up">
+      <div class="card-icon green">GH</div>
+      <div class="card-title">GitHistoryReader</div>
+      <div class="card-desc"><code>src/ingest/GitHistoryReader.ts</code></div>
+      <ul class="card-list">
+        <li>Full commit DAG extraction</li>
+        <li>File change tracking (A/M/D/R/C)</li>
+        <li>Unified diff parsing with hunk ranges</li>
+        <li>Explicit "why" from commit messages only</li>
+        <li>Parses: <code>Why:</code> <code>Reason:</code> <code>Fixes #</code> <code>Closes #</code></li>
+        <li>Never guesses or infers — explicit sources only</li>
+      </ul>
+    </div>
+    <div class="ve-card fade-up">
+      <div class="card-icon" style="background:rgba(45,212,191,0.08);color:var(--teal);border:1px solid var(--teal-mid)">DV</div>
+      <div class="card-title">DeterministicVectorizer</div>
+      <div class="card-desc"><code>src/search/DeterministicVectorizer.ts</code></div>
+      <ul class="card-list">
+        <li>Hash-based feature vectors — no ML required</li>
+        <li>Bit-for-bit reproducible across runs</li>
+        <li>N-gram generation (1-3 grams)</li>
+        <li>L2 normalization</li>
+      </ul>
+    </div>
+    <div class="ve-card fade-up">
+      <div class="card-icon" style="background:rgba(45,212,191,0.08);color:var(--teal);border:1px solid var(--teal-mid)">TCG</div>
+      <div class="card-title">TemporalCodeGraph</div>
+      <div class="card-desc"><code>src/graph/TemporalCodeGraph.ts</code></div>
+      <ul class="card-list">
+        <li>Neo4j bi-temporal model</li>
+        <li>Nodes: Project, File, Chunk, Commit</li>
+        <li>Edges: HAS_FILE, HAS_CHUNK, MODIFIES, CHANGES</li>
+        <li>Point-in-time queries, file history, commit timeline</li>
+      </ul>
+    </div>
+    <div class="ve-card fade-up">
+      <div class="card-icon" style="background:rgba(45,212,191,0.08);color:var(--teal);border:1px solid var(--teal-mid)">CI</div>
+      <div class="card-title">CodeIndexer</div>
+      <div class="card-desc"><code>src/search/CodeIndexer.ts</code></div>
+      <ul class="card-list">
+        <li>Qdrant vector indexing for code chunks</li>
+        <li>Full provenance metadata per chunk</li>
+        <li>Semantic search with project/file/type filters</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- STORAGE -->
+<section id="storage">
+  <div class="section-label"><span class="dot" style="background:var(--slate)"></span>Data Layer</div>
+  <h2>Storage Systems</h2>
+
+  <div class="grid-3">
+    <div class="ve-card ve-card--elevated ve-card--teal fade-up" style="position:relative">
+      <div style="position:absolute;top:1rem;right:1rem">
+        <span class="status-ok"></span>
+      </div>
+      <div class="card-title" style="font-size:1rem;margin-bottom:0.25rem">SQLite</div>
+      <div class="card-desc" style="margin-bottom:0.75rem;font-family:var(--font-mono);font-size:11px">bun:sqlite · always available</div>
+      <ul class="card-list">
+        <li>Core memory items (key/value + metadata)</li>
+        <li>Session records and lifecycle</li>
+        <li>EventStore (append-only log)</li>
+        <li>Agent registrations + quota tracking</li>
+        <li>Knowledge entries (FTS5)</li>
+        <li>Diagnostics findings (content-addressable)</li>
+        <li>Admin data (API keys, LLM config)</li>
+        <li>Worklog events</li>
+      </ul>
+      <div class="spacer"></div>
+      <code>PING_MEM_DB_PATH</code>
+    </div>
+    <div class="ve-card ve-card--elevated fade-up" style="position:relative">
+      <div style="position:absolute;top:1rem;right:1rem">
+        <span class="status-warn"></span>
+      </div>
+      <div class="card-title" style="font-size:1rem;margin-bottom:0.25rem">Neo4j</div>
+      <div class="card-desc" style="margin-bottom:0.75rem;font-family:var(--font-mono);font-size:11px">:7687 · required for ingestion</div>
+      <ul class="card-list">
+        <li>Temporal code graph (bi-temporal model)</li>
+        <li>Project / File / Chunk / Commit nodes</li>
+        <li>Relationship edges for history queries</li>
+        <li>Entity graph (NER + relationships)</li>
+        <li>Point-in-time file version queries</li>
+        <li>Causal chain / lineage tracking</li>
+      </ul>
+      <div class="spacer"></div>
+      <div class="callout callout-warn" style="margin-bottom:0;padding:0.5rem 0.75rem">
+        <p>503 on codebase endpoints if not running. <code>docker restart ping-mem-neo4j</code></p>
+      </div>
+    </div>
+    <div class="ve-card ve-card--elevated fade-up" style="position:relative">
+      <div style="position:absolute;top:1rem;right:1rem">
+        <span class="status-warn"></span>
+      </div>
+      <div class="card-title" style="font-size:1rem;margin-bottom:0.25rem">Qdrant</div>
+      <div class="card-desc" style="margin-bottom:0.75rem;font-family:var(--font-mono);font-size:11px">:6333 · required for code search</div>
+      <ul class="card-list">
+        <li>Code chunk vectors (deterministic, hash-based)</li>
+        <li>Semantic code search with provenance</li>
+        <li>Filter by project / file / chunk type</li>
+        <li>Optional ML vectors (OpenAI, Gemini)</li>
+      </ul>
+      <div class="spacer"></div>
+      <div class="callout callout-warn" style="margin-bottom:0;padding:0.5rem 0.75rem">
+        <p>Empty results = project not ingested. Run <code>force-ingest.ts</code></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- REST API -->
+<section id="api">
+  <div class="section-label"><span class="dot" style="background:var(--amber)"></span>REST API Reference</div>
+  <h2>REST Endpoints (port 3003)</h2>
+
+  <div class="callout callout-warn" style="margin-bottom:1.25rem">
+    <div class="callout-title">Codebase Search is GET, Not POST</div>
+    <p><code>GET /api/v1/codebase/search?query=...&amp;projectId=...&amp;type=...&amp;limit=...</code> — use query params, not request body. A common mistake.</p>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Method</th>
+          <th>Endpoint</th>
+          <th>Body / Params</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="method-post">POST</span></td>
+          <td><code>/api/v1/codebase/ingest</code></td>
+          <td><code>{projectDir, forceReingest?}</code></td>
+          <td>Triggers full ingestion pipeline</td>
+        </tr>
+        <tr>
+          <td><span class="method-post">POST</span></td>
+          <td><code>/api/v1/codebase/verify</code></td>
+          <td><code>{projectDir}</code></td>
+          <td>Verify manifest integrity</td>
+        </tr>
+        <tr>
+          <td><span class="method-get">GET</span></td>
+          <td><code>/api/v1/codebase/search</code></td>
+          <td><code>?query=&projectId=&type=&limit=</code></td>
+          <td>Semantic code search — NOT POST</td>
+        </tr>
+        <tr>
+          <td><span class="method-get">GET</span></td>
+          <td><code>/api/v1/codebase/timeline</code></td>
+          <td><code>?projectId=&filePath=&limit=</code></td>
+          <td>Temporal commit history</td>
+        </tr>
+        <tr>
+          <td><span class="method-get">GET</span></td>
+          <td><code>/health</code></td>
+          <td>—</td>
+          <td>Always 200 if server is up</td>
+        </tr>
+        <tr>
+          <td><span class="method-post">POST</span></td>
+          <td><code>/api/v1/agents/register</code></td>
+          <td><code>{agentId, role, admin?, ttlMs?, quotaBytes?, quotaCount?}</code></td>
+          <td>Register or update agent</td>
+        </tr>
+        <tr>
+          <td><span class="method-get">GET</span></td>
+          <td><code>/api/v1/agents/quotas</code></td>
+          <td><code>?agentId=</code> (optional)</td>
+          <td>Quota usage</td>
+        </tr>
+        <tr>
+          <td><span class="method-del">DELETE</span></td>
+          <td><code>/api/v1/agents/:agentId</code></td>
+          <td>—</td>
+          <td>Deregister agent</td>
+        </tr>
+        <tr>
+          <td><span class="method-post">POST</span></td>
+          <td><code>/api/v1/knowledge/ingest</code></td>
+          <td><code>{projectId, title, solution, symptoms?, rootCause?, tags?}</code></td>
+          <td>Upsert knowledge entry</td>
+        </tr>
+        <tr>
+          <td><span class="method-post">POST</span></td>
+          <td><code>/api/v1/knowledge/search</code></td>
+          <td><code>{query, projectId?, crossProject?, tags?, limit?}</code></td>
+          <td>Full-text search (FTS5)</td>
+        </tr>
+        <tr>
+          <td><span class="method-get">GET</span></td>
+          <td><code>/api/v1/events/stream</code></td>
+          <td>—</td>
+          <td>SSE real-time event stream</td>
+        </tr>
+        <tr>
+          <td><span class="method-get">GET</span></td>
+          <td><code>/ui/*</code></td>
+          <td>—</td>
+          <td>HTMX web UI routes</td>
+        </tr>
+        <tr>
+          <td><span class="method-get">GET</span></td>
+          <td><code>/admin</code></td>
+          <td>Basic Auth required</td>
+          <td>Admin panel</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- KNOWN ISSUES -->
+<section id="issues">
+  <div class="section-label"><span class="dot" style="background:var(--rose)"></span>Known Issues</div>
+  <h2>Failure Modes &amp; Known Bugs</h2>
+
+  <div class="two-col" style="margin-bottom:1.5rem">
+    <div>
+      <h3 style="color:var(--text);margin-bottom:0.75rem">Runtime Failures</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Symptom</th>
+              <th>Cause</th>
+              <th>Fix</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>503 on codebase endpoints</td>
+              <td>IngestionService not initialized</td>
+              <td><code>docker-compose restart ping-mem-rest</code></td>
+            </tr>
+            <tr>
+              <td>Empty search results</td>
+              <td>Project not ingested into Qdrant</td>
+              <td><code>bun run scripts/force-ingest.ts &lt;dir&gt;</code></td>
+            </tr>
+            <tr>
+              <td>Wrong projectId</td>
+              <td>Path mismatch Docker vs local</td>
+              <td>Verify git remote URL is consistent</td>
+            </tr>
+            <tr>
+              <td>ECONNREFUSED :3003</td>
+              <td>REST container down</td>
+              <td><code>docker-compose up -d ping-mem-rest</code></td>
+            </tr>
+            <tr>
+              <td>ECONNREFUSED :6333</td>
+              <td>Qdrant down</td>
+              <td><code>docker restart ping-mem-qdrant</code></td>
+            </tr>
+            <tr>
+              <td>No re-ingest after changes</td>
+              <td>Stale manifest blocks scan</td>
+              <td>Delete <code>.ping-mem/manifest.json</code>, reingest</td>
+            </tr>
+            <tr>
+              <td>Large repo ingestion hangs</td>
+              <td>Neo4j sequential commit processing</td>
+              <td>Wait — 1000 commits takes significant time</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div>
+      <h3 style="color:var(--text);margin-bottom:0.75rem">Security Issues (all resolved)</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Severity</th>
+              <th>Issue</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="sev-p0">P0</span></td>
+              <td>SQL injection via string interpolation</td>
+              <td><span style="color:var(--green)">Fixed</span> — parameterized queries</td>
+            </tr>
+            <tr>
+              <td><span class="sev-p0">P0</span></td>
+              <td>Command injection in commit hashes</td>
+              <td><span style="color:var(--green)">Fixed</span> — SafeGit with execFile</td>
+            </tr>
+            <tr>
+              <td><span class="sev-p0">P0</span></td>
+              <td>Timing attack in admin auth</td>
+              <td><span style="color:var(--green)">Fixed</span> — crypto.timingSafeEqual</td>
+            </tr>
+            <tr>
+              <td><span class="sev-p0">P0</span></td>
+              <td>Unvalidated JSON in API bodies</td>
+              <td><span style="color:var(--green)">Fixed</span> — Zod schemas on all endpoints</td>
+            </tr>
+            <tr>
+              <td><span class="sev-p1">P1</span></td>
+              <td>Neo4j session leaks</td>
+              <td><span style="color:var(--green)">Fixed</span> — try-finally on all sessions</td>
+            </tr>
+            <tr>
+              <td><span class="sev-p1">P1</span></td>
+              <td>Race conditions (save + max-session)</td>
+              <td><span style="color:var(--green)">Fixed</span> — promise-based mutex</td>
+            </tr>
+            <tr>
+              <td><span class="sev-p1">P1</span></td>
+              <td>CORS too permissive</td>
+              <td><span style="color:var(--green)">Fixed</span> — strict origin policy</td>
+            </tr>
+            <tr>
+              <td><span class="sev-p1">P1</span></td>
+              <td>No rate limiting</td>
+              <td><span style="color:var(--green)">Fixed</span> — per-IP sliding window + Retry-After</td>
+            </tr>
+            <tr>
+              <td><span class="sev-p1">P1</span></td>
+              <td>Invalid session ID accepted</td>
+              <td><span style="color:var(--green)">Fixed</span> — session existence check on all context endpoints</td>
+            </tr>
+            <tr>
+              <td><span class="sev-p1">P1</span></td>
+              <td>Agent memory not isolated</td>
+              <td><span style="color:var(--green)">Fixed</span> — X-Agent-ID propagated to MemoryManager</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Consumer Checklist -->
+  <div class="ve-card ve-card--elevated" style="padding:1.5rem">
+    <div class="card-title" style="margin-bottom:1rem;font-size:0.9rem">Consumer Project Integration Checklist</div>
+    <div class="grid-4">
+      <div style="display:flex;flex-direction:column;gap:0.4rem">
+        <div class="section-label"><span class="dot" style="background:var(--teal)"></span>Register</div>
+        <code style="font-size:11px;display:block;line-height:1.5">echo "/path/to/project" &gt;&gt;<br>~/.ping-mem/registered-projects.txt</code>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.4rem">
+        <div class="section-label"><span class="dot" style="background:var(--amber)"></span>Health Check</div>
+        <code style="font-size:11px;display:block;line-height:1.5">curl http://localhost:3003/health</code>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.4rem">
+        <div class="section-label"><span class="dot" style="background:var(--green)"></span>Verify Search</div>
+        <code style="font-size:10px;display:block;line-height:1.5;word-break:break-all">curl "localhost:3003/api/v1/codebase/search?query=test&limit=1"</code>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.4rem">
+        <div class="section-label"><span class="dot" style="background:var(--rose)"></span>If 503</div>
+        <code style="font-size:11px;display:block;line-height:1.5">bun run scripts/force-ingest.ts /path/to/project</code>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<section style="border-top:1px solid var(--border);padding:2rem 0;text-align:center">
+  <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim)">
+    ping-mem v2.0.0 · <a href="https://ping-mem.ping-gadgets.com" style="color:var(--teal)">ping-mem.ping-gadgets.com</a> ·
+    localhost:3003 (REST) · localhost:3000 (MCP/SSE) ·
+    <a href="https://github.com/ping-gadgets/ping-mem" style="color:var(--text-dim)">github.com/ping-gadgets/ping-mem</a>
+  </div>
+</section>
+
+</div><!-- end container -->
+
+<script>
+  // Mermaid config
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    securityLevel: 'loose',
+  });
+
+  // Zoom state per diagram
+  const zoomState = {};
+
+  function zoomMermaid(id, delta) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (delta === 0) { zoomState[id] = 1; }
+    else {
+      zoomState[id] = Math.min(3, Math.max(0.4, (zoomState[id] || 1) + delta));
+    }
+    el.style.transform = `scale(${zoomState[id]})`;
+    el.style.transformOrigin = 'top center';
+  }
+
+  function openMermaidInNewTab(wrapId) {
+    const wrap = document.getElementById(wrapId);
+    if (!wrap) return;
+    const svg = wrap.querySelector('svg');
+    if (!svg) return;
+    const clone = svg.cloneNode(true);
+    clone.removeAttribute('height');
+    clone.style.maxWidth = '100%';
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+      body{margin:0;padding:2rem;background:#08111f;display:flex;justify-content:center;}
+      svg{max-width:100%;}</style></head><body>${clone.outerHTML}</body></html>`;
+    const blob = new Blob([html], {type: 'text/html'});
+    window.open(URL.createObjectURL(blob), '_blank');
+  }
+
+  // Drag-to-pan on mermaid containers
+  document.querySelectorAll('.mermaid-content').forEach(el => {
+    let isDragging = false, startX, startY, scrollLeft, scrollTop;
+    el.addEventListener('mousedown', e => {
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      el.style.cursor = 'grabbing';
+    });
+    document.addEventListener('mousemove', e => {
+      if (!isDragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      el.scrollLeft -= dx;
+      el.scrollTop -= dy;
+      startX = e.clientX;
+      startY = e.clientY;
+    });
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+      el.style.cursor = 'zoom-in';
+    });
+    el.addEventListener('wheel', e => {
+      e.preventDefault();
+      const wrapId = el.id;
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      zoomMermaid(wrapId, delta);
+    }, { passive: false });
+  });
+</script>
+</body>
+</html>
