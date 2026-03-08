@@ -87,8 +87,10 @@ export class HealthMonitor {
   private fastTimer: ReturnType<typeof setInterval> | null = null;
   private qualityTimer: ReturnType<typeof setInterval> | null = null;
   private stopping = false;
+  private consecutiveTickFailures = 0;
   private lastAlerts = new Map<string, number>();
   private activeAlerts = new Map<string, HealthAlert>();
+  private static readonly MAX_ALERTS = 200;
   private lastSnapshot: HealthSnapshot | null = null;
   private lastFastTickAt: string | null = null;
   private lastQualityTickAt: string | null = null;
@@ -152,6 +154,8 @@ export class HealthMonitor {
       });
       this.lastSnapshot = snapshot;
       this.lastFastTickAt = new Date().toISOString();
+      this.consecutiveTickFailures = 0;
+      this.activeAlerts.delete("monitor:tick_failure");
 
       const sqliteMetrics = snapshot.components.sqlite.metrics;
       if (sqliteMetrics) {
@@ -166,7 +170,15 @@ export class HealthMonitor {
         });
       }
     } catch (error) {
-      log.error("Fast tick probe failed", { error: error instanceof Error ? error.message : String(error) });
+      this.consecutiveTickFailures++;
+      log.error("Fast tick probe failed", {
+        error: error instanceof Error ? error.message : String(error),
+        consecutiveFailures: this.consecutiveTickFailures,
+      });
+      if (this.consecutiveTickFailures >= 3) {
+        this.alert("critical", "monitor:tick_failure", "sqlite",
+          `Health monitoring degraded: ${this.consecutiveTickFailures} consecutive probe failures`);
+      }
     }
 
     if (this.stopping) return;
@@ -179,7 +191,13 @@ export class HealthMonitor {
         log.info("SQLite WAL checkpoint completed", { walSizeBytes: walSize });
       }
     } catch (error) {
-      log.warn("WAL checkpoint failed", { error: error instanceof Error ? error.message : String(error) });
+      const lastWalSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
+      log.error("WAL checkpoint failed — WAL may grow unbounded", {
+        error: error instanceof Error ? error.message : String(error),
+        walSizeBytes: lastWalSize,
+      });
+      this.alert("warning", "sqlite:wal_checkpoint_failed", "sqlite",
+        `WAL checkpoint failed at ${lastWalSize} bytes`);
     }
   }
 
@@ -222,6 +240,8 @@ export class HealthMonitor {
         probeSucceeded = true;
       } catch (error) {
         log.warn("Neo4j quality tick failed", { error: error instanceof Error ? error.message : String(error) });
+        this.alert("warning", "neo4j:quality_probe_failed", "neo4j",
+          `Quality probe failed: ${error instanceof Error ? error.message : "unknown"}`);
       }
     }
 
@@ -318,6 +338,16 @@ export class HealthMonitor {
       timestamp: new Date(now).toISOString(),
     };
     this.activeAlerts.set(key, alert);
+
+    // Evict oldest alerts if map exceeds cap
+    if (this.activeAlerts.size > HealthMonitor.MAX_ALERTS) {
+      const oldest = Array.from(this.activeAlerts.entries())
+        .sort(([, a], [, b]) => (a.timestamp < b.timestamp ? -1 : 1))[0];
+      if (oldest) {
+        this.activeAlerts.delete(oldest[0]);
+        this.lastAlerts.delete(oldest[0]);
+      }
+    }
 
     if (severity === "critical") {
       log.error(`CRITICAL ${message}`, { key, source });

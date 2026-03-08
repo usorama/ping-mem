@@ -299,6 +299,7 @@ describe("QdrantClientWrapper - Unit Tests", () => {
   describe("Health Check", () => {
     it("should return true when server is healthy", async () => {
       mockGetCollections.mockResolvedValue({ collections: [] });
+      mockGetCollection.mockResolvedValue({ status: "green" });
 
       const client = new QdrantClientWrapper(testConfig);
       await client.connect();
@@ -315,9 +316,8 @@ describe("QdrantClientWrapper - Unit Tests", () => {
     });
 
     it("should return false when health check fails", async () => {
-      mockGetCollections
-        .mockResolvedValueOnce({ collections: [] }) // For connect
-        .mockRejectedValueOnce(new Error("Server error")); // For health check
+      mockGetCollections.mockResolvedValue({ collections: [] }); // For connect
+      mockGetCollection.mockRejectedValue(new Error("Server error")); // For health check
 
       const client = new QdrantClientWrapper(testConfig);
       await client.connect();
@@ -333,6 +333,7 @@ describe("QdrantClientWrapper - Unit Tests", () => {
 
     beforeEach(async () => {
       mockGetCollections.mockResolvedValue({ collections: [] });
+      mockGetCollection.mockResolvedValue({ status: "green" });
       client = new QdrantClientWrapper(testConfig);
       await client.connect();
     });

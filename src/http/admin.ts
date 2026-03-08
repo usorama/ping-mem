@@ -450,8 +450,14 @@ function renderAdminPage(): string {
   </main>
 
   <script>
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
     const state = {
-      apiKey: localStorage.getItem("pingMemApiKey") || "",
+      apiKey: sessionStorage.getItem("pingMemApiKey") || "",
     };
 
     const apiKeyInput = document.getElementById("currentApiKey");
@@ -461,7 +467,7 @@ function renderAdminPage(): string {
 
     saveApiKey.addEventListener("click", () => {
       state.apiKey = apiKeyInput.value.trim();
-      localStorage.setItem("pingMemApiKey", state.apiKey);
+      sessionStorage.setItem("pingMemApiKey", state.apiKey);
       apiKeyStatus.textContent = state.apiKey ? "Saved" : "Missing";
     });
 
@@ -481,34 +487,39 @@ function renderAdminPage(): string {
       return json.data;
     }
 
+    function createCell(text) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      return td;
+    }
+
     async function refreshKeys() {
       const keys = await apiFetch("/api/admin/keys");
       const table = document.getElementById("keysTable");
-      table.innerHTML = "";
+      table.textContent = "";
       keys.forEach((key) => {
         const row = document.createElement("tr");
-        const createdAt = new Date(key.createdAt).toLocaleString();
-        const status = key.active ? "Active" : "Inactive";
-        const action = key.active
-          ? "<button data-id=\"" + key.id + "\" class=\"ghost\">Deactivate</button>"
-          : "";
-        row.innerHTML =
-          "<td>" + key.id + "</td>" +
-          "<td>" + key.last4 + "</td>" +
-          "<td>" + createdAt + "</td>" +
-          "<td>" + status + "</td>" +
-          "<td>" + action + "</td>";
-        table.appendChild(row);
-      });
-
-      table.querySelectorAll("button").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          await apiFetch("/api/admin/keys/deactivate", {
-            method: "POST",
-            body: JSON.stringify({ id: btn.dataset.id }),
+        row.appendChild(createCell(key.id));
+        row.appendChild(createCell(key.last4));
+        row.appendChild(createCell(new Date(key.createdAt).toLocaleString()));
+        row.appendChild(createCell(key.active ? "Active" : "Inactive"));
+        const actionTd = document.createElement("td");
+        if (key.active) {
+          const btn = document.createElement("button");
+          btn.className = "ghost";
+          btn.textContent = "Deactivate";
+          btn.dataset.id = key.id;
+          btn.addEventListener("click", async () => {
+            await apiFetch("/api/admin/keys/deactivate", {
+              method: "POST",
+              body: JSON.stringify({ id: key.id }),
+            });
+            refreshKeys();
           });
-          refreshKeys();
-        });
+          actionTd.appendChild(btn);
+        }
+        row.appendChild(actionTd);
+        table.appendChild(row);
       });
     }
 
@@ -527,28 +538,26 @@ function renderAdminPage(): string {
     async function refreshProjects() {
       const projects = await apiFetch("/api/admin/projects");
       const table = document.getElementById("projectsTable");
-      table.innerHTML = "";
+      table.textContent = "";
       projects.forEach((project) => {
         const row = document.createElement("tr");
         const lastIngested = project.lastIngestedAt
           ? new Date(project.lastIngestedAt).toLocaleString()
           : "-";
-        row.innerHTML =
-          "<td>" + project.projectDir + "</td>" +
-          "<td>" + project.projectId + "</td>" +
-          "<td>" + lastIngested + "</td>" +
-          "<td><button data-dir=\"" + project.projectDir + "\" class=\"secondary\">Delete</button></td>";
-        table.appendChild(row);
-      });
-
-      table.querySelectorAll("button").forEach((btn) => {
+        row.appendChild(createCell(project.projectDir));
+        row.appendChild(createCell(project.projectId));
+        row.appendChild(createCell(lastIngested));
+        const actionTd = document.createElement("td");
+        const btn = document.createElement("button");
+        btn.className = "secondary";
+        btn.textContent = "Delete";
         btn.addEventListener("click", async () => {
           if (!confirm("Delete all memory, graph, and diagnostics for this project?")) {
             return;
           }
           await apiFetch("/api/admin/projects", {
             method: "DELETE",
-            body: JSON.stringify({ projectDir: btn.dataset.dir }),
+            body: JSON.stringify({ projectDir: project.projectDir }),
           });
           refreshProjects();
         });

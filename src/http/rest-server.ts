@@ -332,10 +332,23 @@ export class RESTPingMemServer {
           skipIntegrityCheck: true,
         });
 
+        const sanitizedSnapshot = {
+          ...snapshot,
+          components: Object.fromEntries(
+            Object.entries(snapshot.components).map(([key, comp]) => [
+              key,
+              comp.error ? { ...comp, error: sanitizeHealthError(comp.error) } : comp,
+            ])
+          ),
+        };
+
         return c.json({
           data: {
-            health: snapshot,
-            monitor: monitorStatus,
+            health: sanitizedSnapshot,
+            monitor: monitorStatus ? {
+              ...monitorStatus,
+              lastSnapshot: monitorStatus.lastSnapshot ? sanitizedSnapshot : null,
+            } : null,
           },
         });
       } catch (error) {
@@ -1623,10 +1636,13 @@ export class RESTPingMemServer {
     }
     const expected = Buffer.from(this.config.apiKey);
     const actual = Buffer.from(apiKey);
-    if (expected.length !== actual.length) {
-      return false;
-    }
-    return timingSafeEqual(expected, actual);
+    // Pad to same length to avoid leaking expected key length via timing
+    const maxLen = Math.max(expected.length, actual.length);
+    const paddedExpected = Buffer.alloc(maxLen);
+    const paddedActual = Buffer.alloc(maxLen);
+    expected.copy(paddedExpected);
+    actual.copy(paddedActual);
+    return timingSafeEqual(paddedExpected, paddedActual) && expected.length === actual.length;
   }
 
   /**

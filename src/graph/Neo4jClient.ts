@@ -185,10 +185,12 @@ export class Neo4jClient {
 
     const onCircuitChange = (state: "closed" | "open" | "half-open") => {
       this.connected = state !== "open" && this.driver !== null;
-      if (state === "closed") {
-        log.info("Circuit recovered", { state });
+      if (state === "open") {
+        log.error("Circuit OPEN — Neo4j operations will fail fast", { state });
+      } else if (state === "half-open") {
+        log.info("Circuit half-open — attempting recovery", { state });
       } else {
-        log.warn("Circuit state changed", { state });
+        log.info("Circuit recovered", { state });
       }
     };
     this.servicePolicy.onStateChange(onCircuitChange);
@@ -238,7 +240,7 @@ export class Neo4jClient {
           : undefined;
 
       throw new Neo4jConnectionError(
-        `Failed to connect to Neo4j at ${this.config.uri}: ${errorMessage}`,
+        `Failed to connect to Neo4j: ${errorMessage}`,
         errorCode,
         error instanceof Error ? error : undefined
       );

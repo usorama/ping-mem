@@ -170,26 +170,35 @@ export async function startHTTPServer(): Promise<void> {
     log.info("Shutdown signal received", { signal });
     healthMonitor.stop();
 
-    try {
-      await new Promise<void>((resolve, reject) => {
-        httpServer.close((err) => (err ? reject(err) : resolve()));
-      });
-      await serverInstance.stop();
-      if (services.neo4jClient) {
-        await services.neo4jClient.disconnect();
-      }
-      if (services.qdrantClient) {
-        await services.qdrantClient.disconnect();
-      }
-      await eventStore.close();
-      diagnosticsStore.close();
-      adminStore.close();
-      log.info("Shutdown complete");
-      process.exit(0);
-    } catch (error) {
-      log.error("Shutdown failed", { error: error instanceof Error ? error.message : String(error) });
+    const shutdownErrors: string[] = [];
+
+    try { await new Promise<void>((resolve, reject) => { httpServer.close((err) => (err ? reject(err) : resolve())); }); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`httpServer: ${msg}`); }
+
+    try { await serverInstance.stop(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`serverInstance: ${msg}`); }
+
+    try { if (services.neo4jClient) await services.neo4jClient.disconnect(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`neo4j: ${msg}`); }
+
+    try { if (services.qdrantClient) await services.qdrantClient.disconnect(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`qdrant: ${msg}`); }
+
+    try { await eventStore.close(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`eventStore: ${msg}`); }
+
+    try { diagnosticsStore.close(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`diagnosticsStore: ${msg}`); }
+
+    try { adminStore.close(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`adminStore: ${msg}`); }
+
+    if (shutdownErrors.length > 0) {
+      log.error("Shutdown completed with errors", { errors: shutdownErrors });
       process.exit(1);
     }
+    log.info("Shutdown complete");
+    process.exit(0);
   };
 
   process.on("SIGINT", () => {

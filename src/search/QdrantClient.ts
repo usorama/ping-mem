@@ -226,7 +226,9 @@ export class QdrantClientWrapper {
       this.client = null;
 
       if (this.config.enableFallback) {
-        // Initialize fallback to local VectorIndex
+        log.warn("Qdrant connection failed, falling back to local VectorIndex", {
+          error: error instanceof Error ? error.message : String(error),
+        });
         await this.initializeFallback();
         this.connected = true;
         this.usingFallback = true;
@@ -284,8 +286,8 @@ export class QdrantClientWrapper {
     }
 
     try {
-      // Use getCollections as a health check - it's a lightweight operation
-      await this.client.getCollections();
+      // Check specific collection rather than listing all (avoids leaking other collection names)
+      await this.client.getCollection(this.config.collectionName);
       return true;
     } catch (error) {
       log.warn("healthCheck failed", {

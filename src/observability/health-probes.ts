@@ -38,10 +38,13 @@ export interface HealthProbeDeps {
 
 export function sanitizeHealthError(error: unknown): string {
   const msg = error instanceof Error ? error.message : String(error);
-  if (msg.includes("ECONNREFUSED")) return "connection refused";
-  if (msg.includes("ETIMEDOUT")) return "connection timeout";
-  if (msg.includes("ECONNRESET")) return "connection reset";
-  if (msg.includes("timeout")) return "connection timeout";
+  const lower = msg.toLowerCase();
+  if (lower.includes("econnrefused")) return "connection refused";
+  if (lower.includes("etimedout") || lower.includes("timeout")) return "connection timeout";
+  if (lower.includes("econnreset")) return "connection reset";
+  if (lower.includes("auth") || lower.includes("credentials") || lower.includes("unauthorized")) return "authentication failed";
+  if (lower.includes("enospc") || lower.includes("disk")) return "disk space issue";
+  if (lower.includes("certificate") || lower.includes("tls") || lower.includes("ssl")) return "TLS/certificate error";
   return "service unavailable";
 }
 
