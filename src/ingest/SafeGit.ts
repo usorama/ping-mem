@@ -97,8 +97,8 @@ export class SafeGit {
     } catch (error: unknown) {
       // git config --get exits with code 1 when the key is not found (no remote configured).
       // Check exit code property first; fall back to string matching for compatibility.
-      const errObj = error as { code?: number };
-      if (errObj.code === 1) {
+      const errObj = error as { code?: number | string };
+      if (typeof errObj.code === "number" && errObj.code === 1) {
         return null; // No remote configured — expected
       }
       const message = error instanceof Error ? error.message : String(error);

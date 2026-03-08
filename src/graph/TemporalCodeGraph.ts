@@ -69,6 +69,9 @@ export class TemporalCodeGraph {
     if (!result.projectManifest?.treeHash) {
       throw new Error("persistIngestion: treeHash is required");
     }
+    if (!result.ingestedAt) {
+      throw new Error("persistIngestion: ingestedAt is required");
+    }
 
     const session = this.neo4j.getSession();
     try {
@@ -244,6 +247,10 @@ export class TemporalCodeGraph {
     projectId: string,
     filePath: string
   ): Promise<Array<{ commitHash: string; changeType: string; date: string }>> {
+    if (!projectId || projectId.trim() === "") {
+      throw new Error("queryFileHistory: projectId is required and must not be empty");
+    }
+
     const session = this.neo4j.getSession();
     try {
       const fileId = this.computeFileId(filePath);

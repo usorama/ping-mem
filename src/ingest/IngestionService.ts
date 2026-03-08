@@ -204,7 +204,7 @@ export class IngestionService {
 
       // Fetch enough commits to cover all file history entries
       // (file may have been modified in commits beyond the user's limit)
-      const commitFetchLimit = Math.max(limit, history.length);
+      const commitFetchLimit = Math.min(Math.max(limit, history.length), 10000);
       const commits = await this.codeGraph.queryCommitHistory(
         options.projectId,
         commitFetchLimit

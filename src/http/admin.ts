@@ -69,9 +69,11 @@ export async function handleAdminRequest(
     const html = renderAdminPage();
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:",
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
     });
     res.end(html);
     return true;
@@ -111,10 +113,17 @@ async function handleAdminApi(
     const { projectDir, projectId } = result.data;
     let resolvedProjectId: string | null;
     try {
-      resolvedProjectId = projectId ?? await resolveProjectId(projectDir ?? "", deps.adminStore);
+      if (projectId) {
+        resolvedProjectId = projectId;
+      } else if (projectDir) {
+        resolvedProjectId = await resolveProjectId(projectDir, deps.adminStore);
+      } else {
+        return respondJson(res, 400, { error: "Either projectDir or projectId is required" });
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      return respondJson(res, 400, { error: "Invalid project directory", message });
+      log.error("deleteProject: resolveProjectId failed", { error: message });
+      return respondJson(res, 400, { error: "Invalid project directory or project not found" });
     }
     if (!resolvedProjectId) {
       return respondJson(res, 404, { error: "Project not found" });
@@ -131,10 +140,22 @@ async function handleAdminApi(
         warnings.push(msg);
       }
     }
-    deps.diagnosticsStore.deleteProject(resolvedProjectId);
+    try {
+      deps.diagnosticsStore.deleteProject(resolvedProjectId);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("deleteProject: diagnostics cleanup failed", { projectId: resolvedProjectId, error: msg });
+      warnings.push(`Diagnostics: ${msg}`);
+    }
 
     if (projectDir) {
-      deleteProjectManifest(projectDir);
+      try {
+        deleteProjectManifest(projectDir);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.error("deleteProject: manifest cleanup failed", { projectDir, error: msg });
+        warnings.push(`Manifest: ${msg}`);
+      }
       const sessionIds = deps.eventStore.findSessionIdsByProjectDir(projectDir);
       deps.eventStore.deleteSessions(sessionIds);
     }
@@ -274,13 +295,14 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     log.error("resolveProjectId: scan failed", { projectDir: normalized, error: message });
-    throw new Error(`Failed to scan project directory "${normalized}": ${message}`);
+    throw new Error("Failed to scan project directory");
   }
 }
 
 function deleteProjectManifest(projectDir: string): void {
   // Validate raw input BEFORE resolving to catch traversal attempts
-  if (projectDir.includes("..")) {
+  const segments = projectDir.split(/[\\/]/);
+  if (segments.includes("..")) {
     throw new Error("projectDir must not contain path traversal sequences");
   }
   const resolved = path.resolve(projectDir);

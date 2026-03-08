@@ -128,8 +128,21 @@ export async function parseBody<T extends ZodSchema>(
   req: IncomingMessage,
   schema: T
 ): Promise<ParseBodyResult<z.infer<T>>> {
-  // Read raw JSON
-  const body = await readJsonBody(req);
+  // Read raw JSON — readJsonBody may throw ValidationError
+  // for oversized or malformed bodies. Convert to ParseError result.
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch (error: unknown) {
+    if (error instanceof ValidationError) {
+      return {
+        success: false,
+        error: error.message,
+        fieldErrors: error.fieldErrors,
+      };
+    }
+    throw error;
+  }
 
   // Validate against schema
   const result = schema.safeParse(body);

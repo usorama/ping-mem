@@ -41,9 +41,9 @@ import { SummaryCache } from "../diagnostics/SummaryCache.js";
 import { RelevanceEngine } from "../memory/RelevanceEngine.js";
 
 import type { ToolModule, ToolDefinition } from "./types.js";
+import type { SessionState } from "./handlers/shared.js";
 
 const log = createLogger("PingMemServer");
-import type { SessionState } from "./handlers/shared.js";
 import {
   ContextToolModule,
   GraphToolModule,
@@ -253,6 +253,7 @@ export class PingMemServer {
         };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        log.error("Tool call failed", { tool: name, error: errorMessage });
         return {
           content: [{ type: "text", text: JSON.stringify({ error: errorMessage }) }],
           isError: true,

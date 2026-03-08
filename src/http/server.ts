@@ -170,11 +170,42 @@ export async function startHTTPServer(): Promise<void> {
   const shutdown = async () => {
     log.info("Shutting down...");
     httpServer.close();
-    await serverInstance.stop();
-    await eventStore.close();
-    diagnosticsStore.close();
-    adminStore.close();
-    log.info("Shutdown complete");
+
+    const shutdownErrors: string[] = [];
+    try {
+      await serverInstance.stop();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("Shutdown: serverInstance.stop() failed", { error: msg });
+      shutdownErrors.push(`serverInstance: ${msg}`);
+    }
+    try {
+      await eventStore.close();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("Shutdown: eventStore.close() failed", { error: msg });
+      shutdownErrors.push(`eventStore: ${msg}`);
+    }
+    try {
+      diagnosticsStore.close();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("Shutdown: diagnosticsStore.close() failed", { error: msg });
+      shutdownErrors.push(`diagnosticsStore: ${msg}`);
+    }
+    try {
+      adminStore.close();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("Shutdown: adminStore.close() failed", { error: msg });
+      shutdownErrors.push(`adminStore: ${msg}`);
+    }
+
+    if (shutdownErrors.length > 0) {
+      log.warn("Shutdown completed with errors", { errors: shutdownErrors });
+    } else {
+      log.info("Shutdown complete");
+    }
     process.exit(0);
   };
 

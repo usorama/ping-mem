@@ -71,11 +71,16 @@ export class GitHistoryReader {
         log.info(`Progress: ${processed}/${commits.length} commits`);
       }
 
-      const changes = await this.readFileChanges(gitRoot, commit.hash);
-      fileChanges.push(...changes);
+      try {
+        const changes = await this.readFileChanges(gitRoot, commit.hash);
+        fileChanges.push(...changes);
 
-      const commitHunks = await this.readDiffHunks(gitRoot, commit.hash);
-      hunks.push(...commitHunks);
+        const commitHunks = await this.readDiffHunks(gitRoot, commit.hash);
+        hunks.push(...commitHunks);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        log.warn("Failed to process commit diffs, skipping", { hash: commit.hash, error: message });
+      }
     }
 
     return { commits, fileChanges, hunks };

@@ -19,6 +19,9 @@ import type { ProjectManifest, FileHashEntry } from "./types.js";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("IngestionOrchestrator");
 
 export interface CodeFileResult {
   filePath: string; // Relative to project root
@@ -121,7 +124,10 @@ export class IngestionOrchestrator {
     }
 
     const currentScan = await this.scanner.scanProject(projectPath, storedManifest);
-    return currentScan.manifest.treeHash === storedManifest.treeHash;
+    return (
+      currentScan.manifest.treeHash === storedManifest.treeHash &&
+      currentScan.manifest.projectId === storedManifest.projectId
+    );
   }
 
   /**
@@ -140,22 +146,27 @@ export class IngestionOrchestrator {
     const results: CodeFileResult[] = [];
 
     for (const entry of fileEntries) {
-      const fullPath = path.join(projectRoot, entry.path);
-      const content = fs.readFileSync(fullPath, "utf-8");
-      const rawChunks = this.chunker.chunkFile(entry.path, content);
-      const chunksWithIds = rawChunks.map((chunk) =>
-        this.buildChunkWithMetadata(entry.path, entry.sha256, content, chunk)
-      );
+      try {
+        const fullPath = path.join(projectRoot, entry.path);
+        const content = fs.readFileSync(fullPath, "utf-8");
+        const rawChunks = this.chunker.chunkFile(entry.path, content);
+        const chunksWithIds = rawChunks.map((chunk) =>
+          this.buildChunkWithMetadata(entry.path, entry.sha256, content, chunk)
+        );
 
-      // Extract symbols from the file
-      const symbols = this.symbolExtractor.extractFromFile(entry.path, content);
+        // Extract symbols from the file
+        const symbols = this.symbolExtractor.extractFromFile(entry.path, content);
 
-      results.push({
-        filePath: entry.path,
-        sha256: entry.sha256,
-        chunks: chunksWithIds,
-        symbols,
-      });
+        results.push({
+          filePath: entry.path,
+          sha256: entry.sha256,
+          chunks: chunksWithIds,
+          symbols,
+        });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        log.warn("Failed to chunk file, skipping", { file: entry.path, error: message });
+      }
     }
 
     return results;
