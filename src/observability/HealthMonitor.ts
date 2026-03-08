@@ -1,5 +1,5 @@
 import type { RuntimeServices } from "../config/runtime.js";
-import { probeSystemHealth, type HealthSnapshot } from "./health-probes.js";
+import { probeSystemHealth, getIntegrityOk, type HealthSnapshot } from "./health-probes.js";
 import type { EventStore } from "../storage/EventStore.js";
 import { createLogger } from "../util/logger.js";
 
@@ -86,6 +86,7 @@ export function createHealthMonitor(deps: HealthMonitorDeps): HealthMonitor {
 export class HealthMonitor {
   private fastTimer: ReturnType<typeof setInterval> | null = null;
   private qualityTimer: ReturnType<typeof setInterval> | null = null;
+  private stopping = false;
   private lastAlerts = new Map<string, number>();
   private activeAlerts = new Map<string, HealthAlert>();
   private lastSnapshot: HealthSnapshot | null = null;
@@ -115,6 +116,7 @@ export class HealthMonitor {
   }
 
   stop(): void {
+    this.stopping = true;
     if (this.fastTimer) {
       clearInterval(this.fastTimer);
       this.fastTimer = null;
@@ -138,12 +140,15 @@ export class HealthMonitor {
   }
 
   private async tick(): Promise<void> {
+    if (this.stopping) return;
+
     try {
       const snapshot = await probeSystemHealth({
         eventStore: this.deps.eventStore,
         ...(this.deps.services.graphManager ? { graphManager: this.deps.services.graphManager } : {}),
         ...(this.deps.services.qdrantClient ? { qdrantClient: this.deps.services.qdrantClient } : {}),
         ...(this.deps.diagnosticsStore ? { diagnosticsStore: this.deps.diagnosticsStore } : {}),
+        skipIntegrityCheck: true,
       });
       this.lastSnapshot = snapshot;
       this.lastFastTickAt = new Date().toISOString();
@@ -164,6 +169,8 @@ export class HealthMonitor {
       log.error("Fast tick probe failed", { error: error instanceof Error ? error.message : String(error) });
     }
 
+    if (this.stopping) return;
+
     // WAL checkpoint in separate try-catch so probe data is preserved even if checkpoint fails
     try {
       const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
@@ -177,6 +184,25 @@ export class HealthMonitor {
   }
 
   private async qualityTick(): Promise<void> {
+    if (this.stopping) return;
+
+    let probeSucceeded = false;
+
+    // SQLite integrity check (expensive — only runs in quality tick, not fast tick)
+    try {
+      const integrityOk = getIntegrityOk(this.deps.eventStore);
+      this.checkThresholds({
+        source: "sqlite",
+        status: integrityOk === 1 ? "healthy" : "unhealthy",
+        metrics: [{ name: "integrity_ok", value: integrityOk, unit: "boolean" }],
+      });
+      probeSucceeded = true;
+    } catch (error) {
+      log.warn("SQLite integrity check failed", { error: error instanceof Error ? error.message : String(error) });
+    }
+
+    if (this.stopping) return;
+
     if (this.deps.services.neo4jClient && this.deps.services.neo4jClient.isConnected()) {
       try {
         const nullRows = await this.deps.services.neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.nullProperties);
@@ -193,10 +219,13 @@ export class HealthMonitor {
             { name: "orphan_node_count", value: orphanNodeCount, unit: "count" },
           ],
         });
+        probeSucceeded = true;
       } catch (error) {
         log.warn("Neo4j quality tick failed", { error: error instanceof Error ? error.message : String(error) });
       }
     }
+
+    if (this.stopping) return;
 
     if (this.deps.services.qdrantClient && this.deps.services.qdrantClient.isConnected()) {
       try {
@@ -219,12 +248,15 @@ export class HealthMonitor {
           status: "healthy",
           metrics: [{ name: "point_count_drift_pct", value: driftPct, unit: "ratio" }],
         });
+        probeSucceeded = true;
       } catch (error) {
         log.warn("Qdrant quality tick failed", { error: error instanceof Error ? error.message : String(error) });
       }
     }
 
-    this.lastQualityTickAt = new Date().toISOString();
+    if (probeSucceeded) {
+      this.lastQualityTickAt = new Date().toISOString();
+    }
   }
 
   private componentToProbeStatus(status: HealthSnapshot["components"]["sqlite"]["status"]): "healthy" | "degraded" | "unhealthy" {

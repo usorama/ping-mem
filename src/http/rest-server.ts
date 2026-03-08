@@ -9,6 +9,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { cors } from "hono/cors";
@@ -57,7 +58,7 @@ import { MemoryPubSub } from "../pubsub/index.js";
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
-import { probeSystemHealth } from "../observability/health-probes.js";
+import { probeSystemHealth, sanitizeHealthError } from "../observability/health-probes.js";
 import type { HealthMonitor } from "../observability/HealthMonitor.js";
 import {
   SessionStartSchema,
@@ -232,9 +233,7 @@ export class RESTPingMemServer {
             apiKey = authHeader.slice(7);
           }
         }
-        const isValid = this.config.apiKeyManager
-          ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
-          : apiKey === this.config.apiKey;
+        const isValid = this.validateApiKey(apiKey ?? undefined);
         if (!isValid) {
           return c.json(
             {
@@ -282,10 +281,7 @@ export class RESTPingMemServer {
             apiKey = authHeader.slice(7);
           }
         }
-        const isValid = this.config.apiKeyManager
-          ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
-          : apiKey === this.config.apiKey;
-        if (!isValid) {
+        if (!this.validateApiKey(apiKey ?? undefined)) {
           return c.json(
             { error: "Unauthorized", message: "Invalid API key" },
             401
@@ -299,34 +295,47 @@ export class RESTPingMemServer {
           ...(this.graphManager ? { graphManager: this.graphManager } : {}),
           ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
           diagnosticsStore: this.diagnosticsStore,
+          skipIntegrityCheck: true,
         });
 
-        return c.json({
+        // Sanitize error messages before sending to client
+        const sanitized = {
           status: snapshot.status,
           timestamp: snapshot.timestamp,
-          components: snapshot.components,
-        });
+          components: Object.fromEntries(
+            Object.entries(snapshot.components).map(([key, comp]) => [
+              key,
+              comp.error ? { ...comp, error: sanitizeHealthError(comp.error) } : comp,
+            ])
+          ),
+        };
+
+        const httpStatus = snapshot.status === "unhealthy" ? 503 : 200;
+        return c.json(sanitized, httpStatus as 200);
       } catch (error) {
         log.error("Health probe failed", {
           error: error instanceof Error ? error.message : String(error),
         });
-        return c.json({ status: "unhealthy", error: "Health probe failed" }, 500);
+        return c.json({ status: "unhealthy", error: "Health probe failed" }, 503);
       }
     });
 
     this.app.get("/api/v1/observability/status", async (c) => {
       try {
-        const snapshot = await probeSystemHealth({
+        // Use cached snapshot from health monitor if available (avoids duplicate probes)
+        const monitorStatus = this.healthMonitor?.getStatus() ?? null;
+        const snapshot = monitorStatus?.lastSnapshot ?? await probeSystemHealth({
           eventStore: this.eventStore,
           ...(this.graphManager ? { graphManager: this.graphManager } : {}),
           ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
           diagnosticsStore: this.diagnosticsStore,
+          skipIntegrityCheck: true,
         });
 
         return c.json({
           data: {
             health: snapshot,
-            monitor: this.healthMonitor?.getStatus() ?? null,
+            monitor: monitorStatus,
           },
         });
       } catch (error) {
@@ -1603,6 +1612,24 @@ export class RESTPingMemServer {
   }
 
   /**
+   * Validate an API key using constant-time comparison
+   */
+  private validateApiKey(apiKey: string | undefined): boolean {
+    if (this.config.apiKeyManager) {
+      return this.config.apiKeyManager.isValid(apiKey);
+    }
+    if (!apiKey || !this.config.apiKey) {
+      return false;
+    }
+    const expected = Buffer.from(this.config.apiKey);
+    const actual = Buffer.from(apiKey);
+    if (expected.length !== actual.length) {
+      return false;
+    }
+    return timingSafeEqual(expected, actual);
+  }
+
+  /**
    * Handle errors and return consistent error responses
    */
   private handleError(c: Context<AppEnv>, error: unknown): Response {
@@ -1645,8 +1672,8 @@ export class RESTPingMemServer {
       if (codeErr.code === "MEMORY_EXISTS") return 409;
       if (codeErr.code === "INVALID_SESSION") return 400;
       if (codeErr.code === "AGENT_EXPIRED") return 410;
-      // Fallback to message-based detection — only for known domain error types
-      const isDomainError = "code" in error ||
+      // Fallback to message-based detection — only for known domain error class names
+      const isDomainError =
         /Memory|Agent|Quota|Lock|Evidence|Schema|Scope/.test(error.constructor.name);
       if (isDomainError) {
         if (error.message.includes("not found")) {

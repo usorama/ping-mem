@@ -527,8 +527,16 @@ describe("QdrantClientWrapper - Unit Tests", () => {
         });
       });
 
-      it("should return false on delete failure", async () => {
+      it("should throw on non-'not found' delete failure", async () => {
         mockDelete.mockRejectedValue(new Error("Delete failed"));
+
+        await expect(client.deleteVector("mem-001")).rejects.toThrow(
+          QdrantOperationError
+        );
+      });
+
+      it("should return false when point not found", async () => {
+        mockDelete.mockRejectedValue(new Error("Point not found"));
 
         const result = await client.deleteVector("mem-001");
         expect(result).toBe(false);

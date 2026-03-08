@@ -3,6 +3,9 @@ import type { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import type { GraphManager } from "../graph/GraphManager.js";
 import type { EventStore } from "../storage/EventStore.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("health-probes");
 
 export type ProbeStatus = "healthy" | "degraded" | "unhealthy" | "not_configured";
 
@@ -30,6 +33,16 @@ export interface HealthProbeDeps {
   graphManager?: GraphManager;
   qdrantClient?: QdrantClientWrapper;
   diagnosticsStore?: DiagnosticsStore;
+  skipIntegrityCheck?: boolean;
+}
+
+export function sanitizeHealthError(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (msg.includes("ECONNREFUSED")) return "connection refused";
+  if (msg.includes("ETIMEDOUT")) return "connection timeout";
+  if (msg.includes("ECONNRESET")) return "connection reset";
+  if (msg.includes("timeout")) return "connection timeout";
+  return "service unavailable";
 }
 
 function roundMs(value: number): number {
@@ -51,7 +64,11 @@ function getWalSizeBytes(eventStore: EventStore): number {
 
   try {
     return fs.statSync(`${dbPath}-wal`).size;
-  } catch {
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      log.warn("Cannot read WAL file", { path: `${dbPath}-wal`, code });
+    }
     return 0;
   }
 }
@@ -68,7 +85,7 @@ function getFreelistRatio(eventStore: EventStore): number {
   return freelistCount / pageCount;
 }
 
-function getIntegrityOk(eventStore: EventStore): number {
+export function getIntegrityOk(eventStore: EventStore): number {
   const db = eventStore.getDatabase();
   // Use quick_check instead of integrity_check — orders of magnitude faster
   // (integrity_check reads every page; quick_check only verifies b-tree structure)
@@ -85,7 +102,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
     deps.eventStore.getDatabase().prepare("SELECT 1").get();
     const walSize = getWalSizeBytes(deps.eventStore);
     const freelistRatio = getFreelistRatio(deps.eventStore);
-    const integrityOk = getIntegrityOk(deps.eventStore);
+    const integrityOk = deps.skipIntegrityCheck ? 1 : getIntegrityOk(deps.eventStore);
     sqlite = {
       status: integrityOk === 1 ? "healthy" : "unhealthy",
       configured: true,

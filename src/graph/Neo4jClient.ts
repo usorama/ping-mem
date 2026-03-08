@@ -56,7 +56,7 @@ export class Neo4jConnectionError extends Neo4jClientError {
  */
 export class Neo4jQueryError extends Neo4jClientError {
   public readonly query: string;
-  public readonly params: Record<string, unknown> | undefined;
+  public readonly paramKeys: string[] | undefined;
 
   constructor(
     message: string,
@@ -68,7 +68,7 @@ export class Neo4jQueryError extends Neo4jClientError {
     super(message, code, cause);
     this.name = "Neo4jQueryError";
     this.query = query;
-    this.params = params ?? undefined;
+    this.paramKeys = params ? Object.keys(params) : undefined;
     Object.setPrototypeOf(this, Neo4jQueryError.prototype);
   }
 }
@@ -151,6 +151,7 @@ export class Neo4jClient {
   private readonly config: ResolvedConfig;
   private connected = false;
   private readonly servicePolicy: ServicePolicy;
+  private readonly writePolicy: ServicePolicy;
 
   constructor(config: Neo4jClientConfig) {
     this.config = {
@@ -174,10 +175,24 @@ export class Neo4jClient {
       timeoutMs: 15_000,
     });
 
-    this.servicePolicy.onStateChange((state) => {
-      this.connected = state !== "open" && this.driver !== null;
-      log.warn("Circuit state changed", { state });
+    this.writePolicy = createServicePolicy({
+      name: "neo4j-write",
+      consecutiveFailures: 5,
+      halfOpenAfterMs: 30_000,
+      maxRetries: 0,
+      timeoutMs: 15_000,
     });
+
+    const onCircuitChange = (state: "closed" | "open" | "half-open") => {
+      this.connected = state !== "open" && this.driver !== null;
+      if (state === "closed") {
+        log.info("Circuit recovered", { state });
+      } else {
+        log.warn("Circuit state changed", { state });
+      }
+    };
+    this.servicePolicy.onStateChange(onCircuitChange);
+    this.writePolicy.onStateChange(onCircuitChange);
   }
 
   /**
@@ -348,7 +363,7 @@ export class Neo4jClient {
     params?: Record<string, unknown>
   ): Promise<T> {
     try {
-      const result = await this.servicePolicy.execute(async () => {
+      const result = await this.writePolicy.execute(async () => {
         const session = this.getSession(neo4j.session.WRITE);
         try {
           return await session.run(cypher, params);
@@ -408,10 +423,15 @@ export class Neo4jClient {
   async executeTransaction<T>(
     work: (session: Session) => Promise<T>
   ): Promise<T> {
-    const session = this.getSession(neo4j.session.WRITE);
-
     try {
-      return await work(session);
+      return await this.writePolicy.execute(async () => {
+        const session = this.getSession(neo4j.session.WRITE);
+        try {
+          return await work(session);
+        } finally {
+          await session.close();
+        }
+      });
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -427,8 +447,6 @@ export class Neo4jClient {
         errorCode,
         error instanceof Error ? error : undefined
       );
-    } finally {
-      await session.close();
     }
   }
 
@@ -445,7 +463,10 @@ export class Neo4jClient {
     try {
       await this.executeQuery("RETURN 1 as ping");
       return true;
-    } catch {
+    } catch (error) {
+      log.warn("Neo4j ping failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   }

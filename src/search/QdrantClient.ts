@@ -172,7 +172,7 @@ export class QdrantClientWrapper {
       consecutiveFailures: 5,
       halfOpenAfterMs: 30_000,
       maxRetries: 2,
-      timeoutMs: this.config.timeout,
+      timeoutMs: 15_000,
     });
 
     this.servicePolicy.onStateChange((state) => {
@@ -181,7 +181,11 @@ export class QdrantClientWrapper {
       } else if (!this.usingFallback) {
         this.connected = this.client !== null;
       }
-      log.warn("Circuit state changed", { state });
+      if (state === "closed") {
+        log.info("Circuit recovered", { state });
+      } else {
+        log.warn("Circuit state changed", { state });
+      }
     });
   }
 
@@ -529,11 +533,18 @@ export class QdrantClientWrapper {
       );
       return true;
     } catch (error) {
-      log.warn("deleteVector failed", {
-        memoryId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
+      const message = error instanceof Error ? error.message : String(error);
+      const isNotFound = message.includes("not found") || message.includes("Not found");
+      if (isNotFound) {
+        log.warn("deleteVector: point not found", { memoryId });
+        return false;
+      }
+      throw new QdrantOperationError(
+        `Failed to delete vector ${memoryId}: ${message}`,
+        "delete",
+        "DELETE_FAILED",
+        error instanceof Error ? error : undefined
+      );
     }
   }
 
