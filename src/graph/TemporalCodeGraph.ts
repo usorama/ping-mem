@@ -682,9 +682,8 @@ export class TemporalCodeGraph {
   async ensureConstraints(): Promise<void> {
     const session = this.neo4j.getSession();
     try {
-      await session.run(
-        "CREATE CONSTRAINT project_id_not_null IF NOT EXISTS FOR (p:Project) REQUIRE p.projectId IS NOT NULL"
-      );
+      // Uniqueness constraint (Community Edition compatible)
+      // Also prevents null since unique index requires non-null values
       await session.run(
         "CREATE CONSTRAINT project_id_unique IF NOT EXISTS FOR (p:Project) REQUIRE p.projectId IS UNIQUE"
       );
