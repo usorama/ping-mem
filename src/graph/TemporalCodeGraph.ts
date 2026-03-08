@@ -82,7 +82,7 @@ export class TemporalCodeGraph {
         `,
         {
           projectId: result.projectId,
-          name: path.basename(result.projectManifest.rootPath) || result.projectId,
+          name: path.basename(result.projectManifest.rootPath.replace(/[\\/]+$/, "")) || result.projectId,
           rootPath: result.projectManifest.rootPath,
           treeHash: result.projectManifest.treeHash,
           ingestedAt: result.ingestedAt,
@@ -182,6 +182,10 @@ export class TemporalCodeGraph {
     projectId: string,
     limit: number = 100
   ): Promise<GitCommit[]> {
+    if (!projectId || projectId.trim() === "") {
+      throw new Error("queryCommitHistory: projectId is required and must not be empty");
+    }
+
     const session = this.neo4j.getSession();
     try {
       // Check that the project exists before running the main query

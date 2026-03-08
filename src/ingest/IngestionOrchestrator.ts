@@ -124,6 +124,15 @@ export class IngestionOrchestrator {
     return currentScan.manifest.treeHash === storedManifest.treeHash;
   }
 
+  /**
+   * Load the stored manifest for a project directory.
+   * Returns null if no manifest exists.
+   */
+  getManifest(projectDir: string): import("./types.js").ProjectManifest | null {
+    const projectPath = path.resolve(projectDir);
+    return this.manifestStore.load(projectPath);
+  }
+
   private chunkCodeFiles(
     projectRoot: string,
     fileEntries: FileHashEntry[]

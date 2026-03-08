@@ -88,7 +88,7 @@ export class GitHistoryReader {
       return root;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      log.warn(`getGitRoot failed for "${projectDir}": ${message}`);
+      log.error(`getGitRoot failed for "${projectDir}": ${message}`);
       return null;
     }
   }

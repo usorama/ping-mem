@@ -12,7 +12,10 @@
 
 import { QdrantClientWrapper } from "./QdrantClient.js";
 import { DeterministicVectorizer } from "./DeterministicVectorizer.js";
+import { createLogger } from "../util/logger.js";
 import type { IngestionResult, CodeFileResult, ChunkWithId } from "../ingest/index.js";
+
+const log = createLogger("CodeIndexer");
 
 export interface CodeIndexerOptions {
   qdrantClient: QdrantClientWrapper;
@@ -111,6 +114,8 @@ export class CodeIndexer {
       });
     }
 
+    const clampedLimit = Math.max(1, Math.min(Math.floor(options.limit ?? 10), 1000));
+
     const searchParams: {
       vector: number[];
       limit: number;
@@ -118,7 +123,7 @@ export class CodeIndexer {
       filter?: { must: Array<{ key: string; match: { value: string } }> };
     } = {
       vector: queryVector,
-      limit: options.limit ?? 10,
+      limit: clampedLimit,
       with_payload: true,
     };
 
@@ -126,7 +131,14 @@ export class CodeIndexer {
       searchParams.filter = { must: mustConditions };
     }
 
-    const results = await qdrantClient.search(collectionName, searchParams);
+    let results: Awaited<ReturnType<typeof qdrantClient.search>>;
+    try {
+      results = await qdrantClient.search(collectionName, searchParams);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("Qdrant search failed", { error: message, query: query.substring(0, 100) });
+      throw new Error(`Code search failed: ${message}`);
+    }
 
     return results.map((r) => {
       const payload = r.payload as Record<string, unknown> | null;

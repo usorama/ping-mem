@@ -38,24 +38,12 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
  * ```
  */
 export function timingSafeStringEqual(a: string, b: string): boolean {
-  // Fast path: identical reference
-  if (a === b) {
-    return true;
-  }
-
-  // Different lengths: cannot be equal
-  // We check this AFTER the reference check to avoid timing leaks
-  // when comparing the same string with itself
-  if (a.length !== b.length) {
-    return false;
-  }
-
-  // Convert strings to buffers for timing-safe comparison
-  const bufA = Buffer.from(a, "utf8");
-  const bufB = Buffer.from(b, "utf8");
-
-  // Use crypto.timingSafeEqual for constant-time comparison
-  return timingSafeEqual(bufA, bufB);
+  // Hash both inputs to fixed-length digests before comparing.
+  // This prevents length leakage: strings of different lengths produce
+  // same-length hashes, so comparison time doesn't reveal length info.
+  const hashA = createHash("sha256").update(a, "utf8").digest();
+  const hashB = createHash("sha256").update(b, "utf8").digest();
+  return timingSafeEqual(hashA, hashB);
 }
 
 /**

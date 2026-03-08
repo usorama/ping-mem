@@ -162,7 +162,6 @@ describe("CT-002: Relationship Creation", () => {
   let store: TemporalStore;
 
   beforeEach(() => {
-    // Note: bun:test mocks auto-clear between tests
     mockClient = createMockNeo4jClient();
     store = new TemporalStore({
       neo4jClient: mockClient as unknown as Neo4jClient,
@@ -214,7 +213,6 @@ describe("CT-003: Bi-Temporal Tracking", () => {
   let store: TemporalStore;
 
   beforeEach(() => {
-    // Note: bun:test mocks auto-clear between tests
     mockClient = createMockNeo4jClient();
     store = new TemporalStore({
       neo4jClient: mockClient as unknown as Neo4jClient,
@@ -275,7 +273,6 @@ describe("CT-004: Query Relationships", () => {
   let graphManager: GraphManager;
 
   beforeEach(() => {
-    // Note: bun:test mocks auto-clear between tests
     mockClient = createMockNeo4jClient();
     graphManager = new GraphManager({
       neo4jClient: mockClient as unknown as Neo4jClient,
@@ -402,7 +399,6 @@ describe("CT-008: Lineage Query", () => {
   let lineageEngine: LineageEngine;
 
   beforeEach(() => {
-    // Note: bun:test mocks auto-clear between tests
     mockClient = createMockNeo4jClient();
     lineageEngine = new LineageEngine(mockClient as unknown as Neo4jClient);
   });

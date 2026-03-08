@@ -96,9 +96,7 @@ export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   try {
     return JSON.parse(raw);
   } catch {
-    // Return empty object for invalid JSON
-    // (validation will catch missing required fields)
-    return {};
+    throw new ValidationError("Invalid JSON in request body");
   }
 }
 

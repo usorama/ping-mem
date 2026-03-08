@@ -46,6 +46,7 @@ export async function startHTTPServer(): Promise<void> {
       neo4jClient: services.neo4jClient,
       qdrantClient: services.qdrantClient,
     });
+    await ingestionService.ensureConstraints();
   }
 
   const transport = (process.env.PING_MEM_TRANSPORT as HTTPTransportType) ?? "streamable-http";

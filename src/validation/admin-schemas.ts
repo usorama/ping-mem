@@ -32,12 +32,12 @@ const strictBoolean = z.boolean({
 });
 
 /**
- * Project ID schema (format: ping-mem-<base58>)
- * Validates format but doesn't enforce strict base58 for flexibility
+ * Project ID schema — accepts SHA-256 hex strings (64 chars).
+ * ProjectIds are computed as SHA-256(remoteUrl + "::" + relativeToGitRoot).
  */
 const projectIdSchema = nonEmptyString.regex(
-  /^ping-mem-[a-zA-Z0-9]+$/,
-  "projectId must start with 'ping-mem-' followed by alphanumeric characters"
+  /^[a-f0-9]{64}$/,
+  "projectId must be a 64-character lowercase hex string (SHA-256)"
 );
 
 // ============================================================================

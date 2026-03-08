@@ -9,6 +9,9 @@ import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import { EventStore } from "../storage/EventStore.js";
 import { ProjectScanner } from "../ingest/ProjectScanner.js";
 import { timingSafeStringEqual } from "../util/auth-utils.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("admin");
 import {
   deleteProjectSchema,
   rotateKeySchema,
@@ -64,7 +67,12 @@ export async function handleAdminRequest(
       return true;
     }
     const html = renderAdminPage();
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+    });
     res.end(html);
     return true;
   }
@@ -101,7 +109,13 @@ async function handleAdminApi(
     }
 
     const { projectDir, projectId } = result.data;
-    const resolvedProjectId = projectId ?? await resolveProjectId(projectDir ?? "", deps.adminStore);
+    let resolvedProjectId: string | null;
+    try {
+      resolvedProjectId = projectId ?? await resolveProjectId(projectDir ?? "", deps.adminStore);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      return respondJson(res, 500, { error: "Failed to resolve project", message });
+    }
     if (!resolvedProjectId) {
       return respondJson(res, 404, { error: "Project not found" });
     }
@@ -162,9 +176,11 @@ async function handleAdminApi(
       const setResult = deps.adminStore.setLLMConfig(result.data);
       return respondJson(res, 200, { data: setResult });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to save LLM config";
+      log.error("Failed to save LLM config", { error: message });
       return respondJson(res, 500, {
         error: "LLMConfigError",
-        message: error instanceof Error ? error.message : "Unable to save LLM config",
+        message: `Failed to save LLM configuration: ${message}`,
       });
     }
   }
@@ -239,17 +255,23 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
     return scan.manifest.projectId;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`resolveProjectId failed for "${normalized}": ${message}\n`);
-    return null;
+    log.error("resolveProjectId: scan failed", { projectDir: normalized, error: message });
+    throw new Error(`Failed to scan project directory "${normalized}": ${message}`);
   }
 }
 
 function deleteProjectManifest(projectDir: string): void {
-  const manifestPath = path.join(projectDir, ".ping-mem", "manifest.json");
+  // Validate path to prevent traversal attacks
+  const resolved = path.resolve(projectDir);
+  if (resolved.includes("..")) {
+    throw new Error("projectDir must not contain path traversal sequences");
+  }
+
+  const manifestPath = path.join(resolved, ".ping-mem", "manifest.json");
   if (fs.existsSync(manifestPath)) {
     fs.unlinkSync(manifestPath);
   }
-  const manifestDir = path.join(projectDir, ".ping-mem");
+  const manifestDir = path.join(resolved, ".ping-mem");
   if (fs.existsSync(manifestDir)) {
     const remaining = fs.readdirSync(manifestDir);
     if (remaining.length === 0) {
@@ -268,7 +290,7 @@ function escapeHtml(str: string): string {
 }
 
 function renderAdminPage(): string {
-  const providerOptions = PROVIDERS.map((p) => `<option value="${p}">${p}</option>`).join("");
+  const providerOptions = PROVIDERS.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
   const providersJson = JSON.stringify(PROVIDERS);
 
   return `<!doctype html>
@@ -495,7 +517,7 @@ function renderAdminPage(): string {
     async function refreshKeys() {
       const keys = await apiFetch("/api/admin/keys");
       const table = document.getElementById("keysTable");
-      table.innerHTML = "";
+      while (table.firstChild) { table.removeChild(table.firstChild); }
       keys.forEach((key) => {
         const row = document.createElement("tr");
         const createdAt = new Date(key.createdAt).toLocaleString();
@@ -549,7 +571,7 @@ function renderAdminPage(): string {
     async function refreshProjects() {
       const projects = await apiFetch("/api/admin/projects");
       const table = document.getElementById("projectsTable");
-      table.innerHTML = "";
+      while (table.firstChild) { table.removeChild(table.firstChild); }
       projects.forEach((project) => {
         const row = document.createElement("tr");
         const lastIngested = project.lastIngestedAt
@@ -620,10 +642,15 @@ function renderAdminPage(): string {
     document.getElementById("refreshProjects").addEventListener("click", refreshProjects);
     document.getElementById("saveLLMConfig").addEventListener("click", saveLLMConfig);
 
+    function showError(msg) {
+      const el = document.getElementById("apiKeyStatus");
+      if (el) { el.textContent = msg; el.className = "error"; }
+    }
+
     if (state.apiKey) {
-      refreshKeys().catch(console.error);
-      refreshProjects().catch(console.error);
-      loadLLMConfig().catch(console.error);
+      refreshKeys().catch((e) => showError("Keys: " + e.message));
+      refreshProjects().catch((e) => showError("Projects: " + e.message));
+      loadLLMConfig().catch((e) => showError("LLM: " + e.message));
     }
   </script>
 </body>

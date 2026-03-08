@@ -12,6 +12,9 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
 import path from "path";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("SafeGit");
 
 const runCommand = promisify(execFile);
 const GIT_HASH_REGEX = /^[a-f0-9]{7,40}$/i;
@@ -67,6 +70,10 @@ export class SafeGit {
   }
 
   async getLog(limit: number = 100, format: string = "%H|%P|%an|%ae|%at|%s"): Promise<string> {
+    // Validate format to prevent injection of git format specifiers that execute commands
+    if (/[^\x20-\x7E]/.test(format)) {
+      throw new Error("SafeGit.getLog: format must contain only printable ASCII characters");
+    }
     const { stdout } = await this.run(["log", "--all", "--topo-order", `--format=${format}`, `-n${limit}`]);
     return stdout;
   }
@@ -89,18 +96,19 @@ export class SafeGit {
       // git config --get exits with code 1 when the key is not found (no remote configured).
       // That's expected and not an error worth logging. Other failures are unexpected.
       const message = error instanceof Error ? error.message : String(error);
-      if (!message.includes("exit code 1")) {
-        // Import would be circular, so use console.warn for unexpected errors
-        process.stderr.write(`SafeGit.getRemoteUrl unexpected error: ${message}\n`);
+      if (message.includes("exit code 1")) {
+        return null; // No remote configured — expected
       }
-      return null;
+      // Unexpected error — propagate instead of silently returning null
+      log.error("getRemoteUrl unexpected error", { error: message });
+      throw new Error(`SafeGit.getRemoteUrl failed: ${message}`);
     }
   }
 
   async listFiles(commitHash: string): Promise<string[]> {
     const safeHash = this.validateHash(commitHash);
     const { stdout } = await this.run(["diff-tree", "--no-commit-id", "--name-only", "-r", safeHash]);
-    return stdout.trim().split("\\n").filter(Boolean);
+    return stdout.trim().split("\n").filter(Boolean);
   }
 
   private validateFilePath(filePath: string): string {

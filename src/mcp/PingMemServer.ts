@@ -351,6 +351,7 @@ export async function main(): Promise<void> {
       neo4jClient: services.neo4jClient,
       qdrantClient: services.qdrantClient,
     });
+    await ingestionService.ensureConstraints();
   }
 
   const server = new PingMemServer({

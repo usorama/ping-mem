@@ -188,6 +188,15 @@ describe("validateEnv", () => {
     expect(exitMock).not.toHaveBeenCalled();
   });
 
+  it("accepts Neo4j triplet with NEO4J_USER alias", () => {
+    process.env["NEO4J_URI"] = "bolt://localhost:7687";
+    process.env["NEO4J_USER"] = "neo4j";
+    process.env["NEO4J_PASSWORD"] = "password";
+
+    expect(() => validateEnv()).not.toThrow();
+    expect(exitMock).not.toHaveBeenCalled();
+  });
+
   // --------------------------------------------------------------------------
   // Numeric field validation
   // --------------------------------------------------------------------------

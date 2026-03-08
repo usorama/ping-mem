@@ -31,6 +31,18 @@ function parseArgs(argv: string[]): { baseUrl: string } {
     }
   }
 
+  // Validate URL scheme to prevent SSRF
+  try {
+    const parsed = new URL(baseUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      log.error(`Invalid URL scheme "${parsed.protocol}". Only http: and https: are allowed.`);
+      process.exit(1);
+    }
+  } catch {
+    log.error(`Invalid URL: "${baseUrl}"`);
+    process.exit(1);
+  }
+
   return { baseUrl };
 }
 
@@ -167,8 +179,11 @@ async function main(): Promise<void> {
     log.info("Health check passed");
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    if (message.includes("ECONNREFUSED") || message.includes("fetch failed")) {
+      log.error(`Cannot connect to server at ${baseUrl}. Is it running?`);
+      process.exit(1);
+    }
     log.error(`Health check failed: ${message}`);
-    log.error(`Is the server running at ${baseUrl}?`);
     process.exit(1);
   }
 
@@ -191,8 +206,10 @@ async function main(): Promise<void> {
         continue;
       }
 
-      const json = (await resp.json()) as { data: { entry: { id: string } } };
-      log.info(`Ingested: "${entry.title}" (id: ${json.data.entry.id.substring(0, 12)}...)`);
+      const json = (await resp.json()) as Record<string, unknown>;
+      const entryData = (json?.data as Record<string, unknown>)?.entry as Record<string, unknown> | undefined;
+      const id = typeof entryData?.id === "string" ? entryData.id.substring(0, 12) : "unknown";
+      log.info(`Ingested: "${entry.title}" (id: ${id}...)`);
       succeeded++;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

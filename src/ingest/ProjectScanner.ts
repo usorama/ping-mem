@@ -2,7 +2,10 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { createSafeGit } from "./SafeGit.js";
+import { createLogger } from "../util/logger.js";
 import type { FileHashEntry, ProjectManifest, ProjectScanResult } from "./types.js";
+
+const log = createLogger("ProjectScanner");
 
 const DEFAULT_IGNORE_DIRS = new Set([
   ".git",
@@ -70,11 +73,14 @@ export class ProjectScanner {
       const entries = fs.readdirSync(current, { withFileTypes: true });
       const sorted = entries.sort((a, b) => a.name.localeCompare(b.name));
       for (const entry of sorted) {
-        if (entry.name.startsWith(".") && entry.name !== ".env") {
-          // Keep deterministic handling of dotfiles, except .env
+        if (entry.name.startsWith(".")) {
           if (this.ignoreDirs.has(entry.name)) {
             continue;
           }
+        }
+        // Exclude .env files to prevent secrets from being ingested
+        if (entry.name === ".env" || (entry.name.startsWith(".env.") && entry.isFile())) {
+          continue;
         }
         const fullPath = path.join(current, entry.name);
         if (entry.isDirectory()) {
@@ -145,8 +151,13 @@ export class ProjectScanner {
       return `${remoteUrl}::${this.normalizePath(relativeToGitRoot)}`;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      process.stderr.write(`ProjectScanner.getGitIdentity failed for "${rootPath}": ${message}. Falling back to path-based projectId.\n`);
-      return null;
+      // "not a git repository" is expected for non-git dirs — fallback is appropriate
+      if (message.includes("not a git repository") || message.includes("fatal: not a git repository")) {
+        log.info(`No git repo at "${rootPath}", using path-based projectId`);
+        return null;
+      }
+      // Unexpected git errors should propagate, not silently degrade to a different identity
+      throw new Error(`ProjectScanner.getGitIdentity failed for "${rootPath}": ${message}`);
     }
   }
 
