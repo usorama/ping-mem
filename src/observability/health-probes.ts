@@ -71,8 +71,10 @@ function getFreelistRatio(eventStore: EventStore): number {
 
 function getIntegrityOk(eventStore: EventStore): number {
   const db = eventStore.getDatabase();
-  const row = db.prepare("PRAGMA integrity_check").get() as { integrity_check?: string } | undefined;
-  return row?.integrity_check === "ok" ? 1 : 0;
+  // Use quick_check instead of integrity_check — orders of magnitude faster
+  // (integrity_check reads every page; quick_check only verifies b-tree structure)
+  const row = db.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+  return row?.quick_check === "ok" ? 1 : 0;
 }
 
 export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSnapshot> {

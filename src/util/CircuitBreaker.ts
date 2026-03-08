@@ -29,7 +29,13 @@ function isTransient(err: unknown): boolean {
   }
 
   const message = err.message.toLowerCase();
-  return message.includes("timeout") || message.includes("connection");
+  return (
+    message.includes("timeout") ||
+    message.includes("connection refused") ||
+    message.includes("connection reset") ||
+    message.includes("connection closed") ||
+    message.includes("socket hang up")
+  );
 }
 
 export function createServicePolicy(opts: {

@@ -76,6 +76,7 @@ const QUALITY_QUERIES = {
 export interface HealthMonitorDeps {
   services: RuntimeServices;
   eventStore: EventStore;
+  diagnosticsStore?: import("../diagnostics/DiagnosticsStore.js").DiagnosticsStore;
 }
 
 export function createHealthMonitor(deps: HealthMonitorDeps): HealthMonitor {
@@ -142,6 +143,7 @@ export class HealthMonitor {
         eventStore: this.deps.eventStore,
         ...(this.deps.services.graphManager ? { graphManager: this.deps.services.graphManager } : {}),
         ...(this.deps.services.qdrantClient ? { qdrantClient: this.deps.services.qdrantClient } : {}),
+        ...(this.deps.diagnosticsStore ? { diagnosticsStore: this.deps.diagnosticsStore } : {}),
       });
       this.lastSnapshot = snapshot;
       this.lastFastTickAt = new Date().toISOString();
@@ -203,6 +205,11 @@ export class HealthMonitor {
 
         const baseline = this.baselineQdrantCount === 0 ? 1 : this.baselineQdrantCount;
         const driftPct = Math.abs(pointCount - this.baselineQdrantCount) / baseline * 100;
+
+        // Update baseline when drift is within acceptable range to track normal growth
+        if (driftPct <= 5) {
+          this.baselineQdrantCount = pointCount;
+        }
         this.checkThresholds({
           source: "qdrant",
           status: "healthy",
@@ -244,6 +251,8 @@ export class HealthMonitor {
         this.alert("warning", key, result.source, `${metric.name}=${metric.value} below ${rule.warnBelow}`);
       } else {
         this.activeAlerts.delete(key);
+        // Clear dedup timestamp so the alert can re-fire if the condition recurs
+        this.lastAlerts.delete(key);
       }
     }
   }

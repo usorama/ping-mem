@@ -64,7 +64,7 @@ export async function startHTTPServer(): Promise<void> {
     diagnosticsDbPath ? { dbPath: diagnosticsDbPath } : undefined
   );
   const eventStore = new EventStore({ dbPath: runtimeConfig.pingMem.dbPath });
-  const healthMonitor = createHealthMonitor({ services, eventStore });
+  const healthMonitor = createHealthMonitor({ services, eventStore, diagnosticsStore });
 
   log.info(`Starting with transport: ${transport}`);
   log.info(`Listening on ${host}:${port}`);
@@ -143,12 +143,7 @@ export async function startHTTPServer(): Promise<void> {
       log.error("Unhandled error", { error: error instanceof Error ? error.message : String(error) });
       if (!res.headersSent) {
         res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(
-          JSON.stringify({
-            error: "Internal Server Error",
-            message: error instanceof Error ? error.message : "Unknown error",
-          })
-        );
+        res.end(JSON.stringify({ error: "Internal Server Error" }));
       }
       });
   });
@@ -176,7 +171,9 @@ export async function startHTTPServer(): Promise<void> {
     healthMonitor.stop();
 
     try {
-      httpServer.close();
+      await new Promise<void>((resolve, reject) => {
+        httpServer.close((err) => (err ? reject(err) : resolve()));
+      });
       await serverInstance.stop();
       if (services.neo4jClient) {
         await services.neo4jClient.disconnect();
@@ -184,11 +181,9 @@ export async function startHTTPServer(): Promise<void> {
       if (services.qdrantClient) {
         await services.qdrantClient.disconnect();
       }
-      if (transport !== "rest") {
-        await eventStore.close();
-        diagnosticsStore.close();
-        adminStore.close();
-      }
+      await eventStore.close();
+      diagnosticsStore.close();
+      adminStore.close();
       log.info("Shutdown complete");
       process.exit(0);
     } catch (error) {
@@ -204,14 +199,15 @@ export async function startHTTPServer(): Promise<void> {
     void shutdown("SIGTERM");
   });
   process.on("uncaughtException", (error) => {
-    log.error("Uncaught exception", { error: error.message });
-    void shutdown("uncaughtException");
+    log.error("Uncaught exception", { error: error.message, stack: error.stack });
+    void shutdown("uncaughtException").finally(() => process.exit(1));
   });
   process.on("unhandledRejection", (reason) => {
     log.error("Unhandled rejection", {
       error: reason instanceof Error ? reason.message : String(reason),
+      stack: reason instanceof Error ? reason.stack : undefined,
     });
-    void shutdown("unhandledRejection");
+    void shutdown("unhandledRejection").finally(() => process.exit(1));
   });
 }
 

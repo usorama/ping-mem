@@ -444,7 +444,7 @@ export class GraphToolModule implements ToolModule {
     });
 
     const health: Record<string, unknown> = {
-      status: snapshot.status === "ok" ? "healthy" : snapshot.status,
+      status: snapshot.status === "ok" ? "healthy" : snapshot.status === "degraded" ? "degraded" : "unhealthy",
       timestamp: new Date().toISOString(),
       version: "1.0.0",
       components: snapshot.components,

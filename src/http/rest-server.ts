@@ -297,6 +297,7 @@ export class RESTPingMemServer {
         eventStore: this.eventStore,
         ...(this.graphManager ? { graphManager: this.graphManager } : {}),
         ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
+        diagnosticsStore: this.diagnosticsStore,
       });
 
       return c.json({
@@ -308,10 +309,18 @@ export class RESTPingMemServer {
 
     this.app.get("/api/v1/observability/status", async (c) => {
       try {
+        if (!this.config.ingestionService) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
+
         const snapshot = await probeSystemHealth({
           eventStore: this.eventStore,
           ...(this.graphManager ? { graphManager: this.graphManager } : {}),
           ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
+          diagnosticsStore: this.diagnosticsStore,
         });
 
         return c.json({

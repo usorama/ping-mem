@@ -283,7 +283,10 @@ export class QdrantClientWrapper {
       // Use getCollections as a health check - it's a lightweight operation
       await this.client.getCollections();
       return true;
-    } catch {
+    } catch (error) {
+      log.warn("healthCheck failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   }
@@ -523,7 +526,11 @@ export class QdrantClientWrapper {
         points: [memoryId],
       });
       return true;
-    } catch {
+    } catch (error) {
+      log.warn("deleteVector failed", {
+        memoryId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   }
