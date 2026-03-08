@@ -120,6 +120,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
       status = "unhealthy";
     }
   } catch (error) {
+    log.error("SQLite probe failed", { error: toErrorMessage(error) });
     sqlite = {
       status: "unhealthy",
       configured: true,
@@ -139,6 +140,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
         latencyMs: roundMs(performance.now() - start),
       };
     } catch (error) {
+      log.warn("Neo4j probe failed", { error: toErrorMessage(error) });
       neo4j = {
         status: "unhealthy",
         configured: true,
@@ -169,6 +171,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
         status = "degraded";
       }
     } catch (error) {
+      log.warn("Qdrant probe failed", { error: toErrorMessage(error) });
       qdrant = {
         status: "unhealthy",
         configured: true,
@@ -194,6 +197,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
         configured: true,
       };
     } catch (error) {
+      log.warn("Diagnostics probe failed", { error: toErrorMessage(error) });
       diagnostics = {
         status: "unhealthy",
         configured: true,

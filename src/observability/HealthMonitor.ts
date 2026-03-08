@@ -104,6 +104,9 @@ export class HealthMonitor {
       return;
     }
 
+    this.stopping = false;
+    this.consecutiveTickFailures = 0;
+
     this.fastTimer = setInterval(() => {
       void this.tick();
     }, 60_000);
@@ -112,8 +115,12 @@ export class HealthMonitor {
       void this.qualityTick();
     }, 300_000);
 
-    void this.tick();
-    void this.qualityTick();
+    this.tick().catch((err) => {
+      log.error("Initial fast tick failed", { error: err instanceof Error ? err.message : String(err) });
+    });
+    this.qualityTick().catch((err) => {
+      log.error("Initial quality tick failed", { error: err instanceof Error ? err.message : String(err) });
+    });
     log.info("Started");
   }
 
@@ -271,6 +278,8 @@ export class HealthMonitor {
         probeSucceeded = true;
       } catch (error) {
         log.warn("Qdrant quality tick failed", { error: error instanceof Error ? error.message : String(error) });
+        this.alert("warning", "qdrant:quality_probe_failed", "qdrant",
+          `Quality probe failed: ${error instanceof Error ? error.message : "unknown"}`);
       }
     }
 

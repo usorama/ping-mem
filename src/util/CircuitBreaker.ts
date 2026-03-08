@@ -62,25 +62,29 @@ export function createServicePolicy(opts: {
   let currentState: ServiceState = "closed";
   const handlers: Array<(state: ServiceState) => void> = [];
 
+  const notifyHandlers = (state: ServiceState) => {
+    for (const handler of handlers) {
+      try {
+        handler(state);
+      } catch (_) {
+        // Handler errors must not break other handlers or circuit breaker internals
+      }
+    }
+  };
+
   breaker.onBreak(() => {
     currentState = "open";
-    for (const handler of handlers) {
-      handler("open");
-    }
+    notifyHandlers("open");
   });
 
   breaker.onHalfOpen(() => {
     currentState = "half-open";
-    for (const handler of handlers) {
-      handler("half-open");
-    }
+    notifyHandlers("half-open");
   });
 
   breaker.onReset(() => {
     currentState = "closed";
-    for (const handler of handlers) {
-      handler("closed");
-    }
+    notifyHandlers("closed");
   });
 
   return {

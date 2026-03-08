@@ -561,6 +561,9 @@ function renderAdminPage(): string {
           });
           refreshProjects();
         });
+        actionTd.appendChild(btn);
+        row.appendChild(actionTd);
+        table.appendChild(row);
       });
     }
 

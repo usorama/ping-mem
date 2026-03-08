@@ -4,7 +4,7 @@
  * @module graph/__tests__/Neo4jClient.test
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   Neo4jClient,
   Neo4jClientError,

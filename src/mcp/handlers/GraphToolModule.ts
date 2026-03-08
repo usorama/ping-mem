@@ -15,7 +15,7 @@ import type {
 } from "../../types/index.js";
 import { RelationshipType } from "../../types/index.js";
 import type { SearchWeights } from "../../search/HybridSearchEngine.js";
-import { probeSystemHealth } from "../../observability/health-probes.js";
+import { probeSystemHealth, sanitizeHealthError } from "../../observability/health-probes.js";
 
 // ============================================================================
 // Tool Schemas
@@ -436,26 +436,46 @@ export class GraphToolModule implements ToolModule {
   }
 
   private async handleHealth(): Promise<Record<string, unknown>> {
-    const snapshot = await probeSystemHealth({
-      eventStore: this.state.eventStore,
-      ...(this.state.graphManager ? { graphManager: this.state.graphManager } : {}),
-      ...(this.state.qdrantClient ? { qdrantClient: this.state.qdrantClient } : {}),
-      ...(this.state.diagnosticsStore ? { diagnosticsStore: this.state.diagnosticsStore } : {}),
-    });
+    try {
+      const snapshot = await probeSystemHealth({
+        eventStore: this.state.eventStore,
+        ...(this.state.graphManager ? { graphManager: this.state.graphManager } : {}),
+        ...(this.state.qdrantClient ? { qdrantClient: this.state.qdrantClient } : {}),
+        ...(this.state.diagnosticsStore ? { diagnosticsStore: this.state.diagnosticsStore } : {}),
+      });
 
-    const health: Record<string, unknown> = {
-      status: snapshot.status === "ok" ? "healthy" : snapshot.status === "degraded" ? "degraded" : "unhealthy",
-      timestamp: new Date().toISOString(),
-      version: "1.0.0",
-      components: snapshot.components,
-    };
+      // Sanitize component errors before returning to MCP clients
+      const sanitizedComponents = Object.fromEntries(
+        Object.entries(snapshot.components).map(([key, comp]) => [
+          key,
+          comp.error ? { ...comp, error: sanitizeHealthError(comp.error) } : comp,
+        ])
+      );
 
-    // Check current session
-    health.session = {
-      active: this.state.currentSessionId !== null,
-      sessionId: this.state.currentSessionId,
-    };
+      const health: Record<string, unknown> = {
+        status: snapshot.status === "ok" ? "healthy" : snapshot.status === "degraded" ? "degraded" : "unhealthy",
+        timestamp: new Date().toISOString(),
+        version: "1.0.0",
+        components: sanitizedComponents,
+      };
 
-    return health;
+      health.session = {
+        active: this.state.currentSessionId !== null,
+        sessionId: this.state.currentSessionId,
+      };
+
+      return health;
+    } catch (error) {
+      return {
+        status: "unhealthy",
+        timestamp: new Date().toISOString(),
+        version: "1.0.0",
+        error: "Health probe failed",
+        session: {
+          active: this.state.currentSessionId !== null,
+          sessionId: this.state.currentSessionId,
+        },
+      };
+    }
   }
 }
