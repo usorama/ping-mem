@@ -57,6 +57,8 @@ import { MemoryPubSub } from "../pubsub/index.js";
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
+import { probeSystemHealth } from "../observability/health-probes.js";
+import type { HealthMonitor } from "../observability/HealthMonitor.js";
 import {
   SessionStartSchema,
   ContextSaveSchema,
@@ -110,6 +112,7 @@ export class RESTPingMemServer {
   private pubsub: MemoryPubSub;
   private knowledgeStore: KnowledgeStore;
   private qdrantClient: QdrantClientWrapper | null = null;
+  private healthMonitor: HealthMonitor | null = null;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -158,6 +161,9 @@ export class RESTPingMemServer {
     }
     if (config.qdrantClient) {
       this.qdrantClient = config.qdrantClient;
+    }
+    if (config.healthMonitor) {
+      this.healthMonitor = config.healthMonitor;
     }
 
     // Initialize Hono app
@@ -287,68 +293,36 @@ export class RESTPingMemServer {
         }
       }
 
-      let overallStatus: "ok" | "degraded" | "unhealthy" = "ok";
-      const components: Record<string, Record<string, unknown>> = {};
-
-      // SQLite health — run a lightweight query and measure latency
-      try {
-        const sqliteStart = performance.now();
-        this.eventStore.getDatabase().prepare("SELECT 1").get();
-        const sqliteLatency = performance.now() - sqliteStart;
-        components.sqlite = { status: "healthy", latencyMs: Math.round(sqliteLatency * 100) / 100 };
-      } catch (err) {
-        components.sqlite = {
-          status: "unhealthy",
-          error: err instanceof Error ? err.message : String(err),
-        };
-        overallStatus = "unhealthy";
-      }
-
-      // Neo4j health
-      if (this.graphManager) {
-        try {
-          await this.graphManager.getEntity("__health_check_nonexistent__");
-          components.neo4j = { status: "healthy", configured: true };
-        } catch (err) {
-          components.neo4j = {
-            status: "unhealthy",
-            configured: true,
-            error: err instanceof Error ? err.message : String(err),
-          };
-          overallStatus = overallStatus === "unhealthy" ? "unhealthy" : "degraded";
-        }
-      } else {
-        components.neo4j = { status: "not_configured", configured: false };
-      }
-
-      // Qdrant health — actual ping via healthCheck()
-      if (this.qdrantClient) {
-        try {
-          const healthy = await this.qdrantClient.healthCheck();
-          components.qdrant = {
-            status: healthy ? "healthy" : "unhealthy",
-            configured: true,
-          };
-          if (!healthy) {
-            overallStatus = overallStatus === "unhealthy" ? "unhealthy" : "degraded";
-          }
-        } catch (err) {
-          components.qdrant = {
-            status: "unhealthy",
-            configured: true,
-            error: err instanceof Error ? err.message : String(err),
-          };
-          overallStatus = overallStatus === "unhealthy" ? "unhealthy" : "degraded";
-        }
-      } else {
-        components.qdrant = { status: "not_configured", configured: false };
-      }
+      const snapshot = await probeSystemHealth({
+        eventStore: this.eventStore,
+        ...(this.graphManager ? { graphManager: this.graphManager } : {}),
+        ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
+      });
 
       return c.json({
-        status: overallStatus,
-        timestamp: new Date().toISOString(),
-        components,
+        status: snapshot.status,
+        timestamp: snapshot.timestamp,
+        components: snapshot.components,
       });
+    });
+
+    this.app.get("/api/v1/observability/status", async (c) => {
+      try {
+        const snapshot = await probeSystemHealth({
+          eventStore: this.eventStore,
+          ...(this.graphManager ? { graphManager: this.graphManager } : {}),
+          ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
+        });
+
+        return c.json({
+          data: {
+            health: snapshot,
+            monitor: this.healthMonitor?.getStatus() ?? null,
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
     });
 
     // ============================================================================
@@ -1614,6 +1588,8 @@ export class RESTPingMemServer {
       diagnosticsStore: this.diagnosticsStore,
       ingestionService: this.config.ingestionService,
       knowledgeStore: this.knowledgeStore,
+      graphManager: this.graphManager ?? undefined,
+      qdrantClient: this.qdrantClient ?? undefined,
     });
   }
 

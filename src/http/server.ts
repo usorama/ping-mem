@@ -20,6 +20,7 @@ import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import { EventStore } from "../storage/EventStore.js";
 import { handleAdminRequest } from "./admin.js";
 import { createLogger } from "../util/logger.js";
+import { createHealthMonitor } from "../observability/HealthMonitor.js";
 
 const log = createLogger("HTTP Server");
 
@@ -63,6 +64,7 @@ export async function startHTTPServer(): Promise<void> {
     diagnosticsDbPath ? { dbPath: diagnosticsDbPath } : undefined
   );
   const eventStore = new EventStore({ dbPath: runtimeConfig.pingMem.dbPath });
+  const healthMonitor = createHealthMonitor({ services, eventStore });
 
   log.info(`Starting with transport: ${transport}`);
   log.info(`Listening on ${host}:${port}`);
@@ -92,6 +94,7 @@ export async function startHTTPServer(): Promise<void> {
       evolutionEngine: services.evolutionEngine,
       ingestionService,
       qdrantClient: services.qdrantClient,
+      healthMonitor,
     });
   } else {
     // SSE / Streamable HTTP mode
@@ -119,6 +122,7 @@ export async function startHTTPServer(): Promise<void> {
 
   // Start the server
   await serverInstance.start();
+  healthMonitor.start();
 
   // Create Node.js HTTP server
   const httpServer = createServer((req, res) => {
@@ -160,19 +164,55 @@ export async function startHTTPServer(): Promise<void> {
   });
 
   // Handle graceful shutdown
-  const shutdown = async () => {
+  let shuttingDown = false;
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+
     log.info("Shutting down...");
-    httpServer.close();
-    await serverInstance.stop();
-    await eventStore.close();
-    diagnosticsStore.close();
-    adminStore.close();
-    log.info("Shutdown complete");
-    process.exit(0);
+    log.info("Shutdown signal received", { signal });
+    healthMonitor.stop();
+
+    try {
+      httpServer.close();
+      await serverInstance.stop();
+      if (services.neo4jClient) {
+        await services.neo4jClient.disconnect();
+      }
+      if (services.qdrantClient) {
+        await services.qdrantClient.disconnect();
+      }
+      if (transport !== "rest") {
+        await eventStore.close();
+        diagnosticsStore.close();
+        adminStore.close();
+      }
+      log.info("Shutdown complete");
+      process.exit(0);
+    } catch (error) {
+      log.error("Shutdown failed", { error: error instanceof Error ? error.message : String(error) });
+      process.exit(1);
+    }
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+  process.on("uncaughtException", (error) => {
+    log.error("Uncaught exception", { error: error.message });
+    void shutdown("uncaughtException");
+  });
+  process.on("unhandledRejection", (reason) => {
+    log.error("Unhandled rejection", {
+      error: reason instanceof Error ? reason.message : String(reason),
+    });
+    void shutdown("unhandledRejection");
+  });
 }
 
 // ============================================================================

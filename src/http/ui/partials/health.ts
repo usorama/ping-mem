@@ -8,49 +8,27 @@ import type { Context } from "hono";
 import type { UIDependencies } from "../routes.js";
 import { escapeHtml } from "../layout.js";
 import { createLogger } from "../../../util/logger.js";
+import { getUiHealthColor, probeSystemHealth } from "../../../observability/health-probes.js";
 
 const log = createLogger("UI:Health");
 
 export function registerHealthPartialRoute(deps: UIDependencies) {
   return async (c: Context) => {
     try {
-      const { ingestionService, diagnosticsStore } = deps;
+      const snapshot = await probeSystemHealth({
+        eventStore: deps.eventStore,
+        diagnosticsStore: deps.diagnosticsStore,
+        ...(deps.graphManager ? { graphManager: deps.graphManager } : {}),
+        ...(deps.qdrantClient ? { qdrantClient: deps.qdrantClient } : {}),
+      });
 
-      // Check services: ingestion (Neo4j+Qdrant) and diagnostics (SQLite)
-      let status: "green" | "yellow" | "red" = "green";
-      let title = "All services healthy";
-
-      let hasIngestion = false;
-      if (ingestionService) {
-        try {
-          // Probe: call listProjects with limit 1 to verify Neo4j + Qdrant connectivity
-          await ingestionService.listProjects({ limit: 1 });
-          hasIngestion = true;
-        } catch (err) {
-          log.error("Ingestion probe failed", { error: err instanceof Error ? err.message : String(err) });
-          hasIngestion = false;
-        }
-      }
-
-      let hasDiagnostics = true;
-      try {
-        // Quick probe: list runs with limit 1
-        diagnosticsStore.listRuns({ limit: 1 });
-      } catch (err) {
-        log.error("Diagnostics probe failed", { error: err instanceof Error ? err.message : String(err) });
-        hasDiagnostics = false;
-      }
-
-      if (!hasIngestion && !hasDiagnostics) {
-        status = "red";
-        title = "Ingestion and Diagnostics unavailable";
-      } else if (!hasIngestion) {
-        status = "yellow";
-        title = "Ingestion unavailable (Neo4j/Qdrant not connected)";
-      } else if (!hasDiagnostics) {
-        status = "yellow";
-        title = "Diagnostics unavailable";
-      }
+      const status = getUiHealthColor(snapshot);
+      const title =
+        snapshot.status === "ok"
+          ? "All services healthy"
+          : snapshot.status === "degraded"
+            ? "One or more services degraded"
+            : "One or more services unhealthy";
 
       return c.html(
         `<span id="health-dot" class="health-dot ${escapeHtml(status)}" title="${escapeHtml(title)}"

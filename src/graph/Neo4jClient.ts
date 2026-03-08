@@ -15,6 +15,10 @@ import neo4j, {
   Integer,
   Record as Neo4jRecord,
 } from "neo4j-driver";
+import { createServicePolicy, type ServicePolicy } from "../util/CircuitBreaker.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("Neo4jClient");
 
 // ============================================================================
 // Error Classes
@@ -146,6 +150,7 @@ export class Neo4jClient {
   private driver: Driver | null = null;
   private readonly config: ResolvedConfig;
   private connected = false;
+  private readonly servicePolicy: ServicePolicy;
 
   constructor(config: Neo4jClientConfig) {
     this.config = {
@@ -160,6 +165,19 @@ export class Neo4jClient {
         config.maxTransactionRetryTime ?? DEFAULT_TX_RETRY_TIME,
       encrypted: config.encrypted,
     };
+
+    this.servicePolicy = createServicePolicy({
+      name: "neo4j",
+      consecutiveFailures: 5,
+      halfOpenAfterMs: 30_000,
+      maxRetries: 2,
+      timeoutMs: 15_000,
+    });
+
+    this.servicePolicy.onStateChange((state) => {
+      this.connected = state !== "open" && this.driver !== null;
+      log.warn("Circuit state changed", { state });
+    });
   }
 
   /**
@@ -230,6 +248,10 @@ export class Neo4jClient {
     return this.connected && this.driver !== null;
   }
 
+  getCircuitState(): "closed" | "open" | "half-open" {
+    return this.servicePolicy.state;
+  }
+
   /**
    * Get a new session from the driver
    *
@@ -272,7 +294,7 @@ export class Neo4jClient {
     const session = this.getSession(neo4j.session.READ);
 
     try {
-      const result = await session.run(cypher, params);
+      const result = await this.servicePolicy.execute(() => session.run(cypher, params));
 
       return result.records.map((record: Neo4jRecord) => {
         const obj: Record<string, unknown> = {};
@@ -325,7 +347,7 @@ export class Neo4jClient {
     const session = this.getSession(neo4j.session.WRITE);
 
     try {
-      const result = await session.run(cypher, params);
+      const result = await this.servicePolicy.execute(() => session.run(cypher, params));
 
       // If there are records, return the first one
       if (result.records.length > 0) {

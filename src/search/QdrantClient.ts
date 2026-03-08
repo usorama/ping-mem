@@ -11,12 +11,16 @@
 
 import { QdrantClient as QdrantSDKClient } from "@qdrant/js-client-rest";
 import type { MemoryId, SessionId } from "../types/index.js";
+import { createServicePolicy, type ServicePolicy } from "../util/CircuitBreaker.js";
+import { createLogger } from "../util/logger.js";
 import {
   VectorIndex,
   type VectorEmbedding,
   type VectorSearchResult,
   type VectorIndexConfig,
 } from "./VectorIndex.js";
+
+const log = createLogger("QdrantClient");
 
 // ============================================================================
 // Error Classes
@@ -149,6 +153,7 @@ export class QdrantClientWrapper {
   private connected = false;
   private usingFallback = false;
   private fallbackIndex: VectorIndex | null = null;
+  private readonly servicePolicy: ServicePolicy;
 
   constructor(config: QdrantClientConfig) {
     this.config = {
@@ -161,6 +166,23 @@ export class QdrantClientWrapper {
       enableFallback: config.enableFallback ?? DEFAULT_ENABLE_FALLBACK,
       fallbackConfig: config.fallbackConfig,
     };
+
+    this.servicePolicy = createServicePolicy({
+      name: "qdrant",
+      consecutiveFailures: 5,
+      halfOpenAfterMs: 30_000,
+      maxRetries: 2,
+      timeoutMs: this.config.timeout,
+    });
+
+    this.servicePolicy.onStateChange((state) => {
+      if (state === "open") {
+        this.connected = false;
+      } else if (!this.usingFallback) {
+        this.connected = this.client !== null;
+      }
+      log.warn("Circuit state changed", { state });
+    });
   }
 
   /**
@@ -243,6 +265,10 @@ export class QdrantClientWrapper {
     return this.usingFallback;
   }
 
+  getCircuitState(): "closed" | "open" | "half-open" {
+    return this.servicePolicy.state;
+  }
+
   /**
    * Perform health check on Qdrant server
    *
@@ -323,22 +349,24 @@ export class QdrantClientWrapper {
     }
 
     try {
-      await this.client.upsert(this.config.collectionName, {
-        wait: true,
-        points: [
-          {
-            id: vectorData.memoryId,
-            vector: Array.from(vectorData.embedding),
-            payload: {
-              session_id: vectorData.sessionId,
-              content: vectorData.content,
-              category: vectorData.category ?? null,
-              indexed_at: new Date().toISOString(),
-              metadata: vectorData.metadata ?? null,
+      await this.servicePolicy.execute(() =>
+        this.client!.upsert(this.config.collectionName, {
+          wait: true,
+          points: [
+            {
+              id: vectorData.memoryId,
+              vector: Array.from(vectorData.embedding),
+              payload: {
+                session_id: vectorData.sessionId,
+                content: vectorData.content,
+                category: vectorData.category ?? null,
+                indexed_at: new Date().toISOString(),
+                metadata: vectorData.metadata ?? null,
+              },
             },
-          },
-        ],
-      });
+          ],
+        })
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -422,9 +450,8 @@ export class QdrantClientWrapper {
         searchParams.filter = { must: mustConditions };
       }
 
-      const results = await this.client.search(
-        this.config.collectionName,
-        searchParams
+      const results = await this.servicePolicy.execute(() =>
+        this.client!.search(this.config.collectionName, searchParams)
       );
 
       return results.map((result) => {
@@ -534,8 +561,8 @@ export class QdrantClientWrapper {
     }
 
     try {
-      const collectionInfo = await this.client.getCollection(
-        this.config.collectionName
+      const collectionInfo = await this.servicePolicy.execute(() =>
+        this.client!.getCollection(this.config.collectionName)
       );
 
       return {

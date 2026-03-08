@@ -15,6 +15,7 @@ import type {
 } from "../../types/index.js";
 import { RelationshipType } from "../../types/index.js";
 import type { SearchWeights } from "../../search/HybridSearchEngine.js";
+import { probeSystemHealth } from "../../observability/health-probes.js";
 
 // ============================================================================
 // Tool Schemas
@@ -435,90 +436,19 @@ export class GraphToolModule implements ToolModule {
   }
 
   private async handleHealth(): Promise<Record<string, unknown>> {
+    const snapshot = await probeSystemHealth({
+      eventStore: this.state.eventStore,
+      ...(this.state.graphManager ? { graphManager: this.state.graphManager } : {}),
+      ...(this.state.qdrantClient ? { qdrantClient: this.state.qdrantClient } : {}),
+      ...(this.state.diagnosticsStore ? { diagnosticsStore: this.state.diagnosticsStore } : {}),
+    });
+
     const health: Record<string, unknown> = {
-      status: "healthy",
+      status: snapshot.status === "ok" ? "healthy" : snapshot.status,
       timestamp: new Date().toISOString(),
       version: "1.0.0",
-      components: {},
+      components: snapshot.components,
     };
-
-    // Check SQLite (EventStore)
-    try {
-      await this.state.eventStore.getBySession("__health_check__");
-      (health.components as Record<string, unknown>).sqlite = {
-        status: "healthy",
-        type: "eventStore",
-      };
-    } catch (error) {
-      (health.components as Record<string, unknown>).sqlite = {
-        status: "unhealthy",
-        error: error instanceof Error ? error.message : "Unknown error",
-      };
-      health.status = "degraded";
-    }
-
-    // Check GraphManager (Neo4j) — actual connectivity check
-    if (this.state.graphManager) {
-      try {
-        // Real connectivity check: attempt a lightweight query against Neo4j
-        await this.state.graphManager.getEntity("__health_check_nonexistent__");
-        (health.components as Record<string, unknown>).neo4j = {
-          status: "healthy",
-          configured: true,
-        };
-      } catch (error) {
-        (health.components as Record<string, unknown>).neo4j = {
-          status: "unhealthy",
-          configured: true,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-        health.status = "degraded";
-      }
-    } else {
-      (health.components as Record<string, unknown>).neo4j = {
-        status: "not_configured",
-        configured: false,
-      };
-    }
-
-    // Check Qdrant — actual health check ping
-    if (this.state.qdrantClient) {
-      try {
-        const healthy = await this.state.qdrantClient.healthCheck();
-        (health.components as Record<string, unknown>).qdrant = {
-          status: healthy ? "healthy" : "unhealthy",
-          configured: true,
-        };
-        if (!healthy) {
-          health.status = "degraded";
-        }
-      } catch (error) {
-        (health.components as Record<string, unknown>).qdrant = {
-          status: "unhealthy",
-          configured: true,
-          error: error instanceof Error ? error.message : "Unknown error",
-        };
-        health.status = "degraded";
-      }
-    } else {
-      (health.components as Record<string, unknown>).qdrant = {
-        status: "not_configured",
-        configured: false,
-      };
-    }
-
-    // Check DiagnosticsStore
-    if (this.state.diagnosticsStore) {
-      (health.components as Record<string, unknown>).diagnostics = {
-        status: "healthy",
-        configured: true,
-      };
-    } else {
-      (health.components as Record<string, unknown>).diagnostics = {
-        status: "not_configured",
-        configured: false,
-      };
-    }
 
     // Check current session
     health.session = {

@@ -66,6 +66,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",
     "@qdrant/js-client-rest": "^1.16.2",
+    "cockatiel": "^3.2.1",
     "neo4j-driver": "^5.28.3",
     "openai": "^6.16.0",
     "sqlite-vec": "^0.1.7-alpha.2",

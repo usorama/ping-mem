@@ -10,6 +10,8 @@ import type { SessionManager } from "../../session/SessionManager.js";
 import type { DiagnosticsStore } from "../../diagnostics/DiagnosticsStore.js";
 import type { IngestionService } from "../../ingest/IngestionService.js";
 import type { KnowledgeStore } from "../../knowledge/KnowledgeStore.js";
+import type { GraphManager } from "../../graph/GraphManager.js";
+import type { QdrantClientWrapper } from "../../search/QdrantClient.js";
 import type { AppEnv } from "../rest-server.js";
 import { registerDashboardRoutes } from "./dashboard.js";
 import { registerMemoryRoutes } from "./memories.js";
@@ -37,6 +39,8 @@ export interface UIDependencies {
   diagnosticsStore: DiagnosticsStore;
   ingestionService?: IngestionService | undefined;
   knowledgeStore?: KnowledgeStore | undefined;
+  graphManager?: GraphManager | undefined;
+  qdrantClient?: QdrantClientWrapper | undefined;
 }
 
 export function registerUIRoutes(app: Hono<AppEnv>, deps: UIDependencies): void {
