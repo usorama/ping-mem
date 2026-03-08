@@ -140,19 +140,25 @@ export class CodeIndexer {
       throw new Error(`Code search failed: ${message}`);
     }
 
-    return results.map((r) => {
-      const payload = r.payload as Record<string, unknown> | null;
-      return {
-        chunkId: (payload?.chunkId as string) ?? "",
-        projectId: (payload?.projectId as string) ?? "",
-        filePath: (payload?.filePath as string) ?? "",
-        type: (payload?.type as "code" | "comment" | "docstring") ?? "code",
-        content: (payload?.content as string) ?? "",
-        lineStart: payload?.lineStart as number | undefined,
-        lineEnd: payload?.lineEnd as number | undefined,
-        score: r.score,
-      };
-    });
+    return results
+      .filter((r) => {
+        // Filter out results with missing critical payload fields
+        const payload = r.payload as Record<string, unknown> | null;
+        return payload && typeof payload.chunkId === "string" && typeof payload.filePath === "string";
+      })
+      .map((r) => {
+        const payload = r.payload as Record<string, unknown>;
+        return {
+          chunkId: payload.chunkId as string,
+          projectId: (payload.projectId as string) ?? "",
+          filePath: payload.filePath as string,
+          type: (payload.type as "code" | "comment" | "docstring") ?? "code",
+          content: (payload.content as string) ?? "",
+          lineStart: payload.lineStart as number | undefined,
+          lineEnd: payload.lineEnd as number | undefined,
+          score: r.score,
+        };
+      });
   }
 
   /**

@@ -10,8 +10,6 @@ import { EventStore } from "../storage/EventStore.js";
 import { ProjectScanner } from "../ingest/ProjectScanner.js";
 import { timingSafeStringEqual } from "../util/auth-utils.js";
 import { createLogger } from "../util/logger.js";
-
-const log = createLogger("admin");
 import {
   deleteProjectSchema,
   rotateKeySchema,
@@ -23,6 +21,8 @@ import {
   type SetLLMConfigInput,
 } from "../validation/admin-schemas.js";
 import { parseBody, isParseSuccess } from "../validation/parse-body.js";
+
+const log = createLogger("admin");
 
 export interface AdminDependencies {
   adminStore: AdminStore;
@@ -114,14 +114,22 @@ async function handleAdminApi(
       resolvedProjectId = projectId ?? await resolveProjectId(projectDir ?? "", deps.adminStore);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      return respondJson(res, 500, { error: "Failed to resolve project", message });
+      return respondJson(res, 400, { error: "Invalid project directory", message });
     }
     if (!resolvedProjectId) {
       return respondJson(res, 404, { error: "Project not found" });
     }
 
+    const warnings: string[] = [];
+
     if (deps.ingestionService) {
-      await deps.ingestionService.deleteProject(resolvedProjectId);
+      try {
+        await deps.ingestionService.deleteProject(resolvedProjectId);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.error("deleteProject: ingestion cleanup failed", { projectId: resolvedProjectId, error: msg });
+        warnings.push(msg);
+      }
     }
     deps.diagnosticsStore.deleteProject(resolvedProjectId);
 
@@ -133,7 +141,10 @@ async function handleAdminApi(
 
     deps.adminStore.deleteProject(resolvedProjectId);
 
-    return respondJson(res, 200, { data: { projectId: resolvedProjectId } });
+    return respondJson(res, 200, {
+      data: { projectId: resolvedProjectId },
+      ...(warnings.length > 0 ? { warnings } : {}),
+    });
   }
 
   if (req.method === "GET" && pathName === "/api/admin/keys") {
@@ -192,6 +203,7 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
   const adminUser = process.env[ADMIN_USER_ENV];
   const adminPass = process.env[ADMIN_PASS_ENV];
   if (!adminUser || !adminPass) {
+    log.warn("Admin authentication is disabled: PING_MEM_ADMIN_USER and PING_MEM_ADMIN_PASS not set");
     return true;
   }
 
@@ -203,13 +215,16 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
     return false;
   }
 
+  // RFC 7617: password is everything after the first colon
   const decoded = Buffer.from(encoded, "base64").toString("utf8");
-  const [user, pass] = decoded.split(":");
+  const colonIndex = decoded.indexOf(":");
+  const user = colonIndex === -1 ? decoded : decoded.substring(0, colonIndex);
+  const pass = colonIndex === -1 ? "" : decoded.substring(colonIndex + 1);
 
   // Use timing-safe comparison to prevent timing attacks
   // See: https://owasp.org/www-community/attacks/Timing_analysis
-  const userValid = timingSafeStringEqual(user ?? "", adminUser);
-  const passValid = timingSafeStringEqual(pass ?? "", adminPass);
+  const userValid = timingSafeStringEqual(user, adminUser);
+  const passValid = timingSafeStringEqual(pass, adminPass);
 
   if (!userValid || !passValid) {
     res.writeHead(401, { "WWW-Authenticate": "Basic" });
@@ -235,7 +250,10 @@ function requireApiKey(
 }
 
 function respondJson(res: ServerResponse, status: number, payload: unknown): void {
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "X-Content-Type-Options": "nosniff",
+  });
   res.end(JSON.stringify(payload));
 }
 
@@ -261,11 +279,11 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
 }
 
 function deleteProjectManifest(projectDir: string): void {
-  // Validate path to prevent traversal attacks
-  const resolved = path.resolve(projectDir);
-  if (resolved.includes("..")) {
+  // Validate raw input BEFORE resolving to catch traversal attempts
+  if (projectDir.includes("..")) {
     throw new Error("projectDir must not contain path traversal sequences");
   }
+  const resolved = path.resolve(projectDir);
 
   const manifestPath = path.join(resolved, ".ping-mem", "manifest.json");
   if (fs.existsSync(manifestPath)) {
@@ -291,7 +309,8 @@ function escapeHtml(str: string): string {
 
 function renderAdminPage(): string {
   const providerOptions = PROVIDERS.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
-  const providersJson = JSON.stringify(PROVIDERS);
+  // Escape </script> sequences to prevent script tag breakout (defense-in-depth)
+  const providersJson = JSON.stringify(PROVIDERS).replace(/</g, "\\u003c");
 
   return `<!doctype html>
 <html lang="en">

@@ -108,7 +108,19 @@ export class IngestionService {
     }
 
     // Persist to Neo4j
-    await this.codeGraph.persistIngestion(ingestionResult);
+    try {
+      await this.codeGraph.persistIngestion(ingestionResult);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("ingestProject: Neo4j persist failed", {
+        projectId: ingestionResult.projectId,
+        error: message,
+      });
+      throw new Error(
+        `Ingestion failed for project "${ingestionResult.projectId}": ` +
+        `Neo4j persist failed: ${message}`
+      );
+    }
 
     // Index vectors in Qdrant
     try {
@@ -121,7 +133,8 @@ export class IngestionService {
       });
       throw new Error(
         `Ingestion partially failed for project "${ingestionResult.projectId}": ` +
-        `Neo4j persist succeeded but Qdrant indexing failed: ${message}`
+        `Neo4j persist succeeded but Qdrant indexing failed. ` +
+        `Run force reingest to recover: ${message}`
       );
     }
 
@@ -189,9 +202,12 @@ export class IngestionService {
         options.filePath
       );
 
+      // Fetch enough commits to cover all file history entries
+      // (file may have been modified in commits beyond the user's limit)
+      const commitFetchLimit = Math.max(limit, history.length);
       const commits = await this.codeGraph.queryCommitHistory(
         options.projectId,
-        limit
+        commitFetchLimit
       );
 
       const commitMap = new Map(commits.map((c) => [c.hash, c]));

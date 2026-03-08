@@ -20,14 +20,28 @@ const log = createLogger("seed-knowledge");
 // CLI Argument Parsing
 // ============================================================================
 
-function parseArgs(argv: string[]): { baseUrl: string } {
+function parseArgs(argv: string[]): { baseUrl: string; apiKey: string | null } {
   let baseUrl = "http://localhost:3000";
+  let apiKey: string | null = null;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--base-url" && i + 1 < argv.length) {
-      baseUrl = argv[i + 1]!;
+    if (arg === "--base-url") {
+      const value = argv[i + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--base-url requires a value");
+      }
+      baseUrl = value;
       i++;
+    } else if (arg === "--api-key") {
+      const value = argv[i + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--api-key requires a value");
+      }
+      apiKey = value;
+      i++;
+    } else {
+      throw new Error(`Unknown argument: ${arg}`);
     }
   }
 
@@ -35,18 +49,27 @@ function parseArgs(argv: string[]): { baseUrl: string } {
   try {
     const parsed = new URL(baseUrl);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      log.error(`Invalid URL scheme "${parsed.protocol}". Only http: and https: are allowed.`);
-      process.exit(1);
+      throw new Error(`Invalid URL scheme "${parsed.protocol}". Only http: and https: are allowed.`);
     }
-  } catch {
-    log.error(`Invalid URL: "${baseUrl}"`);
-    process.exit(1);
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith("Invalid URL scheme")) {
+      throw err;
+    }
+    throw new Error(`Invalid URL: "${baseUrl}"`);
   }
 
-  return { baseUrl };
+  return { baseUrl, apiKey };
 }
 
-const args = parseArgs(process.argv.slice(2));
+let args: { baseUrl: string; apiKey: string | null };
+try {
+  args = parseArgs(process.argv.slice(2));
+} catch (err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  log.error(message);
+  log.error("Usage: bun run scripts/seed-knowledge.ts [--base-url http://localhost:3000] [--api-key <key>]");
+  process.exit(1);
+}
 
 // ============================================================================
 // Knowledge Entry Type (matches POST /api/v1/knowledge/ingest body)
@@ -191,11 +214,16 @@ async function main(): Promise<void> {
   let succeeded = 0;
   let failed = 0;
 
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (args.apiKey) {
+    headers["Authorization"] = `Bearer ${args.apiKey}`;
+  }
+
   for (const entry of ENTRIES) {
     try {
       const resp = await fetch(`${baseUrl}/api/v1/knowledge/ingest`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(entry),
       });
 

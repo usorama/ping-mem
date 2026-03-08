@@ -22,6 +22,8 @@ const DEFAULT_IGNORE_DIRS = new Set([
   ".ping-mem",
   ".worktrees",
   ".claude",
+  ".vscode",
+  ".idea",
 ]);
 
 const MANIFEST_SCHEMA_VERSION = 1;
@@ -80,6 +82,10 @@ export class ProjectScanner {
         }
         // Exclude .env files to prevent secrets from being ingested
         if (entry.name === ".env" || (entry.name.startsWith(".env.") && entry.isFile())) {
+          continue;
+        }
+        // Exclude OS-generated metadata files
+        if (entry.name === ".DS_Store" || entry.name === "Thumbs.db") {
           continue;
         }
         const fullPath = path.join(current, entry.name);

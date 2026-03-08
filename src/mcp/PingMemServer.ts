@@ -10,6 +10,7 @@
  * @version 2.0.0
  */
 
+import { createLogger } from "../util/logger.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -40,6 +41,8 @@ import { SummaryCache } from "../diagnostics/SummaryCache.js";
 import { RelevanceEngine } from "../memory/RelevanceEngine.js";
 
 import type { ToolModule, ToolDefinition } from "./types.js";
+
+const log = createLogger("PingMemServer");
 import type { SessionState } from "./handlers/shared.js";
 import {
   ContextToolModule,
@@ -351,7 +354,13 @@ export async function main(): Promise<void> {
       neo4jClient: services.neo4jClient,
       qdrantClient: services.qdrantClient,
     });
-    await ingestionService.ensureConstraints();
+    try {
+      await ingestionService.ensureConstraints();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("Failed to create Neo4j constraints. Check Neo4j version, permissions, and connectivity.", { error: message });
+      throw new Error(`Neo4j constraint setup failed: ${message}`);
+    }
   }
 
   const server = new PingMemServer({

@@ -70,11 +70,13 @@ export class SafeGit {
   }
 
   async getLog(limit: number = 100, format: string = "%H|%P|%an|%ae|%at|%s"): Promise<string> {
-    // Validate format to prevent injection of git format specifiers that execute commands
+    // Validate format: only printable ASCII (prevents control char injection)
     if (/[^\x20-\x7E]/.test(format)) {
       throw new Error("SafeGit.getLog: format must contain only printable ASCII characters");
     }
-    const { stdout } = await this.run(["log", "--all", "--topo-order", `--format=${format}`, `-n${limit}`]);
+    // Clamp limit to prevent excessive memory usage via maxBuffer
+    const clampedLimit = Math.max(1, Math.min(Math.floor(limit), 10000));
+    const { stdout } = await this.run(["log", "--all", "--topo-order", `--format=${format}`, `-n${clampedLimit}`]);
     return stdout;
   }
 
@@ -94,10 +96,14 @@ export class SafeGit {
       return result.stdout.trim() || null;
     } catch (error: unknown) {
       // git config --get exits with code 1 when the key is not found (no remote configured).
-      // That's expected and not an error worth logging. Other failures are unexpected.
+      // Check exit code property first; fall back to string matching for compatibility.
+      const errObj = error as { code?: number };
+      if (errObj.code === 1) {
+        return null; // No remote configured — expected
+      }
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("exit code 1")) {
-        return null; // No remote configured — expected
+        return null; // No remote configured — expected (string fallback)
       }
       // Unexpected error — propagate instead of silently returning null
       log.error("getRemoteUrl unexpected error", { error: message });

@@ -4,8 +4,9 @@
  * Prevents timing attacks by ensuring that string comparison
  * operations take constant time regardless of input values.
  *
- * Based on Node.js crypto.timingSafeEqual() but handles strings
- * of different lengths by padding with zeros and failing safely.
+ * Hashes both inputs with SHA-256 to produce fixed-length digests,
+ * then compares using crypto.timingSafeEqual. This prevents both
+ * value and length leakage via timing side channels.
  *
  * @see https://nodejs.org/api/crypto.html#cryptotimingsafeequala-b
  */
@@ -16,13 +17,10 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 /**
  * Timing-safe string comparison.
  *
- * This function compares two strings in constant time, preventing
- * timing attacks that could leak information about password correctness.
- *
- * IMPORTANT: This function ALWAYS returns false for strings of different
- * lengths. The length difference is detected in constant time by using
- * a timing-safe comparison first, then comparing lengths in a way that
- * doesn't leak timing information.
+ * Hashes both inputs with SHA-256 to produce fixed-length digests,
+ * then compares using crypto.timingSafeEqual. This eliminates both
+ * value-based and length-based timing leaks, so strings of any
+ * length can be compared safely.
  *
  * @param a - First string to compare
  * @param b - Second string to compare

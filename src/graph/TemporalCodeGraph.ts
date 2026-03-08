@@ -51,6 +51,7 @@ export class TemporalCodeGraph {
   }
 
   private static readonly BATCH_SIZE = 500;
+  private static readonly ALLOWED_SORT_VALUES = new Set(["lastIngestedAt", "filesCount", "rootPath"]);
 
   /**
    * Persist a full ingestion result to Neo4j.
@@ -301,9 +302,8 @@ export class TemporalCodeGraph {
       const { projectId, limit = 100, sortBy = "lastIngestedAt" } = options;
 
       // Validate sortBy to prevent Cypher injection via interpolation
-      const ALLOWED_SORT = new Set(["lastIngestedAt", "filesCount", "rootPath"]);
-      if (!ALLOWED_SORT.has(sortBy)) {
-        throw new Error(`Invalid sortBy value: expected one of ${[...ALLOWED_SORT].join(", ")}`);
+      if (!TemporalCodeGraph.ALLOWED_SORT_VALUES.has(sortBy)) {
+        throw new Error(`Invalid sortBy value: expected one of ${[...TemporalCodeGraph.ALLOWED_SORT_VALUES].join(", ")}`);
       }
 
       // Build WHERE clause for optional projectId filter

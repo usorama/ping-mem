@@ -88,8 +88,13 @@ export class GitHistoryReader {
       return root;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      log.error(`getGitRoot failed for "${projectDir}": ${message}`);
-      return null;
+      // "not a git repository" is expected for non-git dirs — return null to skip git history
+      if (message.includes("not a git repository") || message.includes("fatal: not a git repository")) {
+        log.info(`No git repo at "${projectDir}", skipping git history`);
+        return null;
+      }
+      // Unexpected git errors should propagate, not silently return empty history
+      throw new Error(`GitHistoryReader.getGitRoot failed for "${projectDir}": ${message}`);
     }
   }
 

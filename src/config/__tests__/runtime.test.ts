@@ -11,7 +11,7 @@
  * @module config/__tests__/runtime.test
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { loadRuntimeConfig, type RuntimeConfig } from "../runtime.js";
 
 // ============================================================================
@@ -68,8 +68,8 @@ describe("loadRuntimeConfig", () => {
     const config = loadRuntimeConfig();
 
     expect(config.pingMem.dbPath).toBe(":memory:");
-    expect(config.neo4j).toBeUndefined();
-    expect(config.qdrant).toBeUndefined();
+    expect(config).not.toHaveProperty("neo4j");
+    expect(config).not.toHaveProperty("qdrant");
   });
 
   it("uses PING_MEM_DB_PATH when provided", () => {
@@ -103,7 +103,7 @@ describe("loadRuntimeConfig", () => {
 
     const config = loadRuntimeConfig();
 
-    expect(config.neo4j).toBeUndefined();
+    expect(config).not.toHaveProperty("neo4j");
   });
 
   it("supports NEO4J_USER as alternative to NEO4J_USERNAME", () => {
@@ -163,7 +163,7 @@ describe("loadRuntimeConfig", () => {
 
     const config = loadRuntimeConfig();
 
-    expect(config.qdrant).toBeUndefined();
+    expect(config).not.toHaveProperty("qdrant");
   });
 
   it("includes optional qdrant api key and vector dimensions", () => {

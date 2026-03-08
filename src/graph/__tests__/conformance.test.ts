@@ -309,7 +309,7 @@ describe("CT-004: Query Relationships", () => {
     );
   });
 
-  it("CT-004.2: filters results by relationship type from multiple types", async () => {
+  it("CT-004.2: returns multiple relationship types for an entity", async () => {
     const now = new Date().toISOString();
     mockClient.executeQuery.mockResolvedValue([
       {
@@ -508,6 +508,10 @@ describe("CT-008: Lineage Query", () => {
     ]);
 
     const ancestors = await lineageEngine.getAncestors("entity-C");
+
+    // Verify the Cypher query includes depth ordering
+    const cypherQuery = mockClient.executeQuery.mock.calls[0]![0] as string;
+    expect(cypherQuery).toContain("ORDER BY depth ASC");
 
     // Results are ordered nearest to furthest (depth ASC in the Cypher)
     // Hop distance 1 = first result (nearest ancestor)

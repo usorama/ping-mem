@@ -46,7 +46,13 @@ export async function startHTTPServer(): Promise<void> {
       neo4jClient: services.neo4jClient,
       qdrantClient: services.qdrantClient,
     });
-    await ingestionService.ensureConstraints();
+    try {
+      await ingestionService.ensureConstraints();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("Failed to create Neo4j constraints. Check Neo4j version, permissions, and connectivity.", { error: message });
+      throw new Error(`Neo4j constraint setup failed: ${message}`);
+    }
   }
 
   const transport = (process.env.PING_MEM_TRANSPORT as HTTPTransportType) ?? "streamable-http";
@@ -139,11 +145,11 @@ export async function startHTTPServer(): Promise<void> {
       .catch((error) => {
       log.error("Unhandled error", { error: error instanceof Error ? error.message : String(error) });
       if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
+        res.writeHead(500, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff" });
         res.end(
           JSON.stringify({
             error: "Internal Server Error",
-            message: error instanceof Error ? error.message : "Unknown error",
+            message: "An internal error occurred",
           })
         );
       }
