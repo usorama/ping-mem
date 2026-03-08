@@ -229,7 +229,7 @@ export class RESTPingMemServer {
         }
         const isValid = this.config.apiKeyManager
           ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
-          : timingSafeStringEqual(apiKey ?? "", this.config.apiKey ?? "");
+          : (this.config.apiKey ? timingSafeStringEqual(apiKey ?? "", this.config.apiKey) : false);
         if (!isValid) {
           return c.json(
             {
@@ -279,7 +279,7 @@ export class RESTPingMemServer {
         }
         const isValid = this.config.apiKeyManager
           ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
-          : timingSafeStringEqual(apiKey ?? "", this.config.apiKey ?? "");
+          : (this.config.apiKey ? timingSafeStringEqual(apiKey ?? "", this.config.apiKey) : false);
         if (!isValid) {
           return c.json(
             { error: "Unauthorized", message: "Invalid API key" },

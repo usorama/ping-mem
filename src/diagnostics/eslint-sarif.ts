@@ -74,7 +74,9 @@ function getEslintVersion(): string {
     }).toString().trim();
     // Output format: "v8.56.0" or "8.56.0"
     return output.replace(/^v/, "");
-  } catch {
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log.warn("Failed to get ESLint version", { error: msg });
     return "unknown";
   }
 }

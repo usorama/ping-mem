@@ -60,7 +60,9 @@ function getPrettierVersion(): string {
       stdio: ["ignore", "pipe", "ignore"],
     }).toString().trim();
     return output;
-  } catch {
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log.warn("Failed to get Prettier version", { error: msg });
     return "unknown";
   }
 }

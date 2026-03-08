@@ -777,8 +777,9 @@ export class RelevanceEngine {
               result.category = metaObj.category;
             }
           }
-        } catch {
-          // Metadata parse failure is non-fatal
+        } catch (metaError: unknown) {
+          const metaMsg = metaError instanceof Error ? metaError.message : String(metaError);
+          log.debug("Metadata parse failure (non-fatal)", { error: metaMsg });
         }
       }
 

@@ -176,7 +176,7 @@ async function handleAdminApi(
 
     return respondJson(res, 200, {
       data: { projectId: resolvedProjectId },
-      ...(warnings.length > 0 ? { warnings } : {}),
+      ...(warnings.length > 0 ? { warnings: warnings.map(w => w.split(":")[0] ?? w) } : {}),
     });
   }
 

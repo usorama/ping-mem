@@ -79,13 +79,23 @@ function computeKnowledgeId(projectId: string, title: string): string {
   return hasher.digest("hex");
 }
 
+function parseTags(tagsJson: string, id: string): string[] {
+  try {
+    return JSON.parse(tagsJson) as string[];
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log.debug("Failed to parse tags JSON", { id, error: msg });
+    return [];
+  }
+}
+
 function rowToEntry(row: KnowledgeRow): KnowledgeEntry {
   const entry: KnowledgeEntry = {
     id: row.id,
     projectId: row.project_id,
     title: row.title,
     solution: row.solution,
-    tags: (() => { try { return JSON.parse(row.tags) as string[]; } catch (e: unknown) { log.warn("Failed to parse tags JSON", { id: row.id, error: e instanceof Error ? e.message : String(e) }); return []; } })(),
+    tags: parseTags(row.tags, row.id),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

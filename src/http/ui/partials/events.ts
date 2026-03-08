@@ -119,7 +119,9 @@ function summarizePayload(payloadStr: string): string {
     if (typeof p.title === "string") return String(p.title);
     if (typeof p.operation === "string") return String(p.operation);
     return "";
-  } catch {
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log.debug("Failed to extract event label from payload", { error: msg });
     return "";
   }
 }

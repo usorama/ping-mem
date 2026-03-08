@@ -610,7 +610,7 @@ export class EvolutionEngine {
         }
       } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : String(error);
-        log.debug("Unable to get related changes for entity", { entityId: change.entityId, error: msg });
+        log.warn("Unable to get related changes for entity", { entityId: change.entityId, error: msg });
       }
     }
   }

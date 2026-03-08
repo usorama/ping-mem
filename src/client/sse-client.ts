@@ -450,8 +450,9 @@ export class SSEPingMemClient implements PingMemClient {
 
     try {
       errorData = await response.json();
-    } catch {
-      // If parsing fails, use default error
+    } catch (parseError: unknown) {
+      const msg = parseError instanceof Error ? parseError.message : String(parseError);
+      log.debug("Failed to parse error response JSON", { status: response.status, error: msg });
     }
 
     const message = errorData?.message ?? response.statusText ?? "Unknown error";

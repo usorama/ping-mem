@@ -16,6 +16,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("DocumentParser");
 
 export type DocumentType = "markdown" | "json" | "yaml" | "text" | "unknown";
 
@@ -92,8 +95,9 @@ export class DocumentParser {
     if (frontmatterMatch) {
       try {
         metadata = this.parseYAMLString(frontmatterMatch[1]!);
-      } catch {
-        // Ignore invalid frontmatter
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.debug("Invalid YAML frontmatter, skipping", { error: msg });
       }
     }
 

@@ -748,11 +748,14 @@ export class LineageEngine {
    * Parse properties from JSON string
    */
   private parseProperties(properties: string): Record<string, unknown> {
+    if (!properties) {
+      return {};
+    }
     try {
       return JSON.parse(properties) as Record<string, unknown>;
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
-      log.warn("Failed to parse entity properties JSON", { error: msg });
+      log.debug("Failed to parse entity properties JSON", { error: msg });
       return {};
     }
   }
