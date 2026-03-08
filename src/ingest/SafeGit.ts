@@ -85,7 +85,14 @@ export class SafeGit {
     try {
       const result = await this.run(["config", "--get", "remote.origin.url"]);
       return result.stdout.trim() || null;
-    } catch {
+    } catch (error: unknown) {
+      // git config --get exits with code 1 when the key is not found (no remote configured).
+      // That's expected and not an error worth logging. Other failures are unexpected.
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("exit code 1")) {
+        // Import would be circular, so use console.warn for unexpected errors
+        process.stderr.write(`SafeGit.getRemoteUrl unexpected error: ${message}\n`);
+      }
       return null;
     }
   }

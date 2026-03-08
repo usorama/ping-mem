@@ -48,20 +48,28 @@ export class CodeIndexer {
 
     if (points.length > 0) {
       const qdrantClient = this.qdrant.getClient();
-      const collectionName = this.qdrant["config"]["collectionName"];
+      const collectionName = this.qdrant.getCollectionName();
 
       // Batch upsert to avoid oversized requests (Qdrant 400 for large payloads)
       const BATCH_SIZE = 200;
       for (let i = 0; i < points.length; i += BATCH_SIZE) {
         const batch = points.slice(i, i + BATCH_SIZE);
-        await qdrantClient.upsert(collectionName, {
-          wait: true,
-          points: batch.map((p) => ({
-            id: p.id,
-            vector: p.vector,
-            payload: p.payload,
-          })),
-        });
+        try {
+          await qdrantClient.upsert(collectionName, {
+            wait: true,
+            points: batch.map((p) => ({
+              id: p.id,
+              vector: p.vector,
+              payload: p.payload,
+            })),
+          });
+        } catch (error: unknown) {
+          const batchIndex = Math.floor(i / BATCH_SIZE);
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `Qdrant upsert batch ${batchIndex} failed (points ${i}-${i + batch.length - 1} of ${points.length}): ${message}`
+          );
+        }
       }
     }
   }
@@ -80,7 +88,7 @@ export class CodeIndexer {
   ): Promise<ChunkSearchResult[]> {
     const queryVector = this.vectorizer.vectorize(query);
     const qdrantClient = this.qdrant.getClient();
-    const collectionName = this.qdrant["config"]["collectionName"];
+    const collectionName = this.qdrant.getCollectionName();
 
     // Build filter conditions
     const mustConditions: Array<{ key: string; match: { value: string } }> = [];
@@ -140,7 +148,7 @@ export class CodeIndexer {
    */
   async deleteProject(projectId: string): Promise<void> {
     const qdrantClient = this.qdrant.getClient();
-    const collectionName = this.qdrant["config"]["collectionName"];
+    const collectionName = this.qdrant.getCollectionName();
 
     await qdrantClient.delete(collectionName, {
       wait: true,
@@ -178,7 +186,9 @@ export class CodeIndexer {
             chunkId: chunk.chunkId,
             sha256: fileResult.sha256,
             type: chunk.type,
-            content: chunk.content.substring(0, 2000),  // Truncated to prevent oversized payloads
+            content: chunk.content.substring(0, 2000),
+            contentTruncated: chunk.content.length > 2000,
+            contentFullLength: chunk.content.length,
             start: chunk.start,
             end: chunk.end,
             lineStart: chunk.lineStart,

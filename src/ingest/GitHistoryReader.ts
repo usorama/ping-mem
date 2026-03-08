@@ -86,7 +86,9 @@ export class GitHistoryReader {
       const git = createSafeGit(projectDir);
       const root = await git.getRoot();
       return root;
-    } catch {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn(`getGitRoot failed for "${projectDir}": ${message}`);
       return null;
     }
   }

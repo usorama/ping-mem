@@ -567,6 +567,13 @@ export class QdrantClientWrapper {
   }
 
   /**
+   * Get the collection name for this client instance
+   */
+  getCollectionName(): string {
+    return this.config.collectionName;
+  }
+
+  /**
    * Get the underlying Qdrant client for advanced operations
    *
    * @throws {QdrantConnectionError} If not connected or using fallback

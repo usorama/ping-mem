@@ -161,6 +161,8 @@ export class IngestionService {
       throw new Error("queryTimeline requires a projectId");
     }
 
+    const limit = Math.max(1, Math.min(Math.floor(options.limit ?? 100), 10000));
+
     if (options.filePath) {
       // File-specific timeline
       const history = await this.codeGraph.queryFileHistory(
@@ -170,7 +172,7 @@ export class IngestionService {
 
       const commits = await this.codeGraph.queryCommitHistory(
         options.projectId,
-        Math.floor(options.limit ?? 100)
+        limit
       );
 
       const commitMap = new Map(commits.map((c) => [c.hash, c]));
@@ -190,7 +192,7 @@ export class IngestionService {
       // Project-wide timeline
       const commits = await this.codeGraph.queryCommitHistory(
         options.projectId,
-        Math.floor(options.limit ?? 100)
+        limit
       );
 
       return commits.map((c) => ({

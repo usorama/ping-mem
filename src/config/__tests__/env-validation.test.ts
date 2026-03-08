@@ -41,6 +41,7 @@ function clearRelevantEnv(): void {
 describe("validateEnv", () => {
   let originalEnv: Record<string, string | undefined>;
   let exitMock: ReturnType<typeof mock>;
+  const originalExit = process.exit;
 
   beforeEach(() => {
     originalEnv = snapshotEnv();
@@ -53,6 +54,9 @@ describe("validateEnv", () => {
   });
 
   afterEach(() => {
+    // Restore original process.exit
+    process.exit = originalExit;
+
     // Restore original process.env
     for (const key of Object.keys(process.env)) {
       if (!(key in originalEnv)) {

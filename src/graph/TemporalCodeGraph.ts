@@ -34,6 +34,7 @@ import type {
 } from "../ingest/index.js";
 import type { ExtractedSymbol } from "../ingest/SymbolExtractor.js";
 import * as crypto from "crypto";
+import * as path from "path";
 import { createLogger } from "../util/logger.js";
 
 const log = createLogger("TemporalCodeGraph");
@@ -59,13 +60,13 @@ export class TemporalCodeGraph {
   async persistIngestion(result: IngestionResult): Promise<void> {
     // Validate required fields before touching Neo4j
     if (!result.projectId) {
-      throw new Error(`persistIngestion: projectId is required but got "${result.projectId}"`);
+      throw new Error("persistIngestion: projectId is required");
     }
     if (!result.projectManifest?.rootPath) {
-      throw new Error(`persistIngestion: rootPath is required but got "${result.projectManifest?.rootPath}"`);
+      throw new Error("persistIngestion: rootPath is required");
     }
     if (!result.projectManifest?.treeHash) {
-      throw new Error(`persistIngestion: treeHash is required but got "${result.projectManifest?.treeHash}"`);
+      throw new Error("persistIngestion: treeHash is required");
     }
 
     const session = this.neo4j.getSession();
@@ -81,7 +82,7 @@ export class TemporalCodeGraph {
         `,
         {
           projectId: result.projectId,
-          name: result.projectManifest.rootPath.split("/").pop() || result.projectId,
+          name: path.basename(result.projectManifest.rootPath) || result.projectId,
           rootPath: result.projectManifest.rootPath,
           treeHash: result.projectManifest.treeHash,
           ingestedAt: result.ingestedAt,
@@ -295,12 +296,18 @@ export class TemporalCodeGraph {
     try {
       const { projectId, limit = 100, sortBy = "lastIngestedAt" } = options;
 
+      // Validate sortBy to prevent Cypher injection via interpolation
+      const ALLOWED_SORT = new Set(["lastIngestedAt", "filesCount", "rootPath"]);
+      if (!ALLOWED_SORT.has(sortBy)) {
+        throw new Error(`Invalid sortBy value: expected one of ${[...ALLOWED_SORT].join(", ")}`);
+      }
+
       // Build WHERE clause for optional projectId filter
       const whereClause = projectId
         ? "WHERE p.projectId = $projectId"
         : "";
 
-      // Build ORDER BY clause
+      // Build ORDER BY clause (sortBy validated above)
       const orderByClause =
         sortBy === "lastIngestedAt"
           ? "ORDER BY p.lastIngestedAt DESC"
@@ -376,7 +383,15 @@ export class TemporalCodeGraph {
   ): Promise<void> {
     for (let i = 0; i < items.length; i += TemporalCodeGraph.BATCH_SIZE) {
       const batch = items.slice(i, i + TemporalCodeGraph.BATCH_SIZE);
-      await session.run(cypher, buildParams(batch));
+      try {
+        await session.run(cypher, buildParams(batch));
+      } catch (error) {
+        const batchIndex = Math.floor(i / TemporalCodeGraph.BATCH_SIZE);
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Neo4j batch ${batchIndex} failed (items ${i}-${i + batch.length - 1} of ${items.length}): ${message}`
+        );
+      }
     }
   }
 
@@ -663,6 +678,10 @@ export class TemporalCodeGraph {
         "CREATE CONSTRAINT project_id_unique IF NOT EXISTS FOR (p:Project) REQUIRE p.projectId IS UNIQUE"
       );
       log.info("Neo4j constraints ensured");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("Failed to ensure Neo4j constraints", { error: message });
+      throw new Error(`Failed to ensure Neo4j constraints: ${message}`);
     } finally {
       await session.close();
     }

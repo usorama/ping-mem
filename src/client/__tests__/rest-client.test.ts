@@ -6,7 +6,7 @@
  * @module client/__tests__/rest-client.test
  */
 
-import { describe, it, expect, beforeEach, mock } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import { RESTPingMemClient, createRESTClient, createLocalRESTClient } from "../rest-client.js";
 import {
   AuthenticationError,
@@ -21,10 +21,16 @@ import {
 
 /** Typed mock for the global fetch function. */
 let fetchMock: ReturnType<typeof mock>;
+let originalFetch: typeof globalThis.fetch;
 
 function installFetchMock(): void {
+  originalFetch = globalThis.fetch;
   fetchMock = mock<typeof globalThis.fetch>();
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+}
+
+function restoreFetch(): void {
+  globalThis.fetch = originalFetch;
 }
 
 /** Helper to make fetchMock resolve with a JSON response. */
@@ -55,6 +61,10 @@ function mockFetchErrorResponse(
 describe("RESTPingMemClient", () => {
   beforeEach(() => {
     installFetchMock();
+  });
+
+  afterEach(() => {
+    restoreFetch();
   });
 
   // --------------------------------------------------------------------------
@@ -163,7 +173,7 @@ describe("RESTPingMemClient", () => {
       expect(headers.get("X-API-Key")).toBe("secret-api-key");
     });
 
-    it("does not include X-API-Key header when apiKey is empty", async () => {
+    it("does not include X-API-Key header when apiKey is not configured", async () => {
       mockFetchResponse({ data: { totalEvents: 0, sessions: { total: 0, active: 0 }, currentSession: null } });
 
       const client = new RESTPingMemClient({ baseUrl: "http://localhost:3000" });

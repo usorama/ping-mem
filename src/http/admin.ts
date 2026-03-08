@@ -237,7 +237,9 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
     const scanner = new ProjectScanner();
     const scan = await scanner.scanProject(normalized);
     return scan.manifest.projectId;
-  } catch {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`resolveProjectId failed for "${normalized}": ${message}\n`);
     return null;
   }
 }
@@ -254,6 +256,15 @@ function deleteProjectManifest(projectDir: string): void {
       fs.rmdirSync(manifestDir);
     }
   }
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function renderAdminPage(): string {
@@ -451,7 +462,7 @@ function renderAdminPage(): string {
 
   <script>
     const state = {
-      apiKey: localStorage.getItem("pingMemApiKey") || "",
+      apiKey: sessionStorage.getItem("pingMemApiKey") || "",
     };
 
     const apiKeyInput = document.getElementById("currentApiKey");
@@ -461,7 +472,7 @@ function renderAdminPage(): string {
 
     saveApiKey.addEventListener("click", () => {
       state.apiKey = apiKeyInput.value.trim();
-      localStorage.setItem("pingMemApiKey", state.apiKey);
+      sessionStorage.setItem("pingMemApiKey", state.apiKey);
       apiKeyStatus.textContent = state.apiKey ? "Saved" : "Missing";
     });
 
@@ -489,15 +500,26 @@ function renderAdminPage(): string {
         const row = document.createElement("tr");
         const createdAt = new Date(key.createdAt).toLocaleString();
         const status = key.active ? "Active" : "Inactive";
-        const action = key.active
-          ? "<button data-id=\"" + key.id + "\" class=\"ghost\">Deactivate</button>"
-          : "";
-        row.innerHTML =
-          "<td>" + key.id + "</td>" +
-          "<td>" + key.last4 + "</td>" +
-          "<td>" + createdAt + "</td>" +
-          "<td>" + status + "</td>" +
-          "<td>" + action + "</td>";
+        const cells = [
+          { text: String(key.id) },
+          { text: String(key.last4) },
+          { text: createdAt },
+          { text: status },
+        ];
+        cells.forEach((cell) => {
+          const td = document.createElement("td");
+          td.textContent = cell.text;
+          row.appendChild(td);
+        });
+        const actionTd = document.createElement("td");
+        if (key.active) {
+          const btn = document.createElement("button");
+          btn.className = "ghost";
+          btn.textContent = "Deactivate";
+          btn.dataset.id = String(key.id);
+          actionTd.appendChild(btn);
+        }
+        row.appendChild(actionTd);
         table.appendChild(row);
       });
 
@@ -533,11 +555,23 @@ function renderAdminPage(): string {
         const lastIngested = project.lastIngestedAt
           ? new Date(project.lastIngestedAt).toLocaleString()
           : "-";
-        row.innerHTML =
-          "<td>" + project.projectDir + "</td>" +
-          "<td>" + project.projectId + "</td>" +
-          "<td>" + lastIngested + "</td>" +
-          "<td><button data-dir=\"" + project.projectDir + "\" class=\"secondary\">Delete</button></td>";
+        const cells = [
+          { text: String(project.projectDir) },
+          { text: String(project.projectId) },
+          { text: lastIngested },
+        ];
+        cells.forEach((cell) => {
+          const td = document.createElement("td");
+          td.textContent = cell.text;
+          row.appendChild(td);
+        });
+        const actionTd = document.createElement("td");
+        const btn = document.createElement("button");
+        btn.className = "secondary";
+        btn.textContent = "Delete";
+        btn.dataset.dir = String(project.projectDir);
+        actionTd.appendChild(btn);
+        row.appendChild(actionTd);
         table.appendChild(row);
       });
 

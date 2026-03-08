@@ -117,6 +117,18 @@ describe("loadRuntimeConfig", () => {
     expect(config.neo4j?.username).toBe("neo4j");
   });
 
+  it("prefers NEO4J_USERNAME over NEO4J_USER when both are set", () => {
+    process.env["NEO4J_URI"] = "bolt://localhost:7687";
+    process.env["NEO4J_USERNAME"] = "primary-user";
+    process.env["NEO4J_USER"] = "fallback-user";
+    process.env["NEO4J_PASSWORD"] = "password";
+
+    const config = loadRuntimeConfig();
+
+    expect(config.neo4j).toBeDefined();
+    expect(config.neo4j?.username).toBe("primary-user");
+  });
+
   it("includes optional neo4j database and pool size", () => {
     process.env["NEO4J_URI"] = "bolt://localhost:7687";
     process.env["NEO4J_USERNAME"] = "neo4j";

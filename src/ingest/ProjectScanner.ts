@@ -130,7 +130,10 @@ export class ProjectScanner {
     try {
       const safeGit = createSafeGit(rootPath);
       const gitRoot = await safeGit.getRoot();
-      const remoteUrl = await safeGit.getRemoteUrl();
+
+      // Query remote URL from the git root directory (not rootPath, which may be a subdir)
+      const safeGitFromRoot = createSafeGit(gitRoot);
+      const remoteUrl = await safeGitFromRoot.getRemoteUrl();
 
       if (!remoteUrl) {
         const repoName = path.basename(gitRoot);
@@ -140,7 +143,9 @@ export class ProjectScanner {
 
       const relativeToGitRoot = path.relative(gitRoot, rootPath) || ".";
       return `${remoteUrl}::${this.normalizePath(relativeToGitRoot)}`;
-    } catch {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`ProjectScanner.getGitIdentity failed for "${rootPath}": ${message}. Falling back to path-based projectId.\n`);
       return null;
     }
   }

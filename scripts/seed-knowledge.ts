@@ -44,9 +44,9 @@ interface KnowledgeSeedEntry {
   projectId: string;
   title: string;
   solution: string;
-  symptoms: string;
-  rootCause: string;
-  tags: string[];
+  symptoms?: string;
+  rootCause?: string;
+  tags?: string[];
 }
 
 // ============================================================================
