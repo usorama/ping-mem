@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "fs";
 import * as path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { createLogger } from "../util/logger.js";
 
 const log = createLogger("eslint-sarif");
@@ -69,12 +69,14 @@ function ensureDir(filePath: string): void {
 
 function getEslintVersion(): string {
   try {
-    const output = execSync("npx eslint --version", {
+    const output = execFileSync("npx", ["eslint", "--version"], {
       stdio: ["ignore", "pipe", "ignore"],
     }).toString().trim();
     // Output format: "v8.56.0" or "8.56.0"
     return output.replace(/^v/, "");
-  } catch {
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log.warn("Failed to get ESLint version", { error: msg });
     return "unknown";
   }
 }
@@ -100,7 +102,7 @@ function main(): void {
   // Run ESLint with JSON formatter
   let eslintOutput: string;
   try {
-    eslintOutput = execSync(eslintCmd.join(" "), {
+    eslintOutput = execFileSync(eslintCmd[0]!, eslintCmd.slice(1), {
       stdio: ["ignore", "pipe", "pipe"],
       maxBuffer: 10 * 1024 * 1024, // 10MB buffer
     }).toString();

@@ -777,13 +777,16 @@ export class RelevanceEngine {
               result.category = metaObj.category;
             }
           }
-        } catch {
-          // Metadata parse failure is non-fatal
+        } catch (metaError: unknown) {
+          const metaMsg = metaError instanceof Error ? metaError.message : String(metaError);
+          log.debug("Metadata parse failure (non-fatal)", { error: metaMsg });
         }
       }
 
       return result;
-    } catch {
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.warn("Failed to build memory payload", { error: msg });
       return null;
     }
   }

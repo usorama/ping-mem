@@ -8,6 +8,10 @@
  * @version 1.0.0
  */
 
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("Neo4jClient");
+
 import neo4j, {
   Driver,
   Session,
@@ -417,7 +421,9 @@ export class Neo4jClient {
     try {
       await this.executeQuery("RETURN 1 as ping");
       return true;
-    } catch {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn("Neo4j ping failed", { error: message });
       return false;
     }
   }

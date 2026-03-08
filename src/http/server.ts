@@ -46,6 +46,13 @@ export async function startHTTPServer(): Promise<void> {
       neo4jClient: services.neo4jClient,
       qdrantClient: services.qdrantClient,
     });
+    try {
+      await ingestionService.ensureConstraints();
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("Failed to create Neo4j constraints. Check Neo4j version, permissions, and connectivity.", { error: message });
+      throw new Error(`Neo4j constraint setup failed: ${message}`);
+    }
   }
 
   const transport = (process.env.PING_MEM_TRANSPORT as HTTPTransportType) ?? "streamable-http";
@@ -138,11 +145,11 @@ export async function startHTTPServer(): Promise<void> {
       .catch((error) => {
       log.error("Unhandled error", { error: error instanceof Error ? error.message : String(error) });
       if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
+        res.writeHead(500, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff" });
         res.end(
           JSON.stringify({
             error: "Internal Server Error",
-            message: error instanceof Error ? error.message : "Unknown error",
+            message: "An internal error occurred",
           })
         );
       }
@@ -163,12 +170,43 @@ export async function startHTTPServer(): Promise<void> {
   const shutdown = async () => {
     log.info("Shutting down...");
     httpServer.close();
-    await serverInstance.stop();
-    await eventStore.close();
-    diagnosticsStore.close();
-    adminStore.close();
-    log.info("Shutdown complete");
-    process.exit(0);
+
+    const shutdownErrors: string[] = [];
+    try {
+      await serverInstance.stop();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("Shutdown: serverInstance.stop() failed", { error: msg });
+      shutdownErrors.push(`serverInstance: ${msg}`);
+    }
+    try {
+      await eventStore.close();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("Shutdown: eventStore.close() failed", { error: msg });
+      shutdownErrors.push(`eventStore: ${msg}`);
+    }
+    try {
+      diagnosticsStore.close();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("Shutdown: diagnosticsStore.close() failed", { error: msg });
+      shutdownErrors.push(`diagnosticsStore: ${msg}`);
+    }
+    try {
+      adminStore.close();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("Shutdown: adminStore.close() failed", { error: msg });
+      shutdownErrors.push(`adminStore: ${msg}`);
+    }
+
+    if (shutdownErrors.length > 0) {
+      log.warn("Shutdown completed with errors", { errors: shutdownErrors });
+    } else {
+      log.info("Shutdown complete");
+    }
+    process.exit(shutdownErrors.length > 0 ? 1 : 0);
   };
 
   process.on("SIGINT", shutdown);

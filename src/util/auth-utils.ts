@@ -4,8 +4,9 @@
  * Prevents timing attacks by ensuring that string comparison
  * operations take constant time regardless of input values.
  *
- * Based on Node.js crypto.timingSafeEqual() but handles strings
- * of different lengths by padding with zeros and failing safely.
+ * Hashes both inputs with SHA-256 to produce fixed-length digests,
+ * then compares using crypto.timingSafeEqual. This prevents both
+ * value and length leakage via timing side channels.
  *
  * @see https://nodejs.org/api/crypto.html#cryptotimingsafeequala-b
  */
@@ -16,13 +17,10 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 /**
  * Timing-safe string comparison.
  *
- * This function compares two strings in constant time, preventing
- * timing attacks that could leak information about password correctness.
- *
- * IMPORTANT: This function ALWAYS returns false for strings of different
- * lengths. The length difference is detected in constant time by using
- * a timing-safe comparison first, then comparing lengths in a way that
- * doesn't leak timing information.
+ * Hashes both inputs with SHA-256 to produce fixed-length digests,
+ * then compares using crypto.timingSafeEqual. This eliminates both
+ * value-based and length-based timing leaks, so strings of any
+ * length can be compared safely.
  *
  * @param a - First string to compare
  * @param b - Second string to compare
@@ -38,24 +36,12 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
  * ```
  */
 export function timingSafeStringEqual(a: string, b: string): boolean {
-  // Fast path: identical reference
-  if (a === b) {
-    return true;
-  }
-
-  // Different lengths: cannot be equal
-  // We check this AFTER the reference check to avoid timing leaks
-  // when comparing the same string with itself
-  if (a.length !== b.length) {
-    return false;
-  }
-
-  // Convert strings to buffers for timing-safe comparison
-  const bufA = Buffer.from(a, "utf8");
-  const bufB = Buffer.from(b, "utf8");
-
-  // Use crypto.timingSafeEqual for constant-time comparison
-  return timingSafeEqual(bufA, bufB);
+  // Hash both inputs to fixed-length digests before comparing.
+  // This prevents length leakage: strings of different lengths produce
+  // same-length hashes, so comparison time doesn't reveal length info.
+  const hashA = createHash("sha256").update(a, "utf8").digest();
+  const hashB = createHash("sha256").update(b, "utf8").digest();
+  return timingSafeEqual(hashA, hashB);
 }
 
 /**

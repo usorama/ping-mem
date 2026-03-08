@@ -1,8 +1,11 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { execSync } from "child_process";
+import { createSafeGit } from "./SafeGit.js";
+import { createLogger } from "../util/logger.js";
 import type { FileHashEntry, ProjectManifest, ProjectScanResult } from "./types.js";
+
+const log = createLogger("ProjectScanner");
 
 const DEFAULT_IGNORE_DIRS = new Set([
   ".git",
@@ -17,6 +20,10 @@ const DEFAULT_IGNORE_DIRS = new Set([
   "venv",
   "__pycache__",
   ".ping-mem",
+  ".worktrees",
+  ".claude",
+  ".vscode",
+  ".idea",
 ]);
 
 const MANIFEST_SCHEMA_VERSION = 1;
@@ -35,7 +42,7 @@ export class ProjectScanner {
     this.includeExtensions = options.includeExtensions ?? null;
   }
 
-  scanProject(projectDir: string, previousManifest?: ProjectManifest): ProjectScanResult {
+  async scanProject(projectDir: string, previousManifest?: ProjectManifest): Promise<ProjectScanResult> {
     // Resolve symlinks so path.relative works correctly with git rev-parse
     // (which always resolves symlinks). macOS: /var → /private/var.
     const rootPath = fs.realpathSync(path.resolve(projectDir));
@@ -45,7 +52,7 @@ export class ProjectScanner {
     );
 
     const treeHash = this.computeTreeHash(fileEntries);
-    const projectId = this.computeProjectId(rootPath);
+    const projectId = await this.computeProjectId(rootPath);
 
     const manifest: ProjectManifest = {
       projectId,
@@ -68,11 +75,18 @@ export class ProjectScanner {
       const entries = fs.readdirSync(current, { withFileTypes: true });
       const sorted = entries.sort((a, b) => a.name.localeCompare(b.name));
       for (const entry of sorted) {
-        if (entry.name.startsWith(".") && entry.name !== ".env") {
-          // Keep deterministic handling of dotfiles, except .env
+        if (entry.name.startsWith(".")) {
           if (this.ignoreDirs.has(entry.name)) {
             continue;
           }
+        }
+        // Exclude .env files to prevent secrets from being ingested
+        if (entry.name === ".env" || (entry.name.startsWith(".env.") && entry.isFile())) {
+          continue;
+        }
+        // Exclude OS-generated metadata files
+        if (entry.name === ".DS_Store" || entry.name === "Thumbs.db") {
+          continue;
         }
         const fullPath = path.join(current, entry.name);
         if (entry.isDirectory()) {
@@ -118,41 +132,38 @@ export class ProjectScanner {
     return hash.digest("hex");
   }
 
-  private computeProjectId(rootPath: string): string {
-    const gitKey = this.getGitIdentity(rootPath);
+  private async computeProjectId(rootPath: string): Promise<string> {
+    const gitKey = await this.getGitIdentity(rootPath);
     const input = gitKey ?? this.normalizePath(rootPath);
     return crypto.createHash("sha256").update(input).digest("hex");
   }
 
-  private getGitIdentity(rootPath: string): string | null {
+  private async getGitIdentity(rootPath: string): Promise<string | null> {
     try {
-      const gitRoot = execSync("git rev-parse --show-toplevel", {
-        cwd: rootPath,
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-        .toString()
-        .trim();
-      const remoteUrl = execSync("git config --get remote.origin.url", {
-        cwd: gitRoot,
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-        .toString()
-        .trim();
+      const safeGit = createSafeGit(rootPath);
+      const gitRoot = await safeGit.getRoot();
 
-      // Use relative path from git root to project dir for subdirectory uniqueness.
-      // This ensures the same repo produces the same projectId regardless of
-      // where it's cloned (local path vs Docker mount vs CI).
-      const relativeToGitRoot = path.relative(gitRoot, rootPath) || ".";
-      const normalizedRelative = this.normalizePath(relativeToGitRoot);
+      // Query remote URL from the git root directory (not rootPath, which may be a subdir)
+      const safeGitFromRoot = createSafeGit(gitRoot);
+      const remoteUrl = await safeGitFromRoot.getRemoteUrl();
 
-      if (remoteUrl) {
-        return `${remoteUrl}::${normalizedRelative}`;
+      if (!remoteUrl) {
+        const repoName = path.basename(gitRoot);
+        const relativeToGitRoot = path.relative(gitRoot, rootPath) || ".";
+        return `${repoName}::${this.normalizePath(relativeToGitRoot)}`;
       }
-      // No remote: fall back to git root basename + relative path
-      const repoName = path.basename(gitRoot);
-      return `${repoName}::${normalizedRelative}`;
-    } catch {
-      return null;
+
+      const relativeToGitRoot = path.relative(gitRoot, rootPath) || ".";
+      return `${remoteUrl}::${this.normalizePath(relativeToGitRoot)}`;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      // "not a git repository" is expected for non-git dirs — fallback is appropriate
+      if (message.includes("not a git repository") || message.includes("fatal: not a git repository")) {
+        log.info(`No git repo at "${rootPath}", using path-based projectId`);
+        return null;
+      }
+      // Unexpected git errors should propagate, not silently degrade to a different identity
+      throw new Error(`ProjectScanner.getGitIdentity failed for "${rootPath}": ${message}`);
     }
   }
 

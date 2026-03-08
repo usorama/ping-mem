@@ -46,3 +46,9 @@ temp/
 
 # Session progress artifacts
 progress-*.txt
+
+# Worktrees
+.worktrees/
+
+# Claude Code
+.claude/

@@ -84,7 +84,7 @@ export class UnifiedIngestionOrchestrator {
 
     // Step 1: Scan project
     const previousManifest = this.manifestStore.load(projectPath);
-    const scanResult = this.scanner.scanProject(projectPath, previousManifest ?? undefined);
+    const scanResult = await this.scanner.scanProject(projectPath, previousManifest ?? undefined);
 
     if (!scanResult.hasChanges && !options.forceReingest) {
       return null; // No changes

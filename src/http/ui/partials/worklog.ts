@@ -133,8 +133,9 @@ export function renderWorklogTable(eventStore: EventStore, filters: WorklogFilte
     let payload: WorklogPayload = {};
     try {
       payload = JSON.parse(entry.payload) as WorklogPayload;
-    } catch {
-      // ignore parse errors
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.debug("Failed to parse worklog payload", { entryId: entry.event_id, error: msg });
     }
 
     const sessionShort = entry.session_id.slice(0, 8);

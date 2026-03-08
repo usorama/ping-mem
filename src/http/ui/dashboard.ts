@@ -41,8 +41,9 @@ export function registerDashboardRoutes(deps: UIDependencies) {
         try {
           const kStats = knowledgeStore.stats();
           knowledgeCount = kStats.totalEntries;
-        } catch {
-          // knowledge store may not be initialized
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : String(error);
+          log.debug("Knowledge store query failed", { error: msg });
         }
       }
 

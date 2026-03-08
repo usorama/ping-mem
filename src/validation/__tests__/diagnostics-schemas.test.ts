@@ -168,12 +168,21 @@ describe("diagnostics-schemas", () => {
       expect(result.success).toBe(false);
     });
 
-    it("should reject projectId not starting with ping-mem-", () => {
+    it("should reject empty projectId", () => {
       const result = diagnosticsIngestSchema.safeParse({
         ...minimalValid,
-        projectId: "invalid-project",
+        projectId: "",
       });
       expect(result.success).toBe(false);
+    });
+
+    it("should accept any non-empty projectId format", () => {
+      // ProjectId format is SHA-256 hex, not restricted to ping-mem- prefix
+      const result = diagnosticsIngestSchema.safeParse({
+        ...minimalValid,
+        projectId: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+      });
+      expect(result.success).toBe(true);
     });
   });
 

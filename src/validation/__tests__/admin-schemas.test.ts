@@ -27,12 +27,13 @@ describe("admin-schemas", () => {
     });
 
     it("should accept valid projectId", () => {
+      const validSha256 = "a".repeat(64);
       const result = deleteProjectSchema.safeParse({
-        projectId: "ping-mem-abc123def456",
+        projectId: validSha256,
       });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.projectId).toBe("ping-mem-abc123def456");
+        expect(result.data.projectId).toBe(validSha256);
       }
     });
 
@@ -50,7 +51,7 @@ describe("admin-schemas", () => {
       });
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.issues[0].message).toContain("must start with 'ping-mem-'");
+        expect(result.error.issues[0].message).toContain("64-character lowercase hex string");
       }
     });
 
@@ -65,9 +66,10 @@ describe("admin-schemas", () => {
     });
 
     it("should reject both projectDir and projectId provided", () => {
+      const validSha256 = "b".repeat(64);
       const result = deleteProjectSchema.safeParse({
         projectDir: "/path/to/project",
-        projectId: "ping-mem-abc123",
+        projectId: validSha256,
       });
       expect(result.success).toBe(false);
       if (!result.success) {

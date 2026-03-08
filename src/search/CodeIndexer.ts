@@ -12,7 +12,10 @@
 
 import { QdrantClientWrapper } from "./QdrantClient.js";
 import { DeterministicVectorizer } from "./DeterministicVectorizer.js";
+import { createLogger } from "../util/logger.js";
 import type { IngestionResult, CodeFileResult, ChunkWithId } from "../ingest/index.js";
+
+const log = createLogger("CodeIndexer");
 
 export interface CodeIndexerOptions {
   qdrantClient: QdrantClientWrapper;
@@ -48,20 +51,28 @@ export class CodeIndexer {
 
     if (points.length > 0) {
       const qdrantClient = this.qdrant.getClient();
-      const collectionName = this.qdrant["config"]["collectionName"];
+      const collectionName = this.qdrant.getCollectionName();
 
       // Batch upsert to avoid oversized requests (Qdrant 400 for large payloads)
-      const BATCH_SIZE = 500;
+      const BATCH_SIZE = 200;
       for (let i = 0; i < points.length; i += BATCH_SIZE) {
         const batch = points.slice(i, i + BATCH_SIZE);
-        await qdrantClient.upsert(collectionName, {
-          wait: true,
-          points: batch.map((p) => ({
-            id: p.id,
-            vector: p.vector,
-            payload: p.payload,
-          })),
-        });
+        try {
+          await qdrantClient.upsert(collectionName, {
+            wait: true,
+            points: batch.map((p) => ({
+              id: p.id,
+              vector: p.vector,
+              payload: p.payload,
+            })),
+          });
+        } catch (error: unknown) {
+          const batchIndex = Math.floor(i / BATCH_SIZE);
+          const message = error instanceof Error ? error.message : String(error);
+          throw new Error(
+            `Qdrant upsert batch ${batchIndex} failed (points ${i}-${i + batch.length - 1} of ${points.length}): ${message}`
+          );
+        }
       }
     }
   }
@@ -80,7 +91,7 @@ export class CodeIndexer {
   ): Promise<ChunkSearchResult[]> {
     const queryVector = this.vectorizer.vectorize(query);
     const qdrantClient = this.qdrant.getClient();
-    const collectionName = this.qdrant["config"]["collectionName"];
+    const collectionName = this.qdrant.getCollectionName();
 
     // Build filter conditions
     const mustConditions: Array<{ key: string; match: { value: string } }> = [];
@@ -103,6 +114,8 @@ export class CodeIndexer {
       });
     }
 
+    const clampedLimit = Math.max(1, Math.min(Math.floor(options.limit ?? 10), 1000));
+
     const searchParams: {
       vector: number[];
       limit: number;
@@ -110,7 +123,7 @@ export class CodeIndexer {
       filter?: { must: Array<{ key: string; match: { value: string } }> };
     } = {
       vector: queryVector,
-      limit: options.limit ?? 10,
+      limit: clampedLimit,
       with_payload: true,
     };
 
@@ -118,21 +131,34 @@ export class CodeIndexer {
       searchParams.filter = { must: mustConditions };
     }
 
-    const results = await qdrantClient.search(collectionName, searchParams);
+    let results: Awaited<ReturnType<typeof qdrantClient.search>>;
+    try {
+      results = await qdrantClient.search(collectionName, searchParams);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("Qdrant search failed", { error: message, query: query.substring(0, 100) });
+      throw new Error(`Code search failed: ${message}`);
+    }
 
-    return results.map((r) => {
-      const payload = r.payload as Record<string, unknown> | null;
-      return {
-        chunkId: (payload?.chunkId as string) ?? "",
-        projectId: (payload?.projectId as string) ?? "",
-        filePath: (payload?.filePath as string) ?? "",
-        type: (payload?.type as "code" | "comment" | "docstring") ?? "code",
-        content: (payload?.content as string) ?? "",
-        lineStart: payload?.lineStart as number | undefined,
-        lineEnd: payload?.lineEnd as number | undefined,
-        score: r.score,
-      };
-    });
+    return results
+      .filter((r) => {
+        // Filter out results with missing critical payload fields
+        const payload = r.payload as Record<string, unknown> | null;
+        return payload && typeof payload.chunkId === "string" && typeof payload.filePath === "string";
+      })
+      .map((r) => {
+        const payload = r.payload as Record<string, unknown>;
+        return {
+          chunkId: payload.chunkId as string,
+          projectId: (payload.projectId as string) ?? "",
+          filePath: payload.filePath as string,
+          type: (payload.type as "code" | "comment" | "docstring") ?? "code",
+          content: (payload.content as string) ?? "",
+          lineStart: payload.lineStart as number | undefined,
+          lineEnd: payload.lineEnd as number | undefined,
+          score: r.score,
+        };
+      });
   }
 
   /**
@@ -140,7 +166,7 @@ export class CodeIndexer {
    */
   async deleteProject(projectId: string): Promise<void> {
     const qdrantClient = this.qdrant.getClient();
-    const collectionName = this.qdrant["config"]["collectionName"];
+    const collectionName = this.qdrant.getCollectionName();
 
     await qdrantClient.delete(collectionName, {
       wait: true,
@@ -178,8 +204,9 @@ export class CodeIndexer {
             chunkId: chunk.chunkId,
             sha256: fileResult.sha256,
             type: chunk.type,
-            // Don't store full content in Qdrant to avoid oversized payloads
-            // Content is stored in Neo4j and can be retrieved from files
+            content: chunk.content.substring(0, 2000),
+            contentTruncated: chunk.content.length > 2000,
+            contentFullLength: chunk.content.length,
             start: chunk.start,
             end: chunk.end,
             lineStart: chunk.lineStart,

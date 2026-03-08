@@ -374,7 +374,7 @@ export class CodebaseToolModule implements ToolModule {
     if (fs.existsSync(normalized)) {
       try {
         const scanner = new ProjectScanner();
-        const scan = scanner.scanProject(normalized);
+        const scan = await scanner.scanProject(normalized);
         projectId = scan.manifest.projectId;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);

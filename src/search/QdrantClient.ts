@@ -17,6 +17,9 @@ import {
   type VectorSearchResult,
   type VectorIndexConfig,
 } from "./VectorIndex.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("QdrantClient");
 
 // ============================================================================
 // Error Classes
@@ -200,7 +203,11 @@ export class QdrantClientWrapper {
       this.client = null;
 
       if (this.config.enableFallback) {
-        // Initialize fallback to local VectorIndex
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        log.warn("Qdrant connection failed, falling back to local VectorIndex", {
+          url: this.config.url,
+          error: errorMessage,
+        });
         await this.initializeFallback();
         this.connected = true;
         this.usingFallback = true;
@@ -257,7 +264,9 @@ export class QdrantClientWrapper {
       // Use getCollections as a health check - it's a lightweight operation
       await this.client.getCollections();
       return true;
-    } catch {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn("Qdrant health check failed", { url: this.config.url, error: message });
       return false;
     }
   }
@@ -496,7 +505,9 @@ export class QdrantClientWrapper {
         points: [memoryId],
       });
       return true;
-    } catch {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("deleteVector failed", { memoryId, error: message });
       return false;
     }
   }
@@ -564,6 +575,13 @@ export class QdrantClientWrapper {
       vectorDimensions: this.config.vectorDimensions,
       ...this.config.fallbackConfig,
     });
+  }
+
+  /**
+   * Get the collection name for this client instance
+   */
+  getCollectionName(): string {
+    return this.config.collectionName;
   }
 
   /**

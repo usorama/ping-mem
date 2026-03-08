@@ -9,6 +9,7 @@ import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import { EventStore } from "../storage/EventStore.js";
 import { ProjectScanner } from "../ingest/ProjectScanner.js";
 import { timingSafeStringEqual } from "../util/auth-utils.js";
+import { createLogger } from "../util/logger.js";
 import {
   deleteProjectSchema,
   rotateKeySchema,
@@ -20,6 +21,8 @@ import {
   type SetLLMConfigInput,
 } from "../validation/admin-schemas.js";
 import { parseBody, isParseSuccess } from "../validation/parse-body.js";
+
+const log = createLogger("admin");
 
 export interface AdminDependencies {
   adminStore: AdminStore;
@@ -64,7 +67,14 @@ export async function handleAdminRequest(
       return true;
     }
     const html = renderAdminPage();
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+    });
     res.end(html);
     return true;
   }
@@ -101,25 +111,73 @@ async function handleAdminApi(
     }
 
     const { projectDir, projectId } = result.data;
-    const resolvedProjectId = projectId ?? resolveProjectId(projectDir ?? "", deps.adminStore);
+    let resolvedProjectId: string | null;
+    try {
+      if (projectId) {
+        resolvedProjectId = projectId;
+      } else if (projectDir) {
+        resolvedProjectId = await resolveProjectId(projectDir, deps.adminStore);
+      } else {
+        return respondJson(res, 400, { error: "Either projectDir or projectId is required" });
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      log.error("deleteProject: resolveProjectId failed", { error: message });
+      return respondJson(res, 400, { error: "Invalid project directory or project not found" });
+    }
     if (!resolvedProjectId) {
       return respondJson(res, 404, { error: "Project not found" });
     }
 
+    const warnings: string[] = [];
+
     if (deps.ingestionService) {
-      await deps.ingestionService.deleteProject(resolvedProjectId);
+      try {
+        await deps.ingestionService.deleteProject(resolvedProjectId);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.error("deleteProject: ingestion cleanup failed", { projectId: resolvedProjectId, error: msg });
+        warnings.push(msg);
+      }
     }
-    deps.diagnosticsStore.deleteProject(resolvedProjectId);
+    try {
+      deps.diagnosticsStore.deleteProject(resolvedProjectId);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("deleteProject: diagnostics cleanup failed", { projectId: resolvedProjectId, error: msg });
+      warnings.push(`Diagnostics: ${msg}`);
+    }
 
     if (projectDir) {
-      deleteProjectManifest(projectDir);
-      const sessionIds = deps.eventStore.findSessionIdsByProjectDir(projectDir);
-      deps.eventStore.deleteSessions(sessionIds);
+      try {
+        deleteProjectManifest(projectDir);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.error("deleteProject: manifest cleanup failed", { projectDir, error: msg });
+        warnings.push(`Manifest: ${msg}`);
+      }
+      try {
+        const sessionIds = deps.eventStore.findSessionIdsByProjectDir(projectDir);
+        deps.eventStore.deleteSessions(sessionIds);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.error("deleteProject: session cleanup failed", { projectDir, error: msg });
+        warnings.push(`Sessions: ${msg}`);
+      }
     }
 
-    deps.adminStore.deleteProject(resolvedProjectId);
+    try {
+      deps.adminStore.deleteProject(resolvedProjectId);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("deleteProject: admin store cleanup failed", { projectId: resolvedProjectId, error: msg });
+      warnings.push(`AdminStore: ${msg}`);
+    }
 
-    return respondJson(res, 200, { data: { projectId: resolvedProjectId } });
+    return respondJson(res, 200, {
+      data: { projectId: resolvedProjectId },
+      ...(warnings.length > 0 ? { warnings: warnings.map(w => w.split(":")[0] ?? w) } : {}),
+    });
   }
 
   if (req.method === "GET" && pathName === "/api/admin/keys") {
@@ -161,10 +219,12 @@ async function handleAdminApi(
     try {
       const setResult = deps.adminStore.setLLMConfig(result.data);
       return respondJson(res, 200, { data: setResult });
-    } catch (error) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unable to save LLM config";
+      log.error("Failed to save LLM config", { error: message });
       return respondJson(res, 500, {
         error: "LLMConfigError",
-        message: error instanceof Error ? error.message : "Unable to save LLM config",
+        message: "Failed to save LLM configuration",
       });
     }
   }
@@ -176,6 +236,7 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
   const adminUser = process.env[ADMIN_USER_ENV];
   const adminPass = process.env[ADMIN_PASS_ENV];
   if (!adminUser || !adminPass) {
+    log.warn("Admin authentication is disabled: PING_MEM_ADMIN_USER and PING_MEM_ADMIN_PASS not set");
     return true;
   }
 
@@ -187,13 +248,16 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
     return false;
   }
 
+  // RFC 7617: password is everything after the first colon
   const decoded = Buffer.from(encoded, "base64").toString("utf8");
-  const [user, pass] = decoded.split(":");
+  const colonIndex = decoded.indexOf(":");
+  const user = colonIndex === -1 ? decoded : decoded.substring(0, colonIndex);
+  const pass = colonIndex === -1 ? "" : decoded.substring(colonIndex + 1);
 
   // Use timing-safe comparison to prevent timing attacks
   // See: https://owasp.org/www-community/attacks/Timing_analysis
-  const userValid = timingSafeStringEqual(user ?? "", adminUser);
-  const passValid = timingSafeStringEqual(pass ?? "", adminPass);
+  const userValid = timingSafeStringEqual(user, adminUser);
+  const passValid = timingSafeStringEqual(pass, adminPass);
 
   if (!userValid || !passValid) {
     res.writeHead(401, { "WWW-Authenticate": "Basic" });
@@ -219,11 +283,14 @@ function requireApiKey(
 }
 
 function respondJson(res: ServerResponse, status: number, payload: unknown): void {
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "X-Content-Type-Options": "nosniff",
+  });
   res.end(JSON.stringify(payload));
 }
 
-function resolveProjectId(projectDir: string, adminStore: AdminStore): string | null {
+async function resolveProjectId(projectDir: string, adminStore: AdminStore): Promise<string | null> {
   const normalized = path.resolve(projectDir);
   const record = adminStore.findProjectByDir(normalized);
   if (record) {
@@ -235,19 +302,28 @@ function resolveProjectId(projectDir: string, adminStore: AdminStore): string | 
   }
   try {
     const scanner = new ProjectScanner();
-    const scan = scanner.scanProject(normalized);
+    const scan = await scanner.scanProject(normalized);
     return scan.manifest.projectId;
-  } catch {
-    return null;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    log.error("resolveProjectId: scan failed", { projectDir: normalized, error: message });
+    throw new Error("Failed to scan project directory");
   }
 }
 
 function deleteProjectManifest(projectDir: string): void {
-  const manifestPath = path.join(projectDir, ".ping-mem", "manifest.json");
+  // Validate raw input BEFORE resolving to catch traversal attempts
+  const segments = projectDir.split(/[\\/]/);
+  if (segments.includes("..")) {
+    throw new Error("projectDir must not contain path traversal sequences");
+  }
+  const resolved = path.resolve(projectDir);
+
+  const manifestPath = path.join(resolved, ".ping-mem", "manifest.json");
   if (fs.existsSync(manifestPath)) {
     fs.unlinkSync(manifestPath);
   }
-  const manifestDir = path.join(projectDir, ".ping-mem");
+  const manifestDir = path.join(resolved, ".ping-mem");
   if (fs.existsSync(manifestDir)) {
     const remaining = fs.readdirSync(manifestDir);
     if (remaining.length === 0) {
@@ -256,9 +332,19 @@ function deleteProjectManifest(projectDir: string): void {
   }
 }
 
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function renderAdminPage(): string {
-  const providerOptions = PROVIDERS.map((p) => `<option value="${p}">${p}</option>`).join("");
-  const providersJson = JSON.stringify(PROVIDERS);
+  const providerOptions = PROVIDERS.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+  // Escape </script> sequences to prevent script tag breakout (defense-in-depth)
+  const providersJson = JSON.stringify(PROVIDERS).replace(/</g, "\\u003c");
 
   return `<!doctype html>
 <html lang="en">
@@ -451,7 +537,7 @@ function renderAdminPage(): string {
 
   <script>
     const state = {
-      apiKey: localStorage.getItem("pingMemApiKey") || "",
+      apiKey: sessionStorage.getItem("pingMemApiKey") || "",
     };
 
     const apiKeyInput = document.getElementById("currentApiKey");
@@ -461,7 +547,7 @@ function renderAdminPage(): string {
 
     saveApiKey.addEventListener("click", () => {
       state.apiKey = apiKeyInput.value.trim();
-      localStorage.setItem("pingMemApiKey", state.apiKey);
+      sessionStorage.setItem("pingMemApiKey", state.apiKey);
       apiKeyStatus.textContent = state.apiKey ? "Saved" : "Missing";
     });
 
@@ -484,20 +570,31 @@ function renderAdminPage(): string {
     async function refreshKeys() {
       const keys = await apiFetch("/api/admin/keys");
       const table = document.getElementById("keysTable");
-      table.innerHTML = "";
+      while (table.firstChild) { table.removeChild(table.firstChild); }
       keys.forEach((key) => {
         const row = document.createElement("tr");
         const createdAt = new Date(key.createdAt).toLocaleString();
         const status = key.active ? "Active" : "Inactive";
-        const action = key.active
-          ? "<button data-id=\"" + key.id + "\" class=\"ghost\">Deactivate</button>"
-          : "";
-        row.innerHTML =
-          "<td>" + key.id + "</td>" +
-          "<td>" + key.last4 + "</td>" +
-          "<td>" + createdAt + "</td>" +
-          "<td>" + status + "</td>" +
-          "<td>" + action + "</td>";
+        const cells = [
+          { text: String(key.id) },
+          { text: String(key.last4) },
+          { text: createdAt },
+          { text: status },
+        ];
+        cells.forEach((cell) => {
+          const td = document.createElement("td");
+          td.textContent = cell.text;
+          row.appendChild(td);
+        });
+        const actionTd = document.createElement("td");
+        if (key.active) {
+          const btn = document.createElement("button");
+          btn.className = "ghost";
+          btn.textContent = "Deactivate";
+          btn.dataset.id = String(key.id);
+          actionTd.appendChild(btn);
+        }
+        row.appendChild(actionTd);
         table.appendChild(row);
       });
 
@@ -527,17 +624,29 @@ function renderAdminPage(): string {
     async function refreshProjects() {
       const projects = await apiFetch("/api/admin/projects");
       const table = document.getElementById("projectsTable");
-      table.innerHTML = "";
+      while (table.firstChild) { table.removeChild(table.firstChild); }
       projects.forEach((project) => {
         const row = document.createElement("tr");
         const lastIngested = project.lastIngestedAt
           ? new Date(project.lastIngestedAt).toLocaleString()
           : "-";
-        row.innerHTML =
-          "<td>" + project.projectDir + "</td>" +
-          "<td>" + project.projectId + "</td>" +
-          "<td>" + lastIngested + "</td>" +
-          "<td><button data-dir=\"" + project.projectDir + "\" class=\"secondary\">Delete</button></td>";
+        const cells = [
+          { text: String(project.projectDir) },
+          { text: String(project.projectId) },
+          { text: lastIngested },
+        ];
+        cells.forEach((cell) => {
+          const td = document.createElement("td");
+          td.textContent = cell.text;
+          row.appendChild(td);
+        });
+        const actionTd = document.createElement("td");
+        const btn = document.createElement("button");
+        btn.className = "secondary";
+        btn.textContent = "Delete";
+        btn.dataset.dir = String(project.projectDir);
+        actionTd.appendChild(btn);
+        row.appendChild(actionTd);
         table.appendChild(row);
       });
 
@@ -586,10 +695,15 @@ function renderAdminPage(): string {
     document.getElementById("refreshProjects").addEventListener("click", refreshProjects);
     document.getElementById("saveLLMConfig").addEventListener("click", saveLLMConfig);
 
+    function showError(msg) {
+      const el = document.getElementById("apiKeyStatus");
+      if (el) { el.textContent = msg; el.className = "error"; }
+    }
+
     if (state.apiKey) {
-      refreshKeys().catch(console.error);
-      refreshProjects().catch(console.error);
-      loadLLMConfig().catch(console.error);
+      refreshKeys().catch((e) => showError("Keys: " + e.message));
+      refreshProjects().catch((e) => showError("Projects: " + e.message));
+      loadLLMConfig().catch((e) => showError("LLM: " + e.message));
     }
   </script>
 </body>
