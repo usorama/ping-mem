@@ -81,7 +81,7 @@ export class IngestionOrchestrator {
       ? null
       : this.manifestStore.load(projectPath);
 
-    const scanResult = this.scanner.scanProject(projectPath, previousManifest ?? undefined);
+    const scanResult = await this.scanner.scanProject(projectPath, previousManifest ?? undefined);
 
     // If no changes and not forcing, return null
     if (!scanResult.hasChanges && !options.forceReingest) {
@@ -113,14 +113,14 @@ export class IngestionOrchestrator {
    * Verify that the ingested manifest matches the current project state.
    * Returns true if manifest is up-to-date and matches on-disk files.
    */
-  verify(projectDir: string): boolean {
+  async verify(projectDir: string): Promise<boolean> {
     const projectPath = path.resolve(projectDir);
     const storedManifest = this.manifestStore.load(projectPath);
     if (!storedManifest) {
       return false;
     }
 
-    const currentScan = this.scanner.scanProject(projectPath, storedManifest);
+    const currentScan = await this.scanner.scanProject(projectPath, storedManifest);
     return currentScan.manifest.treeHash === storedManifest.treeHash;
   }
 

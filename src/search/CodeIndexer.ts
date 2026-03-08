@@ -51,7 +51,7 @@ export class CodeIndexer {
       const collectionName = this.qdrant["config"]["collectionName"];
 
       // Batch upsert to avoid oversized requests (Qdrant 400 for large payloads)
-      const BATCH_SIZE = 500;
+      const BATCH_SIZE = 200;
       for (let i = 0; i < points.length; i += BATCH_SIZE) {
         const batch = points.slice(i, i + BATCH_SIZE);
         await qdrantClient.upsert(collectionName, {
@@ -178,8 +178,7 @@ export class CodeIndexer {
             chunkId: chunk.chunkId,
             sha256: fileResult.sha256,
             type: chunk.type,
-            // Don't store full content in Qdrant to avoid oversized payloads
-            // Content is stored in Neo4j and can be retrieved from files
+            content: chunk.content.substring(0, 2000),  // Truncated to prevent oversized payloads
             start: chunk.start,
             end: chunk.end,
             lineStart: chunk.lineStart,

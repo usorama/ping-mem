@@ -46,3 +46,6 @@ temp/
 
 # Session progress artifacts
 progress-*.txt
+
+# Worktrees
+.worktrees/

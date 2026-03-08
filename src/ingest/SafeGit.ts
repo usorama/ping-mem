@@ -81,6 +81,15 @@ export class SafeGit {
     return stdout.trim();
   }
 
+  async getRemoteUrl(): Promise<string | null> {
+    try {
+      const result = await this.run(["config", "--get", "remote.origin.url"]);
+      return result.stdout.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
   async listFiles(commitHash: string): Promise<string[]> {
     const safeHash = this.validateHash(commitHash);
     const { stdout } = await this.run(["diff-tree", "--no-commit-id", "--name-only", "-r", safeHash]);

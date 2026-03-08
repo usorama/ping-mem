@@ -57,18 +57,31 @@ export class TemporalCodeGraph {
    * Uses UNWIND-based batching for performance (10x+ faster than individual queries).
    */
   async persistIngestion(result: IngestionResult): Promise<void> {
+    // Validate required fields before touching Neo4j
+    if (!result.projectId) {
+      throw new Error(`persistIngestion: projectId is required but got "${result.projectId}"`);
+    }
+    if (!result.projectManifest?.rootPath) {
+      throw new Error(`persistIngestion: rootPath is required but got "${result.projectManifest?.rootPath}"`);
+    }
+    if (!result.projectManifest?.treeHash) {
+      throw new Error(`persistIngestion: treeHash is required but got "${result.projectManifest?.treeHash}"`);
+    }
+
     const session = this.neo4j.getSession();
     try {
       // 1. Create or merge Project node
       await session.run(
         `
         MERGE (p:Project { projectId: $projectId })
-        SET p.rootPath = $rootPath,
+        SET p.name = $name,
+            p.rootPath = $rootPath,
             p.treeHash = $treeHash,
             p.lastIngestedAt = $ingestedAt
         `,
         {
           projectId: result.projectId,
+          name: result.projectManifest.rootPath.split("/").pop() || result.projectId,
           rootPath: result.projectManifest.rootPath,
           treeHash: result.projectManifest.treeHash,
           ingestedAt: result.ingestedAt,
@@ -170,6 +183,16 @@ export class TemporalCodeGraph {
   ): Promise<GitCommit[]> {
     const session = this.neo4j.getSession();
     try {
+      // Check that the project exists before running the main query
+      const projectCheck = await session.run(
+        "MATCH (p:Project { projectId: $projectId }) RETURN p.name AS name",
+        { projectId }
+      );
+      if (projectCheck.records.length === 0) {
+        log.warn("queryCommitHistory: project not found in graph", { projectId });
+        return [];
+      }
+
       const result = await session.run(
         `
         MATCH (p:Project { projectId: $projectId })-[:HAS_COMMIT]->(c:Commit)
@@ -624,5 +647,24 @@ export class TemporalCodeGraph {
     hash.update("\n");
     hash.update(String(hunk.newLines));
     return hash.digest("hex");
+  }
+
+  /**
+   * Ensure Neo4j constraints exist for Project nodes.
+   * Idempotent: safe to call multiple times.
+   */
+  async ensureConstraints(): Promise<void> {
+    const session = this.neo4j.getSession();
+    try {
+      await session.run(
+        "CREATE CONSTRAINT project_id_not_null IF NOT EXISTS FOR (p:Project) REQUIRE p.projectId IS NOT NULL"
+      );
+      await session.run(
+        "CREATE CONSTRAINT project_id_unique IF NOT EXISTS FOR (p:Project) REQUIRE p.projectId IS UNIQUE"
+      );
+      log.info("Neo4j constraints ensured");
+    } finally {
+      await session.close();
+    }
   }
 }

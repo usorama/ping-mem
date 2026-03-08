@@ -1,7 +1,7 @@
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import { execSync } from "child_process";
+import { createSafeGit } from "./SafeGit.js";
 import type { FileHashEntry, ProjectManifest, ProjectScanResult } from "./types.js";
 
 const DEFAULT_IGNORE_DIRS = new Set([
@@ -17,6 +17,8 @@ const DEFAULT_IGNORE_DIRS = new Set([
   "venv",
   "__pycache__",
   ".ping-mem",
+  ".worktrees",
+  ".claude",
 ]);
 
 const MANIFEST_SCHEMA_VERSION = 1;
@@ -35,7 +37,7 @@ export class ProjectScanner {
     this.includeExtensions = options.includeExtensions ?? null;
   }
 
-  scanProject(projectDir: string, previousManifest?: ProjectManifest): ProjectScanResult {
+  async scanProject(projectDir: string, previousManifest?: ProjectManifest): Promise<ProjectScanResult> {
     // Resolve symlinks so path.relative works correctly with git rev-parse
     // (which always resolves symlinks). macOS: /var → /private/var.
     const rootPath = fs.realpathSync(path.resolve(projectDir));
@@ -45,7 +47,7 @@ export class ProjectScanner {
     );
 
     const treeHash = this.computeTreeHash(fileEntries);
-    const projectId = this.computeProjectId(rootPath);
+    const projectId = await this.computeProjectId(rootPath);
 
     const manifest: ProjectManifest = {
       projectId,
@@ -118,39 +120,26 @@ export class ProjectScanner {
     return hash.digest("hex");
   }
 
-  private computeProjectId(rootPath: string): string {
-    const gitKey = this.getGitIdentity(rootPath);
+  private async computeProjectId(rootPath: string): Promise<string> {
+    const gitKey = await this.getGitIdentity(rootPath);
     const input = gitKey ?? this.normalizePath(rootPath);
     return crypto.createHash("sha256").update(input).digest("hex");
   }
 
-  private getGitIdentity(rootPath: string): string | null {
+  private async getGitIdentity(rootPath: string): Promise<string | null> {
     try {
-      const gitRoot = execSync("git rev-parse --show-toplevel", {
-        cwd: rootPath,
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-        .toString()
-        .trim();
-      const remoteUrl = execSync("git config --get remote.origin.url", {
-        cwd: gitRoot,
-        stdio: ["ignore", "pipe", "ignore"],
-      })
-        .toString()
-        .trim();
+      const safeGit = createSafeGit(rootPath);
+      const gitRoot = await safeGit.getRoot();
+      const remoteUrl = await safeGit.getRemoteUrl();
 
-      // Use relative path from git root to project dir for subdirectory uniqueness.
-      // This ensures the same repo produces the same projectId regardless of
-      // where it's cloned (local path vs Docker mount vs CI).
-      const relativeToGitRoot = path.relative(gitRoot, rootPath) || ".";
-      const normalizedRelative = this.normalizePath(relativeToGitRoot);
-
-      if (remoteUrl) {
-        return `${remoteUrl}::${normalizedRelative}`;
+      if (!remoteUrl) {
+        const repoName = path.basename(gitRoot);
+        const relativeToGitRoot = path.relative(gitRoot, rootPath) || ".";
+        return `${repoName}::${this.normalizePath(relativeToGitRoot)}`;
       }
-      // No remote: fall back to git root basename + relative path
-      const repoName = path.basename(gitRoot);
-      return `${repoName}::${normalizedRelative}`;
+
+      const relativeToGitRoot = path.relative(gitRoot, rootPath) || ".";
+      return `${remoteUrl}::${this.normalizePath(relativeToGitRoot)}`;
     } catch {
       return null;
     }

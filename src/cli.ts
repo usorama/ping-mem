@@ -110,7 +110,7 @@ async function collectDiagnostics(args: ArgMap): Promise<void> {
     : [sarifPath!];
 
   const scanner = new ProjectScanner();
-  const scan = scanner.scanProject(projectDir);
+  const scan = await scanner.scanProject(projectDir);
   const projectId = scan.manifest.projectId;
   const treeHash = scan.manifest.treeHash;
 

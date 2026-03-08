@@ -101,7 +101,7 @@ async function handleAdminApi(
     }
 
     const { projectDir, projectId } = result.data;
-    const resolvedProjectId = projectId ?? resolveProjectId(projectDir ?? "", deps.adminStore);
+    const resolvedProjectId = projectId ?? await resolveProjectId(projectDir ?? "", deps.adminStore);
     if (!resolvedProjectId) {
       return respondJson(res, 404, { error: "Project not found" });
     }
@@ -223,7 +223,7 @@ function respondJson(res: ServerResponse, status: number, payload: unknown): voi
   res.end(JSON.stringify(payload));
 }
 
-function resolveProjectId(projectDir: string, adminStore: AdminStore): string | null {
+async function resolveProjectId(projectDir: string, adminStore: AdminStore): Promise<string | null> {
   const normalized = path.resolve(projectDir);
   const record = adminStore.findProjectByDir(normalized);
   if (record) {
@@ -235,7 +235,7 @@ function resolveProjectId(projectDir: string, adminStore: AdminStore): string | 
   }
   try {
     const scanner = new ProjectScanner();
-    const scan = scanner.scanProject(normalized);
+    const scan = await scanner.scanProject(normalized);
     return scan.manifest.projectId;
   } catch {
     return null;

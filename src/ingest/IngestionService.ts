@@ -123,7 +123,7 @@ export class IngestionService {
    * Verify that the ingested manifest matches current project state.
    */
   async verifyProject(projectDir: string): Promise<VerifyProjectResult> {
-    const valid = this.orchestrator.verify(projectDir);
+    const valid = await this.orchestrator.verify(projectDir);
 
     // If valid, also extract current hashes for confirmation
     const manifestStore = this.orchestrator["manifestStore"];
@@ -157,6 +157,10 @@ export class IngestionService {
   async queryTimeline(
     options: QueryTimelineOptions
   ): Promise<TimelineEvent[]> {
+    if (!options.projectId) {
+      throw new Error("queryTimeline requires a projectId");
+    }
+
     if (options.filePath) {
       // File-specific timeline
       const history = await this.codeGraph.queryFileHistory(
