@@ -21,9 +21,10 @@ FROM oven/bun:1.2.5-alpine AS runtime
 
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies (git required for code ingestion)
 RUN apk add --no-cache \
     curl \
+    git \
     && rm -rf /var/cache/apk/*
 
 # Copy built artifacts from builder
