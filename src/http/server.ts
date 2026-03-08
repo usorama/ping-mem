@@ -206,7 +206,7 @@ export async function startHTTPServer(): Promise<void> {
     } else {
       log.info("Shutdown complete");
     }
-    process.exit(0);
+    process.exit(shutdownErrors.length > 0 ? 1 : 0);
   };
 
   process.on("SIGINT", shutdown);

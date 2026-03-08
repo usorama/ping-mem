@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "fs";
 import * as path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { createLogger } from "../util/logger.js";
 
 const log = createLogger("prettier-sarif");
@@ -56,7 +56,7 @@ function ensureDir(filePath: string): void {
 
 function getPrettierVersion(): string {
   try {
-    const output = execSync("npx prettier --version", {
+    const output = execFileSync("npx", ["prettier", "--version"], {
       stdio: ["ignore", "pipe", "ignore"],
     }).toString().trim();
     return output;
@@ -88,7 +88,7 @@ function main(): void {
   let hasIssues = false;
   
   try {
-    execSync(prettierCmd.join(" "), {
+    execFileSync(prettierCmd[0]!, prettierCmd.slice(1), {
       stdio: ["ignore", "pipe", "pipe"],
       maxBuffer: 10 * 1024 * 1024, // 10MB buffer
     });

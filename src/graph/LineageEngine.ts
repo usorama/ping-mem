@@ -11,6 +11,9 @@
 
 import type { Neo4jClient } from "./Neo4jClient.js";
 import type { Entity, EntityType } from "../types/graph.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("LineageEngine");
 
 // ============================================================================
 // Configuration
@@ -747,7 +750,9 @@ export class LineageEngine {
   private parseProperties(properties: string): Record<string, unknown> {
     try {
       return JSON.parse(properties) as Record<string, unknown>;
-    } catch {
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.warn("Failed to parse entity properties JSON", { error: msg });
       return {};
     }
   }

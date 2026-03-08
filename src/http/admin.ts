@@ -156,11 +156,23 @@ async function handleAdminApi(
         log.error("deleteProject: manifest cleanup failed", { projectDir, error: msg });
         warnings.push(`Manifest: ${msg}`);
       }
-      const sessionIds = deps.eventStore.findSessionIdsByProjectDir(projectDir);
-      deps.eventStore.deleteSessions(sessionIds);
+      try {
+        const sessionIds = deps.eventStore.findSessionIdsByProjectDir(projectDir);
+        deps.eventStore.deleteSessions(sessionIds);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.error("deleteProject: session cleanup failed", { projectDir, error: msg });
+        warnings.push(`Sessions: ${msg}`);
+      }
     }
 
-    deps.adminStore.deleteProject(resolvedProjectId);
+    try {
+      deps.adminStore.deleteProject(resolvedProjectId);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("deleteProject: admin store cleanup failed", { projectId: resolvedProjectId, error: msg });
+      warnings.push(`AdminStore: ${msg}`);
+    }
 
     return respondJson(res, 200, {
       data: { projectId: resolvedProjectId },
@@ -207,12 +219,12 @@ async function handleAdminApi(
     try {
       const setResult = deps.adminStore.setLLMConfig(result.data);
       return respondJson(res, 200, { data: setResult });
-    } catch (error) {
+    } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unable to save LLM config";
       log.error("Failed to save LLM config", { error: message });
       return respondJson(res, 500, {
         error: "LLMConfigError",
-        message: `Failed to save LLM configuration: ${message}`,
+        message: "Failed to save LLM configuration",
       });
     }
   }

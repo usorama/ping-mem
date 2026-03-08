@@ -8,6 +8,10 @@
  * @version 1.0.0
  */
 
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("SSEClient");
+
 import type {
   SSEClientConfig,
   PingMemClient,
@@ -349,7 +353,8 @@ export class SSEPingMemClient implements PingMemClient {
         }
       }
     } catch (error) {
-      console.error("[SSE Client] Failed to parse message:", error);
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("Failed to parse SSE message", { error: message });
     }
   }
 

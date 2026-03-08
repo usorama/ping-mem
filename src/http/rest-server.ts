@@ -15,6 +15,7 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import * as path from "path";
 import { createLogger } from "../util/logger.js";
+import { timingSafeStringEqual } from "../util/auth-utils.js";
 
 const log = createLogger("REST Server");
 
@@ -228,7 +229,7 @@ export class RESTPingMemServer {
         }
         const isValid = this.config.apiKeyManager
           ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
-          : apiKey === this.config.apiKey;
+          : timingSafeStringEqual(apiKey ?? "", this.config.apiKey ?? "");
         if (!isValid) {
           return c.json(
             {
@@ -278,7 +279,7 @@ export class RESTPingMemServer {
         }
         const isValid = this.config.apiKeyManager
           ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
-          : apiKey === this.config.apiKey;
+          : timingSafeStringEqual(apiKey ?? "", this.config.apiKey ?? "");
         if (!isValid) {
           return c.json(
             { error: "Unauthorized", message: "Invalid API key" },

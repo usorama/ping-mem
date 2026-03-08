@@ -783,7 +783,9 @@ export class RelevanceEngine {
       }
 
       return result;
-    } catch {
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.warn("Failed to build memory payload", { error: msg });
       return null;
     }
   }
