@@ -66,8 +66,9 @@ export async function renderSessionsTable(
         const events = await eventStore.getBySession(s.id as SessionId);
         eventCount = events.length;
         memoryCount = events.filter((e) => e.eventType === "MEMORY_SAVED").length;
-      } catch {
-        // Fall back to in-memory counts
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.debug("Failed to fetch session events, using in-memory counts", { sessionId: s.id, error: msg });
       }
     }
 

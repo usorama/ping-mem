@@ -22,7 +22,11 @@ function computeSriForChart(filePath: string): string {
   try {
     const content = fs.readFileSync(filePath);
     return `sha384-${nodeCrypto.createHash("sha384").update(content).digest("base64")}`;
-  } catch { return ""; }
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log.warn("SRI hash computation failed for chart asset", { filePath, error: msg });
+    return "";
+  }
 }
 const SRI_CHART = computeSriForChart(path.join(staticDir, "chart.umd.min.js"));
 

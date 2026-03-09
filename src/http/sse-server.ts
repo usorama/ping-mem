@@ -14,6 +14,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprot
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as crypto from "crypto";
 import { createLogger } from "../util/logger.js";
+import { timingSafeStringEqual } from "../util/auth-utils.js";
 
 const log = createLogger("SSE Server");
 
@@ -157,7 +158,7 @@ export class SSEPingMemServer {
       }
       const isValid = this.config.apiKeyManager
         ? this.config.apiKeyManager.isValid(apiKey)
-        : apiKey === this.config.apiKey;
+        : (this.config.apiKey ? timingSafeStringEqual(apiKey ?? "", this.config.apiKey) : false);
       if (!isValid) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid or missing API key. Use X-API-Key header or Authorization: Bearer <token>." }));

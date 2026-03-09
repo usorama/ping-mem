@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as fs from "fs";
 import * as path from "path";
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 
 import { ProjectScanner } from "./ingest/ProjectScanner.js";
 import { DiagnosticsStore } from "./diagnostics/DiagnosticsStore.js";
@@ -79,13 +79,15 @@ Examples:
 
 function getCommitHash(projectDir: string): string | undefined {
   try {
-    return execSync("git rev-parse HEAD", {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: projectDir,
       stdio: ["ignore", "pipe", "ignore"],
     })
       .toString()
       .trim();
-  } catch {
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log.debug("Failed to get commit hash", { projectDir, error: msg });
     return undefined;
   }
 }
@@ -110,7 +112,7 @@ async function collectDiagnostics(args: ArgMap): Promise<void> {
     : [sarifPath!];
 
   const scanner = new ProjectScanner();
-  const scan = scanner.scanProject(projectDir);
+  const scan = await scanner.scanProject(projectDir);
   const projectId = scan.manifest.projectId;
   const treeHash = scan.manifest.treeHash;
 

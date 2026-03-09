@@ -17,7 +17,9 @@ function computeSri(filePath: string): string {
     const content = fs.readFileSync(filePath);
     const hash = crypto.createHash("sha384").update(content).digest("base64");
     return `sha384-${hash}`;
-  } catch {
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error);
+    log.warn("SRI hash computation failed — SRI protection disabled for this asset", { filePath, error: msg });
     return "";
   }
 }

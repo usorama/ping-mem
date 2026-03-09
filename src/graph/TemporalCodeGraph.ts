@@ -34,6 +34,7 @@ import type {
 } from "../ingest/index.js";
 import type { ExtractedSymbol } from "../ingest/SymbolExtractor.js";
 import * as crypto from "crypto";
+import * as path from "path";
 import { createLogger } from "../util/logger.js";
 
 const log = createLogger("TemporalCodeGraph");
@@ -50,6 +51,7 @@ export class TemporalCodeGraph {
   }
 
   private static readonly BATCH_SIZE = 500;
+  private static readonly ALLOWED_SORT_VALUES = new Set(["lastIngestedAt", "filesCount", "rootPath"]);
 
   /**
    * Persist a full ingestion result to Neo4j.
@@ -57,18 +59,34 @@ export class TemporalCodeGraph {
    * Uses UNWIND-based batching for performance (10x+ faster than individual queries).
    */
   async persistIngestion(result: IngestionResult): Promise<void> {
+    // Validate required fields before touching Neo4j
+    if (!result.projectId) {
+      throw new Error("persistIngestion: projectId is required");
+    }
+    if (!result.projectManifest?.rootPath) {
+      throw new Error("persistIngestion: rootPath is required");
+    }
+    if (!result.projectManifest?.treeHash) {
+      throw new Error("persistIngestion: treeHash is required");
+    }
+    if (!result.ingestedAt) {
+      throw new Error("persistIngestion: ingestedAt is required");
+    }
+
     const session = this.neo4j.getSession();
     try {
       // 1. Create or merge Project node
       await session.run(
         `
         MERGE (p:Project { projectId: $projectId })
-        SET p.rootPath = $rootPath,
+        SET p.name = $name,
+            p.rootPath = $rootPath,
             p.treeHash = $treeHash,
             p.lastIngestedAt = $ingestedAt
         `,
         {
           projectId: result.projectId,
+          name: path.basename(result.projectManifest.rootPath.replace(/[\\/]+$/, "")) || result.projectId,
           rootPath: result.projectManifest.rootPath,
           treeHash: result.projectManifest.treeHash,
           ingestedAt: result.ingestedAt,
@@ -168,8 +186,22 @@ export class TemporalCodeGraph {
     projectId: string,
     limit: number = 100
   ): Promise<GitCommit[]> {
+    if (!projectId || projectId.trim() === "") {
+      throw new Error("queryCommitHistory: projectId is required and must not be empty");
+    }
+
     const session = this.neo4j.getSession();
     try {
+      // Check that the project exists before running the main query
+      const projectCheck = await session.run(
+        "MATCH (p:Project { projectId: $projectId }) RETURN p.name AS name",
+        { projectId }
+      );
+      if (projectCheck.records.length === 0) {
+        log.warn("queryCommitHistory: project not found in graph", { projectId });
+        return [];
+      }
+
       const result = await session.run(
         `
         MATCH (p:Project { projectId: $projectId })-[:HAS_COMMIT]->(c:Commit)
@@ -215,6 +247,10 @@ export class TemporalCodeGraph {
     projectId: string,
     filePath: string
   ): Promise<Array<{ commitHash: string; changeType: string; date: string }>> {
+    if (!projectId || projectId.trim() === "") {
+      throw new Error("queryFileHistory: projectId is required and must not be empty");
+    }
+
     const session = this.neo4j.getSession();
     try {
       const fileId = this.computeFileId(filePath);
@@ -272,12 +308,17 @@ export class TemporalCodeGraph {
     try {
       const { projectId, limit = 100, sortBy = "lastIngestedAt" } = options;
 
+      // Validate sortBy to prevent Cypher injection via interpolation
+      if (!TemporalCodeGraph.ALLOWED_SORT_VALUES.has(sortBy)) {
+        throw new Error(`Invalid sortBy value: expected one of ${[...TemporalCodeGraph.ALLOWED_SORT_VALUES].join(", ")}`);
+      }
+
       // Build WHERE clause for optional projectId filter
       const whereClause = projectId
         ? "WHERE p.projectId = $projectId"
         : "";
 
-      // Build ORDER BY clause
+      // Build ORDER BY clause (sortBy validated above)
       const orderByClause =
         sortBy === "lastIngestedAt"
           ? "ORDER BY p.lastIngestedAt DESC"
@@ -353,7 +394,15 @@ export class TemporalCodeGraph {
   ): Promise<void> {
     for (let i = 0; i < items.length; i += TemporalCodeGraph.BATCH_SIZE) {
       const batch = items.slice(i, i + TemporalCodeGraph.BATCH_SIZE);
-      await session.run(cypher, buildParams(batch));
+      try {
+        await session.run(cypher, buildParams(batch));
+      } catch (error) {
+        const batchIndex = Math.floor(i / TemporalCodeGraph.BATCH_SIZE);
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `Neo4j batch ${batchIndex} failed (items ${i}-${i + batch.length - 1} of ${items.length}): ${message}`
+        );
+      }
     }
   }
 
@@ -624,5 +673,27 @@ export class TemporalCodeGraph {
     hash.update("\n");
     hash.update(String(hunk.newLines));
     return hash.digest("hex");
+  }
+
+  /**
+   * Ensure Neo4j constraints exist for Project nodes.
+   * Idempotent: safe to call multiple times.
+   */
+  async ensureConstraints(): Promise<void> {
+    const session = this.neo4j.getSession();
+    try {
+      // Uniqueness constraint (Community Edition compatible)
+      // Also prevents null since unique index requires non-null values
+      await session.run(
+        "CREATE CONSTRAINT project_id_unique IF NOT EXISTS FOR (p:Project) REQUIRE p.projectId IS UNIQUE"
+      );
+      log.info("Neo4j constraints ensured");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("Failed to ensure Neo4j constraints", { error: message });
+      throw new Error(`Failed to ensure Neo4j constraints: ${message}`);
+    } finally {
+      await session.close();
+    }
   }
 }

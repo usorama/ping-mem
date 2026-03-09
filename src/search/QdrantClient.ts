@@ -606,6 +606,13 @@ export class QdrantClientWrapper {
   }
 
   /**
+   * Get the collection name for this client instance.
+   */
+  getCollectionName(): string {
+    return this.config.collectionName;
+  }
+
+  /**
    * Initialize local fallback VectorIndex
    */
   private async initializeFallback(): Promise<void> {

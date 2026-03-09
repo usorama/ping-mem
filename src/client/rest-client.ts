@@ -32,6 +32,10 @@ import {
   ServerError,
 } from "./types.js";
 
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("RESTClient");
+
 // ============================================================================
 // REST Client Implementation
 // ============================================================================
@@ -294,8 +298,9 @@ export class RESTPingMemClient implements PingMemClient {
 
     try {
       errorData = await response.json() as RESTErrorResponse;
-    } catch {
-      // If parsing fails, use default error
+    } catch (parseError: unknown) {
+      const msg = parseError instanceof Error ? parseError.message : String(parseError);
+      log.debug("Failed to parse error response JSON", { status: response.status, error: msg });
     }
 
     const message = errorData?.message ?? response.statusText ?? "Unknown error";

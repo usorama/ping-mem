@@ -40,10 +40,10 @@ describe("ProjectScanner", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    test("same repo at different absolute paths produces same projectId", () => {
+    test("same repo at different absolute paths produces same projectId", async () => {
       // Scan from actual path
       const scanner = new ProjectScanner();
-      const result1 = scanner.scanProject(repoDir);
+      const result1 = await scanner.scanProject(repoDir);
 
       // Create a symlink to simulate a different mount path
       const altPath = path.join(tempDir, "alt-mount");
@@ -51,22 +51,22 @@ describe("ProjectScanner", () => {
 
       // Resolve the symlink to get the real path (simulates Docker remapping)
       // Both should resolve to the same git remote, producing the same projectId
-      const result2 = scanner.scanProject(fs.realpathSync(altPath));
+      const result2 = await scanner.scanProject(fs.realpathSync(altPath));
 
       expect(result1.manifest.projectId).toBe(result2.manifest.projectId);
     });
 
-    test("projectId is deterministic across multiple scans", () => {
+    test("projectId is deterministic across multiple scans", async () => {
       const scanner = new ProjectScanner();
-      const result1 = scanner.scanProject(repoDir);
-      const result2 = scanner.scanProject(repoDir);
+      const result1 = await scanner.scanProject(repoDir);
+      const result2 = await scanner.scanProject(repoDir);
 
       expect(result1.manifest.projectId).toBe(result2.manifest.projectId);
     });
 
-    test("projectId uses git remote URL, not filesystem path", () => {
+    test("projectId uses git remote URL, not filesystem path", async () => {
       const scanner = new ProjectScanner();
-      const result = scanner.scanProject(repoDir);
+      const result = await scanner.scanProject(repoDir);
 
       // The projectId should NOT contain the temp directory path hash
       // Verify by checking that two repos with the same remote produce the same ID
@@ -82,15 +82,15 @@ describe("ProjectScanner", () => {
       fs.writeFileSync(path.join(repoDir2, "index.ts"), "export const x = 1;\n");
       execSync("git add . && git commit -m 'init'", { cwd: repoDir2, stdio: "ignore" });
 
-      const result2 = scanner.scanProject(repoDir2);
+      const result2 = await scanner.scanProject(repoDir2);
 
       // Same remote + same relative path = same projectId
       expect(result.manifest.projectId).toBe(result2.manifest.projectId);
     });
 
-    test("different remotes produce different projectIds", () => {
+    test("different remotes produce different projectIds", async () => {
       const scanner = new ProjectScanner();
-      const result1 = scanner.scanProject(repoDir);
+      const result1 = await scanner.scanProject(repoDir);
 
       const repoDir2 = path.join(tempDir, "other-repo");
       fs.mkdirSync(repoDir2);
@@ -104,20 +104,20 @@ describe("ProjectScanner", () => {
       fs.writeFileSync(path.join(repoDir2, "index.ts"), "export const x = 1;\n");
       execSync("git add . && git commit -m 'init'", { cwd: repoDir2, stdio: "ignore" });
 
-      const result2 = scanner.scanProject(repoDir2);
+      const result2 = await scanner.scanProject(repoDir2);
 
       expect(result1.manifest.projectId).not.toBe(result2.manifest.projectId);
     });
 
-    test("subdirectories within same repo get unique projectIds", () => {
+    test("subdirectories within same repo get unique projectIds", async () => {
       // Create a subdirectory
       const subDir = path.join(repoDir, "packages", "sub-project");
       fs.mkdirSync(subDir, { recursive: true });
       fs.writeFileSync(path.join(subDir, "lib.ts"), "export const y = 2;\n");
 
       const scanner = new ProjectScanner();
-      const rootResult = scanner.scanProject(repoDir);
-      const subResult = scanner.scanProject(subDir);
+      const rootResult = await scanner.scanProject(repoDir);
+      const subResult = await scanner.scanProject(subDir);
 
       // Same repo but different relative paths = different projectIds
       expect(rootResult.manifest.projectId).not.toBe(subResult.manifest.projectId);
@@ -135,7 +135,7 @@ describe("ProjectScanner", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    test("ignores default directories like node_modules and .git", () => {
+    test("ignores default directories like node_modules and .git", async () => {
       fs.mkdirSync(path.join(tempDir, "node_modules"), { recursive: true });
       fs.writeFileSync(path.join(tempDir, "node_modules", "dep.js"), "module.exports = {};");
       fs.mkdirSync(path.join(tempDir, ".git"), { recursive: true });
@@ -143,7 +143,7 @@ describe("ProjectScanner", () => {
       fs.writeFileSync(path.join(tempDir, "index.ts"), "export const x = 1;");
 
       const scanner = new ProjectScanner();
-      const result = scanner.scanProject(tempDir);
+      const result = await scanner.scanProject(tempDir);
 
       const paths = result.manifest.files.map((f) => f.path);
       expect(paths).toContain("index.ts");
@@ -151,43 +151,43 @@ describe("ProjectScanner", () => {
       expect(paths.every((p) => !p.startsWith(".git/"))).toBe(true);
     });
 
-    test("treeHash is deterministic for same content", () => {
+    test("treeHash is deterministic for same content", async () => {
       fs.writeFileSync(path.join(tempDir, "a.ts"), "const a = 1;");
       fs.writeFileSync(path.join(tempDir, "b.ts"), "const b = 2;");
 
       const scanner = new ProjectScanner();
-      const result1 = scanner.scanProject(tempDir);
-      const result2 = scanner.scanProject(tempDir);
+      const result1 = await scanner.scanProject(tempDir);
+      const result2 = await scanner.scanProject(tempDir);
 
       expect(result1.manifest.treeHash).toBe(result2.manifest.treeHash);
     });
 
-    test("treeHash changes when file content changes", () => {
+    test("treeHash changes when file content changes", async () => {
       fs.writeFileSync(path.join(tempDir, "a.ts"), "const a = 1;");
 
       const scanner = new ProjectScanner();
-      const result1 = scanner.scanProject(tempDir);
+      const result1 = await scanner.scanProject(tempDir);
 
       fs.writeFileSync(path.join(tempDir, "a.ts"), "const a = 2;");
-      const result2 = scanner.scanProject(tempDir);
+      const result2 = await scanner.scanProject(tempDir);
 
       expect(result1.manifest.treeHash).not.toBe(result2.manifest.treeHash);
     });
 
-    test("hasChanges detects when treeHash differs from previous manifest", () => {
+    test("hasChanges detects when treeHash differs from previous manifest", async () => {
       fs.writeFileSync(path.join(tempDir, "a.ts"), "const a = 1;");
 
       const scanner = new ProjectScanner();
-      const result1 = scanner.scanProject(tempDir);
+      const result1 = await scanner.scanProject(tempDir);
       expect(result1.hasChanges).toBe(true);
 
       // Same content, pass previous manifest
-      const result2 = scanner.scanProject(tempDir, result1.manifest);
+      const result2 = await scanner.scanProject(tempDir, result1.manifest);
       expect(result2.hasChanges).toBe(false);
 
       // Change content
       fs.writeFileSync(path.join(tempDir, "a.ts"), "const a = 2;");
-      const result3 = scanner.scanProject(tempDir, result1.manifest);
+      const result3 = await scanner.scanProject(tempDir, result1.manifest);
       expect(result3.hasChanges).toBe(true);
     });
   });

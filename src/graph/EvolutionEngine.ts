@@ -12,6 +12,9 @@
 import type { TemporalStore, BiTemporalMeta } from "./TemporalStore.js";
 import type { GraphManager } from "./GraphManager.js";
 import type { Entity } from "../types/graph.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("EvolutionEngine");
 
 // ============================================================================
 // Configuration
@@ -596,16 +599,18 @@ export class EvolutionEngine {
                 });
               }
             }
-          } catch {
-            // Skip entities without history
+          } catch (error: unknown) {
+            const msg = error instanceof Error ? error.message : String(error);
+            log.debug("Skipping entity without history", { entityId: relatedId, error: msg });
           }
         }
 
         if (relatedChanges.length > 0) {
           change.relatedEntities = relatedChanges.slice(0, maxDepth * 10);
         }
-      } catch {
-        // Skip if unable to get related changes
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.warn("Unable to get related changes for entity", { entityId: change.entityId, error: msg });
       }
     }
   }

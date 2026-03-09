@@ -79,6 +79,14 @@ export class IngestionService {
   }
 
   /**
+   * Ensure Neo4j constraints are set up (idempotent).
+   * Should be called once at startup or before first ingestion.
+   */
+  async ensureConstraints(): Promise<void> {
+    await this.codeGraph.ensureConstraints();
+  }
+
+  /**
    * Ingest a project: scan, chunk, index graph + vectors.
    * Returns null if no changes detected (unless forceReingest=true).
    */
@@ -100,10 +108,35 @@ export class IngestionService {
     }
 
     // Persist to Neo4j
-    await this.codeGraph.persistIngestion(ingestionResult);
+    try {
+      await this.codeGraph.persistIngestion(ingestionResult);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("ingestProject: Neo4j persist failed", {
+        projectId: ingestionResult.projectId,
+        error: message,
+      });
+      throw new Error(
+        `Ingestion failed for project "${ingestionResult.projectId}": ` +
+        `Neo4j persist failed: ${message}`
+      );
+    }
 
     // Index vectors in Qdrant
-    await this.codeIndexer.indexIngestion(ingestionResult);
+    try {
+      await this.codeIndexer.indexIngestion(ingestionResult);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("ingestProject: Qdrant indexing failed after Neo4j persist succeeded", {
+        projectId: ingestionResult.projectId,
+        error: message,
+      });
+      throw new Error(
+        `Ingestion partially failed for project "${ingestionResult.projectId}": ` +
+        `Neo4j persist succeeded but Qdrant indexing failed. ` +
+        `Run force reingest to recover: ${message}`
+      );
+    }
 
     return {
       projectId: ingestionResult.projectId,
@@ -123,11 +156,10 @@ export class IngestionService {
    * Verify that the ingested manifest matches current project state.
    */
   async verifyProject(projectDir: string): Promise<VerifyProjectResult> {
-    const valid = this.orchestrator.verify(projectDir);
+    const valid = await this.orchestrator.verify(projectDir);
 
     // If valid, also extract current hashes for confirmation
-    const manifestStore = this.orchestrator["manifestStore"];
-    const manifest = manifestStore.load(projectDir);
+    const manifest = this.orchestrator.getManifest(projectDir);
 
     if (!manifest) {
       return {
@@ -157,6 +189,12 @@ export class IngestionService {
   async queryTimeline(
     options: QueryTimelineOptions
   ): Promise<TimelineEvent[]> {
+    if (!options.projectId) {
+      throw new Error("queryTimeline requires a projectId");
+    }
+
+    const limit = Math.max(1, Math.min(Math.floor(options.limit ?? 100), 10000));
+
     if (options.filePath) {
       // File-specific timeline
       const history = await this.codeGraph.queryFileHistory(
@@ -164,14 +202,17 @@ export class IngestionService {
         options.filePath
       );
 
+      // Fetch enough commits to cover all file history entries
+      // (file may have been modified in commits beyond the user's limit)
+      const commitFetchLimit = Math.min(Math.max(limit, history.length), 10000);
       const commits = await this.codeGraph.queryCommitHistory(
         options.projectId,
-        Math.floor(options.limit ?? 100)
+        commitFetchLimit
       );
 
       const commitMap = new Map(commits.map((c) => [c.hash, c]));
 
-      return history.map((h) => {
+      return history.slice(0, limit).map((h) => {
         const commit = commitMap.get(h.commitHash);
         return {
           commitHash: h.commitHash,
@@ -186,7 +227,7 @@ export class IngestionService {
       // Project-wide timeline
       const commits = await this.codeGraph.queryCommitHistory(
         options.projectId,
-        Math.floor(options.limit ?? 100)
+        limit
       );
 
       return commits.map((c) => ({
@@ -216,10 +257,30 @@ export class IngestionService {
 
   /**
    * Delete all indexed data for a project.
+   * Attempts both Neo4j and Qdrant deletion; reports partial failures.
    */
   async deleteProject(projectId: string): Promise<void> {
-    await this.codeGraph.deleteProject(projectId);
-    await this.codeIndexer.deleteProject(projectId);
+    const errors: string[] = [];
+
+    try {
+      await this.codeGraph.deleteProject(projectId);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("deleteProject: Neo4j deletion failed", { projectId, error: message });
+      errors.push(`Neo4j: ${message}`);
+    }
+
+    try {
+      await this.codeIndexer.deleteProject(projectId);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error("deleteProject: Qdrant deletion failed", { projectId, error: message });
+      errors.push(`Qdrant: ${message}`);
+    }
+
+    if (errors.length > 0) {
+      throw new Error(`Partial deletion failure for project "${projectId}": ${errors.join("; ")}`);
+    }
   }
 
   /**

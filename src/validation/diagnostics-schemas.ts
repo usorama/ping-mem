@@ -125,13 +125,7 @@ export type FindingInput = z.infer<typeof findingSchema>;
 export const diagnosticsIngestSchema = z
   .object({
     // Required fields
-    projectId: z
-      .string()
-      .min(1)
-      .max(500)
-      .regex(/^ping-mem-[a-zA-Z0-9]+$/, {
-        message: "projectId must start with 'ping-mem-'",
-      }),
+    projectId: z.string().min(1, "projectId is required").max(500),
     treeHash: sha256HashSchema,
     configHash: sha256HashSchema,
 

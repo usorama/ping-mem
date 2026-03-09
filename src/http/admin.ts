@@ -120,25 +120,71 @@ async function handleAdminApi(
       }
     }
 
-    const resolvedProjectId = projectId ?? resolveProjectId(projectDir ?? "", deps.adminStore);
+    let resolvedProjectId: string | null;
+    try {
+      if (projectId) {
+        resolvedProjectId = projectId;
+      } else if (projectDir) {
+        resolvedProjectId = await resolveProjectId(projectDir, deps.adminStore);
+      } else {
+        return respondJson(res, 400, { error: "Either projectDir or projectId is required" });
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      log.error("deleteProject: resolveProjectId failed", { error: message });
+      return respondJson(res, 400, { error: "Invalid project directory or project not found" });
+    }
+
     if (!resolvedProjectId) {
       return respondJson(res, 404, { error: "Project not found" });
     }
 
+    const warnings: string[] = [];
+
     if (deps.ingestionService) {
-      await deps.ingestionService.deleteProject(resolvedProjectId);
+      try {
+        await deps.ingestionService.deleteProject(resolvedProjectId);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.error("deleteProject: ingestion cleanup failed", { projectId: resolvedProjectId, error: msg });
+        warnings.push(msg);
+      }
     }
-    deps.diagnosticsStore.deleteProject(resolvedProjectId);
+    try {
+      deps.diagnosticsStore.deleteProject(resolvedProjectId);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("deleteProject: diagnostics cleanup failed", { projectId: resolvedProjectId, error: msg });
+      warnings.push(msg);
+    }
 
     if (projectDir) {
-      deleteProjectManifest(projectDir);
-      const sessionIds = deps.eventStore.findSessionIdsByProjectDir(projectDir);
-      deps.eventStore.deleteSessions(sessionIds);
+      try {
+        deleteProjectManifest(projectDir);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.error("deleteProject: manifest cleanup failed", { projectDir, error: msg });
+        warnings.push(msg);
+      }
+      try {
+        const sessionIds = deps.eventStore.findSessionIdsByProjectDir(projectDir);
+        deps.eventStore.deleteSessions(sessionIds);
+      } catch (error: unknown) {
+        const msg = error instanceof Error ? error.message : String(error);
+        log.error("deleteProject: session cleanup failed", { projectDir, error: msg });
+        warnings.push(msg);
+      }
     }
 
-    deps.adminStore.deleteProject(resolvedProjectId);
+    try {
+      deps.adminStore.deleteProject(resolvedProjectId);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      log.error("deleteProject: adminStore cleanup failed", { projectId: resolvedProjectId, error: msg });
+      warnings.push(msg);
+    }
 
-    return respondJson(res, 200, { data: { projectId: resolvedProjectId } });
+    return respondJson(res, 200, { data: { projectId: resolvedProjectId, warnings } });
   }
 
   if (req.method === "GET" && pathName === "/api/admin/keys") {
@@ -249,7 +295,7 @@ function respondJson(res: ServerResponse, status: number, payload: unknown): voi
   res.end(JSON.stringify(payload));
 }
 
-function resolveProjectId(projectDir: string, adminStore: AdminStore): string | null {
+async function resolveProjectId(projectDir: string, adminStore: AdminStore): Promise<string | null> {
   const normalized = path.resolve(projectDir);
   const record = adminStore.findProjectByDir(normalized);
   if (record) {
@@ -261,10 +307,12 @@ function resolveProjectId(projectDir: string, adminStore: AdminStore): string | 
   }
   try {
     const scanner = new ProjectScanner();
-    const scan = scanner.scanProject(normalized);
+    const scan = await scanner.scanProject(normalized);
     return scan.manifest.projectId;
-  } catch {
-    return null;
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    log.error("resolveProjectId: scan failed", { projectDir: normalized, error: message });
+    throw new Error("Failed to scan project directory");
   }
 }
 
