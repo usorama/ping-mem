@@ -124,7 +124,66 @@ describe("ProjectScanner", () => {
     });
   });
 
-  describe("file scanning", () => {
+  describe("git ls-files mode", () => {
+    let tempDir2: string;
+    let repoDir: string;
+
+    beforeEach(() => {
+      tempDir2 = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'scanner-git-')));
+      repoDir = path.join(tempDir2, 'repo');
+      fs.mkdirSync(repoDir);
+      execSync('git init', { cwd: repoDir, stdio: 'ignore' });
+      execSync('git config user.email "t@t.com"', { cwd: repoDir, stdio: 'ignore' });
+      execSync('git config user.name "T"', { cwd: repoDir, stdio: 'ignore' });
+    });
+
+    afterEach(() => {
+      fs.rmSync(tempDir2, { recursive: true, force: true });
+    });
+
+    test('uses git ls-files: includes tracked, excludes untracked', async () => {
+      fs.writeFileSync(path.join(repoDir, 'tracked.ts'), 'export const a = 1;');
+      fs.writeFileSync(path.join(repoDir, 'untracked.ts'), 'export const b = 2;');
+      execSync('git add tracked.ts && git commit -m init', { cwd: repoDir, stdio: 'ignore', shell: true });
+
+      const scanner = new ProjectScanner({ useGitLsFiles: true });
+      const result = await scanner.scanProject(repoDir);
+      const paths = result.manifest.files.map((f) => f.path);
+      expect(paths).toContain('tracked.ts');
+      expect(paths).not.toContain('untracked.ts');
+    });
+
+    test('includeExtensions is honored in git ls-files path', async () => {
+      fs.writeFileSync(path.join(repoDir, 'a.ts'), 'export const a = 1;');
+      fs.writeFileSync(path.join(repoDir, 'b.js'), 'const b = 2;');
+      execSync('git add . && git commit -m init', { cwd: repoDir, stdio: 'ignore', shell: true });
+
+      const scanner = new ProjectScanner({ useGitLsFiles: true, includeExtensions: new Set(['.ts']) });
+      const result = await scanner.scanProject(repoDir);
+      const paths = result.manifest.files.map((f) => f.path);
+      expect(paths).toContain('a.ts');
+      expect(paths).not.toContain('b.js');
+    });
+
+    test('falls back to walkDirectory when useGitLsFiles=false', async () => {
+      fs.writeFileSync(path.join(repoDir, 'a.ts'), 'export const a = 1;');
+      // NOT committed — walkDirectory will still find it
+      const scanner = new ProjectScanner({ useGitLsFiles: false });
+      const result = await scanner.scanProject(repoDir);
+      expect(result.manifest.files.map((f) => f.path)).toContain('a.ts');
+    });
+
+    test('falls back to walkDirectory when not in a git repo', async () => {
+      const nonGitDir = path.join(tempDir2, 'no-git');
+      fs.mkdirSync(nonGitDir);
+      fs.writeFileSync(path.join(nonGitDir, 'a.ts'), 'export const a = 1;');
+      const scanner = new ProjectScanner({ useGitLsFiles: true });
+      const result = await scanner.scanProject(nonGitDir);
+      expect(result.manifest.files.map((f) => f.path)).toContain('a.ts');
+    });
+  });
+
+      describe("file scanning", () => {
     let tempDir: string;
 
     beforeEach(() => {

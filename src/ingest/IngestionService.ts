@@ -102,6 +102,9 @@ export class IngestionService {
       ingestOptions.maxCommits = options.maxCommits;
     }
     ingestOptions.maxCommitAgeDays = options.maxCommitAgeDays ?? 30;
+    if (options.maxCommitAgeDays === undefined) {
+      log.info("maxCommitAgeDays not specified — defaulting to 30 days (older commits will not be ingested)");
+    }
 
     const ingestionResult = await this.orchestrator.ingest(options.projectDir, ingestOptions);
 

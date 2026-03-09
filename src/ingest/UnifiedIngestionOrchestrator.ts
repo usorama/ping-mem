@@ -14,6 +14,8 @@ import { CodeChunker } from "./CodeChunker.js";
 import { GitHistoryReader } from "./GitHistoryReader.js";
 import { DocumentParser, type DocumentEntity } from "./DocumentParser.js";
 import type { ProjectManifest } from "./types.js";
+import * as fs from "fs";
+import * as crypto from "crypto";
 import * as path from "path";
 
 export type ProjectType = "code" | "documents" | "mixed";
@@ -182,11 +184,11 @@ export class UnifiedIngestionOrchestrator {
 
     for (const entry of fileEntries) {
       const fullPath = path.join(projectRoot, entry.path);
-      const content = require("fs").readFileSync(fullPath, "utf-8");
+      const content = fs.readFileSync(fullPath, "utf-8");
       const rawChunks = this.codeChunker.chunkFile(entry.path, content);
 
       const chunks = rawChunks.map((chunk) => {
-        const hash = require("crypto").createHash("sha256");
+        const hash = crypto.createHash("sha256");
         hash.update(entry.path);
         hash.update("\n");
         hash.update(entry.sha256);

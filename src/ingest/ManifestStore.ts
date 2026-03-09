@@ -16,7 +16,12 @@ export class ManifestStore {
       return null;
     }
     const data = fs.readFileSync(manifestPath, "utf-8");
-    return JSON.parse(data) as ProjectManifest;
+    try {
+      return JSON.parse(data) as ProjectManifest;
+    } catch {
+      // Corrupt manifest — treat as absent and allow re-ingestion
+      return null;
+    }
   }
 
   save(projectDir: string, manifest: ProjectManifest): void {

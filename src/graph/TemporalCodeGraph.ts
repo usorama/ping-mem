@@ -593,10 +593,16 @@ export class TemporalCodeGraph {
   private async persistParentsBatch(
     commits: GitCommit[]
   ): Promise<void> {
+    // Build set of ingested commit hashes so we never create bare orphan Commit nodes
+    // for parent hashes that fall outside the ingestion window (e.g., due to maxCommitAgeDays).
+    const ingestedHashes = new Set(commits.map((c) => c.hash));
+
     const parentItems: Array<{ hash: string; parentHash: string }> = [];
     for (const commit of commits) {
       for (const parentHash of commit.parentHashes) {
-        parentItems.push({ hash: commit.hash, parentHash });
+        if (ingestedHashes.has(parentHash)) {
+          parentItems.push({ hash: commit.hash, parentHash });
+        }
       }
     }
 
@@ -606,7 +612,7 @@ export class TemporalCodeGraph {
       `
       UNWIND $items AS item
       MATCH (c:Commit { hash: item.hash })
-      MERGE (parent:Commit { hash: item.parentHash })
+      MATCH (parent:Commit { hash: item.parentHash })
       MERGE (c)-[:PARENT]->(parent)
       `,
       (batch) => ({ items: batch }),

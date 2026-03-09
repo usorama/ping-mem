@@ -100,7 +100,12 @@ export class ProjectScanner {
       if (gitFiles !== null) {
         log.info(`Using git ls-files: ${gitFiles.length} tracked files`);
         return gitFiles
-          .filter(f => !this.excludeExtensions.has(path.extname(f).toLowerCase()))
+          .filter(f => {
+            const ext = path.extname(f).toLowerCase();
+            if (this.excludeExtensions.has(ext)) return false;
+            if (this.includeExtensions && !this.includeExtensions.has(ext)) return false;
+            return true;
+          })
           .map(f => path.join(rootPath, f))
           .sort();
       }
