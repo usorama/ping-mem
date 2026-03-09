@@ -289,34 +289,19 @@ export class RESTPingMemServer {
         }
       }
 
+      // Lightweight liveness check — only pings SQLite (core dependency).
+      // Full dependency probing is at /api/v1/observability/status.
       try {
-        const snapshot = await probeSystemHealth({
-          eventStore: this.eventStore,
-          ...(this.graphManager ? { graphManager: this.graphManager } : {}),
-          ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
-          diagnosticsStore: this.diagnosticsStore,
-          skipIntegrityCheck: true,
+        this.eventStore.getDatabase().prepare("SELECT 1").get();
+        return c.json({
+          status: "ok",
+          timestamp: new Date().toISOString(),
         });
-
-        // Sanitize error messages before sending to client
-        const sanitized = {
-          status: snapshot.status,
-          timestamp: snapshot.timestamp,
-          components: Object.fromEntries(
-            Object.entries(snapshot.components).map(([key, comp]) => [
-              key,
-              comp.error ? { ...comp, error: sanitizeHealthError(comp.error) } : comp,
-            ])
-          ),
-        };
-
-        const httpStatus = snapshot.status === "unhealthy" ? 503 : 200;
-        return c.json(sanitized, httpStatus as 200);
       } catch (error) {
-        log.error("Health probe failed", {
+        log.error("Health check failed — SQLite unreachable", {
           error: error instanceof Error ? error.message : String(error),
         });
-        return c.json({ status: "unhealthy", error: "Health probe failed" }, 503);
+        return c.json({ status: "unhealthy", error: "SQLite unreachable" }, 503);
       }
     });
 

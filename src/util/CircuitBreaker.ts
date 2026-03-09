@@ -8,6 +8,9 @@ import {
   timeout,
   wrap,
 } from "cockatiel";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("CircuitBreaker");
 
 export type ServiceState = "closed" | "open" | "half-open";
 
@@ -66,8 +69,11 @@ export function createServicePolicy(opts: {
     for (const handler of handlers) {
       try {
         handler(state);
-      } catch (_) {
-        // Handler errors must not break other handlers or circuit breaker internals
+      } catch (handlerError) {
+        log.warn(`State-change handler threw [${opts.name}]`, {
+          state,
+          error: handlerError instanceof Error ? handlerError.message : String(handlerError),
+        });
       }
     }
   };

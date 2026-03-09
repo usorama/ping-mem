@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import * as fs from "fs";
 import * as path from "path";
 
+import { createLogger } from "../util/logger.js";
 import { AdminStore, type LLMConfigInput } from "../admin/AdminStore.js";
 import { ApiKeyManager } from "../admin/ApiKeyManager.js";
 import { IngestionService } from "../ingest/IngestionService.js";
@@ -28,6 +29,8 @@ export interface AdminDependencies {
   diagnosticsStore: DiagnosticsStore;
   eventStore: EventStore;
 }
+
+const log = createLogger("Admin");
 
 const ADMIN_USER_ENV = "PING_MEM_ADMIN_USER";
 const ADMIN_PASS_ENV = "PING_MEM_ADMIN_PASS";
@@ -64,7 +67,14 @@ export async function handleAdminRequest(
       return true;
     }
     const html = renderAdminPage();
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+    });
     res.end(html);
     return true;
   }
@@ -188,7 +198,10 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
   }
 
   const decoded = Buffer.from(encoded, "base64").toString("utf8");
-  const [user, pass] = decoded.split(":");
+  // RFC 7617: password may contain colons — split only on first colon
+  const colonIndex = decoded.indexOf(":");
+  const user = colonIndex === -1 ? decoded : decoded.substring(0, colonIndex);
+  const pass = colonIndex === -1 ? "" : decoded.substring(colonIndex + 1);
 
   // Use timing-safe comparison to prevent timing attacks
   // See: https://owasp.org/www-community/attacks/Timing_analysis
@@ -196,6 +209,7 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
   const passValid = timingSafeStringEqual(pass ?? "", adminPass);
 
   if (!userValid || !passValid) {
+    log.warn("Admin auth failed — invalid credentials", { ip: (req.socket?.remoteAddress) ?? "unknown" });
     res.writeHead(401, { "WWW-Authenticate": "Basic" });
     res.end("Unauthorized");
     return false;
@@ -219,7 +233,10 @@ function requireApiKey(
 }
 
 function respondJson(res: ServerResponse, status: number, payload: unknown): void {
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "X-Content-Type-Options": "nosniff",
+  });
   res.end(JSON.stringify(payload));
 }
 
@@ -243,11 +260,17 @@ function resolveProjectId(projectDir: string, adminStore: AdminStore): string | 
 }
 
 function deleteProjectManifest(projectDir: string): void {
-  const manifestPath = path.join(projectDir, ".ping-mem", "manifest.json");
+  // Prevent path traversal attacks
+  const segments = projectDir.split(/[\\/]/);
+  if (segments.includes("..")) {
+    throw new Error("projectDir must not contain path traversal sequences");
+  }
+  const resolved = path.resolve(projectDir);
+  const manifestPath = path.join(resolved, ".ping-mem", "manifest.json");
   if (fs.existsSync(manifestPath)) {
     fs.unlinkSync(manifestPath);
   }
-  const manifestDir = path.join(projectDir, ".ping-mem");
+  const manifestDir = path.join(resolved, ".ping-mem");
   if (fs.existsSync(manifestDir)) {
     const remaining = fs.readdirSync(manifestDir);
     if (remaining.length === 0) {

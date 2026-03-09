@@ -16,6 +16,9 @@ import type {
 import { RelationshipType } from "../../types/index.js";
 import type { SearchWeights } from "../../search/HybridSearchEngine.js";
 import { probeSystemHealth, sanitizeHealthError } from "../../observability/health-probes.js";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("GraphToolModule");
 
 // ============================================================================
 // Tool Schemas
@@ -466,6 +469,9 @@ export class GraphToolModule implements ToolModule {
 
       return health;
     } catch (error) {
+      log.error("Health probe failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return {
         status: "unhealthy",
         timestamp: new Date().toISOString(),

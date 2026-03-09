@@ -87,6 +87,8 @@ export class HealthMonitor {
   private fastTimer: ReturnType<typeof setInterval> | null = null;
   private qualityTimer: ReturnType<typeof setInterval> | null = null;
   private stopping = false;
+  private tickRunning = false;
+  private qualityTickRunning = false;
   private consecutiveTickFailures = 0;
   private lastAlerts = new Map<string, number>();
   private activeAlerts = new Map<string, HealthAlert>();
@@ -108,11 +110,15 @@ export class HealthMonitor {
     this.consecutiveTickFailures = 0;
 
     this.fastTimer = setInterval(() => {
-      void this.tick();
+      this.tick().catch((err) => {
+        log.error("Fast tick threw unexpectedly", { error: err instanceof Error ? err.message : String(err) });
+      });
     }, 60_000);
 
     this.qualityTimer = setInterval(() => {
-      void this.qualityTick();
+      this.qualityTick().catch((err) => {
+        log.error("Quality tick threw unexpectedly", { error: err instanceof Error ? err.message : String(err) });
+      });
     }, 300_000);
 
     this.tick().catch((err) => {
@@ -149,142 +155,168 @@ export class HealthMonitor {
   }
 
   private async tick(): Promise<void> {
-    if (this.stopping) return;
+    if (this.stopping || this.tickRunning) return;
+    this.tickRunning = true;
 
     try {
-      const snapshot = await probeSystemHealth({
-        eventStore: this.deps.eventStore,
-        ...(this.deps.services.graphManager ? { graphManager: this.deps.services.graphManager } : {}),
-        ...(this.deps.services.qdrantClient ? { qdrantClient: this.deps.services.qdrantClient } : {}),
-        ...(this.deps.diagnosticsStore ? { diagnosticsStore: this.deps.diagnosticsStore } : {}),
-        skipIntegrityCheck: true,
-      });
-      this.lastSnapshot = snapshot;
-      this.lastFastTickAt = new Date().toISOString();
-      this.consecutiveTickFailures = 0;
-      this.activeAlerts.delete("monitor:tick_failure");
-
-      const sqliteMetrics = snapshot.components.sqlite.metrics;
-      if (sqliteMetrics) {
-        this.checkThresholds({
-          source: "sqlite",
-          status: this.componentToProbeStatus(snapshot.components.sqlite.status),
-          metrics: [
-            { name: "wal_size_bytes", value: sqliteMetrics.wal_size_bytes ?? 0, unit: "bytes" },
-            { name: "freelist_ratio", value: sqliteMetrics.freelist_ratio ?? 0, unit: "ratio" },
-            { name: "integrity_ok", value: sqliteMetrics.integrity_ok ?? 0, unit: "boolean" },
-          ],
+      try {
+        const snapshot = await probeSystemHealth({
+          eventStore: this.deps.eventStore,
+          ...(this.deps.services.graphManager ? { graphManager: this.deps.services.graphManager } : {}),
+          ...(this.deps.services.qdrantClient ? { qdrantClient: this.deps.services.qdrantClient } : {}),
+          ...(this.deps.diagnosticsStore ? { diagnosticsStore: this.deps.diagnosticsStore } : {}),
+          skipIntegrityCheck: true,
         });
-      }
-    } catch (error) {
-      this.consecutiveTickFailures++;
-      log.error("Fast tick probe failed", {
-        error: error instanceof Error ? error.message : String(error),
-        consecutiveFailures: this.consecutiveTickFailures,
-      });
-      if (this.consecutiveTickFailures >= 3) {
-        this.alert("critical", "monitor:tick_failure", "sqlite",
-          `Health monitoring degraded: ${this.consecutiveTickFailures} consecutive probe failures`);
-      }
-    }
+        this.lastSnapshot = snapshot;
+        this.lastFastTickAt = new Date().toISOString();
+        this.consecutiveTickFailures = 0;
+        this.activeAlerts.delete("monitor:tick_failure");
 
-    if (this.stopping) return;
+        const sqliteMetrics = snapshot.components.sqlite.metrics;
+        if (sqliteMetrics) {
+          this.checkThresholds({
+            source: "sqlite",
+            status: this.componentToProbeStatus(snapshot.components.sqlite.status),
+            metrics: [
+              { name: "wal_size_bytes", value: sqliteMetrics.wal_size_bytes ?? 0, unit: "bytes" },
+              { name: "freelist_ratio", value: sqliteMetrics.freelist_ratio ?? 0, unit: "ratio" },
+              { name: "integrity_ok", value: sqliteMetrics.integrity_ok ?? 0, unit: "boolean" },
+            ],
+          });
+        }
 
-    // WAL checkpoint in separate try-catch so probe data is preserved even if checkpoint fails
-    try {
-      const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
-      if (walSize > 50_000_000) {
-        this.deps.eventStore.getDatabase().exec("PRAGMA wal_checkpoint(TRUNCATE)");
-        log.info("SQLite WAL checkpoint completed", { walSizeBytes: walSize });
+        // Alert on service-down states (Neo4j/Qdrant unhealthy in snapshot)
+        if (snapshot.components.neo4j.configured && snapshot.components.neo4j.status === "unhealthy") {
+          this.alert("warning", "neo4j:service_down", "neo4j", "Neo4j is unreachable");
+        } else {
+          this.activeAlerts.delete("neo4j:service_down");
+          this.lastAlerts.delete("neo4j:service_down");
+        }
+        if (snapshot.components.qdrant.configured && snapshot.components.qdrant.status === "unhealthy") {
+          this.alert("warning", "qdrant:service_down", "qdrant", "Qdrant is unreachable");
+        } else {
+          this.activeAlerts.delete("qdrant:service_down");
+          this.lastAlerts.delete("qdrant:service_down");
+        }
+      } catch (error) {
+        this.consecutiveTickFailures++;
+        log.error("Fast tick probe failed", {
+          error: error instanceof Error ? error.message : String(error),
+          consecutiveFailures: this.consecutiveTickFailures,
+        });
+        if (this.consecutiveTickFailures >= 3) {
+          this.alert("critical", "monitor:tick_failure", "sqlite",
+            `Health monitoring degraded: ${this.consecutiveTickFailures} consecutive probe failures`);
+        }
       }
-    } catch (error) {
-      const lastWalSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
-      log.error("WAL checkpoint failed — WAL may grow unbounded", {
-        error: error instanceof Error ? error.message : String(error),
-        walSizeBytes: lastWalSize,
-      });
-      this.alert("warning", "sqlite:wal_checkpoint_failed", "sqlite",
-        `WAL checkpoint failed at ${lastWalSize} bytes`);
+
+      if (this.stopping) return;
+
+      // WAL checkpoint in separate try-catch so probe data is preserved even if checkpoint fails
+      try {
+        const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
+        if (walSize > 50_000_000) {
+          this.deps.eventStore.getDatabase().exec("PRAGMA wal_checkpoint(TRUNCATE)");
+          log.info("SQLite WAL checkpoint completed", { walSizeBytes: walSize });
+        }
+      } catch (error) {
+        const lastWalSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
+        log.error("WAL checkpoint failed — WAL may grow unbounded", {
+          error: error instanceof Error ? error.message : String(error),
+          walSizeBytes: lastWalSize,
+        });
+        this.alert("warning", "sqlite:wal_checkpoint_failed", "sqlite",
+          `WAL checkpoint failed at ${lastWalSize} bytes`);
+      }
+    } finally {
+      this.tickRunning = false;
     }
   }
 
   private async qualityTick(): Promise<void> {
-    if (this.stopping) return;
+    if (this.stopping || this.qualityTickRunning) return;
+    this.qualityTickRunning = true;
 
-    let probeSucceeded = false;
-
-    // SQLite integrity check (expensive — only runs in quality tick, not fast tick)
     try {
-      const integrityOk = getIntegrityOk(this.deps.eventStore);
-      this.checkThresholds({
-        source: "sqlite",
-        status: integrityOk === 1 ? "healthy" : "unhealthy",
-        metrics: [{ name: "integrity_ok", value: integrityOk, unit: "boolean" }],
-      });
-      probeSucceeded = true;
-    } catch (error) {
-      log.warn("SQLite integrity check failed", { error: error instanceof Error ? error.message : String(error) });
-    }
+      let probeSucceeded = false;
 
-    if (this.stopping) return;
-
-    if (this.deps.services.neo4jClient && this.deps.services.neo4jClient.isConnected()) {
+      // SQLite integrity check (expensive — only runs in quality tick, not fast tick)
       try {
-        const nullRows = await this.deps.services.neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.nullProperties);
-        const nullNodeCount = nullRows.reduce((sum, row) => sum + Number(row.cnt), 0);
-
-        const orphanRows = await this.deps.services.neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.orphanNodes);
-        const orphanNodeCount = Number(orphanRows[0]?.cnt ?? 0);
-
+        const integrityOk = getIntegrityOk(this.deps.eventStore);
         this.checkThresholds({
-          source: "neo4j",
-          status: "healthy",
-          metrics: [
-            { name: "null_node_count", value: nullNodeCount, unit: "count" },
-            { name: "orphan_node_count", value: orphanNodeCount, unit: "count" },
-          ],
+          source: "sqlite",
+          status: integrityOk === 1 ? "healthy" : "unhealthy",
+          metrics: [{ name: "integrity_ok", value: integrityOk, unit: "boolean" }],
         });
         probeSucceeded = true;
       } catch (error) {
-        log.warn("Neo4j quality tick failed", { error: error instanceof Error ? error.message : String(error) });
-        this.alert("warning", "neo4j:quality_probe_failed", "neo4j",
-          `Quality probe failed: ${error instanceof Error ? error.message : "unknown"}`);
+        log.warn("SQLite integrity check failed", { error: error instanceof Error ? error.message : String(error) });
+        this.alert("critical", "sqlite:integrity_check_failed", "sqlite",
+          `SQLite integrity check failed: ${error instanceof Error ? error.message : "unknown"}`);
       }
-    }
 
-    if (this.stopping) return;
+      if (this.stopping) return;
 
-    if (this.deps.services.qdrantClient && this.deps.services.qdrantClient.isConnected()) {
-      try {
-        const stats = await this.deps.services.qdrantClient.getStats();
-        const pointCount = stats.totalVectors;
+      if (this.deps.services.neo4jClient && this.deps.services.neo4jClient.isConnected()) {
+        try {
+          const nullRows = await this.deps.services.neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.nullProperties);
+          const nullNodeCount = nullRows.reduce((sum, row) => sum + Number(row.cnt), 0);
 
-        if (this.baselineQdrantCount === null) {
-          this.baselineQdrantCount = pointCount;
+          const orphanRows = await this.deps.services.neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.orphanNodes);
+          const orphanNodeCount = Number(orphanRows[0]?.cnt ?? 0);
+
+          this.checkThresholds({
+            source: "neo4j",
+            status: "healthy",
+            metrics: [
+              { name: "null_node_count", value: nullNodeCount, unit: "count" },
+              { name: "orphan_node_count", value: orphanNodeCount, unit: "count" },
+            ],
+          });
+          probeSucceeded = true;
+        } catch (error) {
+          log.warn("Neo4j quality tick failed", { error: error instanceof Error ? error.message : String(error) });
+          this.alert("warning", "neo4j:quality_probe_failed", "neo4j",
+            `Quality probe failed: ${error instanceof Error ? error.message : "unknown"}`);
         }
-
-        const baseline = this.baselineQdrantCount === 0 ? 1 : this.baselineQdrantCount;
-        const driftPct = Math.abs(pointCount - this.baselineQdrantCount) / baseline * 100;
-
-        // Update baseline when drift is within acceptable range to track normal growth
-        if (driftPct <= 5) {
-          this.baselineQdrantCount = pointCount;
-        }
-        this.checkThresholds({
-          source: "qdrant",
-          status: "healthy",
-          metrics: [{ name: "point_count_drift_pct", value: driftPct, unit: "ratio" }],
-        });
-        probeSucceeded = true;
-      } catch (error) {
-        log.warn("Qdrant quality tick failed", { error: error instanceof Error ? error.message : String(error) });
-        this.alert("warning", "qdrant:quality_probe_failed", "qdrant",
-          `Quality probe failed: ${error instanceof Error ? error.message : "unknown"}`);
       }
-    }
 
-    if (probeSucceeded) {
-      this.lastQualityTickAt = new Date().toISOString();
+      if (this.stopping) return;
+
+      if (this.deps.services.qdrantClient && this.deps.services.qdrantClient.isConnected()) {
+        try {
+          const stats = await this.deps.services.qdrantClient.getStats();
+          const pointCount = stats.totalVectors;
+
+          if (this.baselineQdrantCount === null) {
+            this.baselineQdrantCount = pointCount;
+          }
+
+          const baseline = this.baselineQdrantCount === 0 ? 1 : this.baselineQdrantCount;
+          const driftPct = Math.abs(pointCount - this.baselineQdrantCount) / baseline * 100;
+
+          // Update baseline when drift is within acceptable range to track normal growth
+          if (driftPct <= 5) {
+            this.baselineQdrantCount = pointCount;
+          }
+          this.checkThresholds({
+            source: "qdrant",
+            status: "healthy",
+            metrics: [{ name: "point_count_drift_pct", value: driftPct, unit: "ratio" }],
+          });
+          probeSucceeded = true;
+        } catch (error) {
+          log.warn("Qdrant quality tick failed", { error: error instanceof Error ? error.message : String(error) });
+          this.alert("warning", "qdrant:quality_probe_failed", "qdrant",
+            `Quality probe failed: ${error instanceof Error ? error.message : "unknown"}`);
+        }
+      }
+
+      if (probeSucceeded) {
+        this.lastQualityTickAt = new Date().toISOString();
+      }
+    } finally {
+      this.qualityTickRunning = false;
     }
   }
 

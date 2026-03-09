@@ -160,6 +160,9 @@ export async function startHTTPServer(): Promise<void> {
 
   // Handle graceful shutdown
   let shuttingDown = false;
+  const isCrashSignal = (signal: string) =>
+    signal === "uncaughtException" || signal === "unhandledRejection";
+
   const shutdown = async (signal: string) => {
     if (shuttingDown) {
       return;
@@ -198,7 +201,8 @@ export async function startHTTPServer(): Promise<void> {
       process.exit(1);
     }
     log.info("Shutdown complete");
-    process.exit(0);
+    // Crash signals (uncaughtException, unhandledRejection) must exit non-zero
+    process.exit(isCrashSignal(signal) ? 1 : 0);
   };
 
   process.on("SIGINT", () => {
