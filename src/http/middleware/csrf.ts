@@ -37,7 +37,9 @@ export function csrfProtection() {
       // Set CSRF token cookie on safe methods
       const token = generateCsrfToken();
       c.set("csrfToken", token);
-      c.header("Set-Cookie", `${CSRF_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Secure`);
+      // Double-submit CSRF pattern: cookie must be JS-readable (no HttpOnly) so client
+      // can read it and include it in the X-CSRF-Token request header for validation.
+      c.header("Set-Cookie", `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict; Secure`);
       return next();
     }
 

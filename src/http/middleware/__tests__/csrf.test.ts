@@ -57,12 +57,14 @@ describe("CSRF Middleware", () => {
       expect(csrfToken).toBeTruthy();
     });
 
-    test("should set HttpOnly and SameSite=Strict on CSRF cookie", async () => {
+    test("should set SameSite=Strict and Secure on CSRF cookie (no HttpOnly — double-submit pattern requires JS-readable cookie)", async () => {
       const app = createTestApp();
       const res = await app.request("/form");
       const setCookie = res.headers.get("set-cookie") ?? "";
-      expect(setCookie).toContain("HttpOnly");
+      // Double-submit CSRF: cookie must NOT be HttpOnly so JS can read and include it in X-CSRF-Token header
+      expect(setCookie).not.toContain("HttpOnly");
       expect(setCookie).toContain("SameSite=Strict");
+      expect(setCookie).toContain("Secure");
     });
   });
 

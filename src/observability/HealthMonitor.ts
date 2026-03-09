@@ -10,7 +10,7 @@ type ProbeSource = "sqlite" | "neo4j" | "qdrant";
 interface ProbeMetric {
   name: string;
   value: number;
-  unit: "bytes" | "count" | "ratio" | "boolean" | "ms";
+  unit: "bytes" | "count" | "ratio" | "percent" | "boolean" | "ms";
 }
 
 interface ProbeResult {
@@ -69,7 +69,7 @@ const QUALITY_QUERIES = {
     MATCH (n:Commit) WHERE n.sha IS NULL RETURN count(n) AS cnt
   `,
   orphanNodes: `
-    MATCH (n) WHERE NOT (n)-[]-() RETURN count(n) AS cnt
+    MATCH (n) WHERE (n:File OR n:Chunk OR n:Commit OR n:Project) AND NOT (n)-[]-() RETURN count(n) AS cnt
   `,
 };
 
@@ -216,7 +216,8 @@ export class HealthMonitor {
       try {
         const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
         if (walSize > 50_000_000) {
-          this.deps.eventStore.getDatabase().exec("PRAGMA wal_checkpoint(TRUNCATE)");
+          // PASSIVE mode never blocks writers (unlike TRUNCATE which waits for all readers)
+          this.deps.eventStore.getDatabase().exec("PRAGMA wal_checkpoint(PASSIVE)");
           log.info("SQLite WAL checkpoint completed", { walSizeBytes: walSize });
         }
       } catch (error) {
@@ -289,21 +290,22 @@ export class HealthMonitor {
           const pointCount = stats.totalVectors;
 
           if (this.baselineQdrantCount === null) {
+            // Skip drift check on first tick — just establish the baseline
             this.baselineQdrantCount = pointCount;
-          }
+          } else {
+            const baseline = this.baselineQdrantCount === 0 ? 1 : this.baselineQdrantCount;
+            const driftPct = Math.abs(pointCount - this.baselineQdrantCount) / baseline * 100;
 
-          const baseline = this.baselineQdrantCount === 0 ? 1 : this.baselineQdrantCount;
-          const driftPct = Math.abs(pointCount - this.baselineQdrantCount) / baseline * 100;
-
-          // Update baseline when drift is within acceptable range to track normal growth
-          if (driftPct <= 5) {
-            this.baselineQdrantCount = pointCount;
+            // Update baseline when drift is within acceptable range to track normal growth
+            if (driftPct <= 5) {
+              this.baselineQdrantCount = pointCount;
+            }
+            this.checkThresholds({
+              source: "qdrant",
+              status: "healthy",
+              metrics: [{ name: "point_count_drift_pct", value: driftPct, unit: "percent" }],
+            });
           }
-          this.checkThresholds({
-            source: "qdrant",
-            status: "healthy",
-            metrics: [{ name: "point_count_drift_pct", value: driftPct, unit: "ratio" }],
-          });
           probeSucceeded = true;
         } catch (error) {
           log.warn("Qdrant quality tick failed", { error: error instanceof Error ? error.message : String(error) });

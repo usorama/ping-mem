@@ -310,7 +310,7 @@ describe("HealthMonitor", () => {
       internals.activeAlerts.set(`test:alert_${i}`, {
         severity: "warning",
         key: `test:alert_${i}`,
-        component: "sqlite",
+        source: "sqlite",
         message: `Alert ${i}`,
         timestamp: new Date(Date.now() + i).toISOString(),
       });
@@ -328,7 +328,7 @@ describe("HealthMonitor", () => {
       metrics: [{ name: "integrity_ok", value: 0, unit: "boolean" }],
     });
 
-    // After eviction, should be at or below MAX_ALERTS + 1 (the new alert)
-    expect(internals.activeAlerts.size).toBeLessThanOrEqual(211);
+    // After eviction: one oldest removed (-1), one new alert added (+1) = stays at 210
+    expect(internals.activeAlerts.size).toBe(210);
   });
 });

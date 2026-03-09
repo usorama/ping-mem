@@ -9,7 +9,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeStringEqual } from "../util/auth-utils.js";
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { cors } from "hono/cors";
@@ -1626,15 +1626,7 @@ export class RESTPingMemServer {
     if (!apiKey || !this.config.apiKey) {
       return false;
     }
-    const expected = Buffer.from(this.config.apiKey);
-    const actual = Buffer.from(apiKey);
-    // Pad to same length to avoid leaking expected key length via timing
-    const maxLen = Math.max(expected.length, actual.length);
-    const paddedExpected = Buffer.alloc(maxLen);
-    const paddedActual = Buffer.alloc(maxLen);
-    expected.copy(paddedExpected);
-    actual.copy(paddedActual);
-    return timingSafeEqual(paddedExpected, paddedActual) && expected.length === actual.length;
+    return timingSafeStringEqual(apiKey, this.config.apiKey);
   }
 
   /**
