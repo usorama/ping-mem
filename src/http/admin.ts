@@ -111,6 +111,15 @@ async function handleAdminApi(
     }
 
     const { projectDir, projectId } = result.data;
+
+    // Guard against path traversal before any filesystem operation
+    if (projectDir) {
+      const segments = projectDir.split(/[\\/]/);
+      if (segments.includes("..")) {
+        return respondJson(res, 400, { error: "projectDir must not contain path traversal sequences" });
+      }
+    }
+
     const resolvedProjectId = projectId ?? resolveProjectId(projectDir ?? "", deps.adminStore);
     if (!resolvedProjectId) {
       return respondJson(res, 404, { error: "Project not found" });

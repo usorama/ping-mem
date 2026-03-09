@@ -8,7 +8,7 @@
 
 import { createMiddleware } from "hono/factory";
 import type { Context, Next } from "hono";
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeStringEqual } from "../../util/auth-utils.js";
 
 const CSRF_HEADER = "x-csrf-token";
 const CSRF_COOKIE = "csrf_token";
@@ -54,9 +54,7 @@ export function csrfProtection() {
       ? rawCookie.substring(`${CSRF_COOKIE}=`.length)
       : undefined;
 
-    if (!headerToken || !cookieToken
-      || headerToken.length !== cookieToken.length
-      || !timingSafeEqual(Buffer.from(headerToken), Buffer.from(cookieToken))) {
+    if (!headerToken || !cookieToken || !timingSafeStringEqual(headerToken, cookieToken)) {
       return c.json({ error: "Forbidden", message: "Invalid or missing CSRF token" }, 403);
     }
 
