@@ -69,14 +69,22 @@ export class SafeGit {
     return stdout;
   }
 
-  async getLog(limit: number = 100, format: string = "%H|%P|%an|%ae|%at|%s"): Promise<string> {
+  async getLog(limit: number = 100, format: string = "%H|%P|%an|%ae|%at|%s", since?: string): Promise<string> {
     // Validate format: only printable ASCII (prevents control char injection)
     if (/[^\x20-\x7E]/.test(format)) {
       throw new Error("SafeGit.getLog: format must contain only printable ASCII characters");
     }
     // Clamp limit to prevent excessive memory usage via maxBuffer
     const clampedLimit = Math.max(1, Math.min(Math.floor(limit), 10000));
-    const { stdout } = await this.run(["log", "--all", "--topo-order", `--format=${format}`, `-n${clampedLimit}`]);
+    const args = ["log", "--all", "--topo-order", `--format=${format}`, `-n${clampedLimit}`];
+    if (since) {
+      // Validate since: only allow safe date patterns (e.g. "30 days ago", "2024-01-01")
+      if (!/^\d+ days? ago$|^\d{4}-\d{2}-\d{2}$/.test(since)) {
+        throw new Error(`SafeGit.getLog: invalid since format: "${since}"`);
+      }
+      args.push(`--since=${since}`);
+    }
+    const { stdout } = await this.run(args);
     return stdout;
   }
 
@@ -109,6 +117,13 @@ export class SafeGit {
       log.error("getRemoteUrl unexpected error", { error: message });
       throw new Error(`SafeGit.getRemoteUrl failed: ${message}`);
     }
+  }
+
+  async lsFiles(): Promise<string[]> {
+    // Use -z for null-terminated output to avoid git quoting filenames
+    // with special characters (non-breaking spaces, etc.)
+    const { stdout } = await this.run(["ls-files", "--cached", "-z"]);
+    return stdout.split("\0").filter(Boolean);
   }
 
   async listFiles(commitHash: string): Promise<string[]> {

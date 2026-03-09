@@ -26,27 +26,52 @@ const DEFAULT_IGNORE_DIRS = new Set([
   ".idea",
 ]);
 
+const DEFAULT_EXCLUDE_EXTENSIONS = new Set([
+  // Images
+  ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp", ".ico", ".svg",
+  // Media
+  ".mp4", ".webm", ".mp3", ".wav", ".ogg",
+  // Documents (can't be chunked into code)
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+  // Archives
+  ".zip", ".tar", ".gz", ".bz2", ".7z", ".rar",
+  // Fonts
+  ".woff", ".woff2", ".ttf", ".eot", ".otf",
+  // Compiled
+  ".exe", ".dll", ".so", ".dylib", ".pyc", ".pyo", ".class",
+  // Database
+  ".db", ".sqlite", ".sqlite3",
+  // Lock files (large, not meaningful to chunk)
+  ".lock",
+]);
+
 const MANIFEST_SCHEMA_VERSION = 1;
 
 export interface ProjectScanOptions {
   ignoreDirs?: Set<string>;
   includeExtensions?: Set<string>;
+  excludeExtensions?: Set<string>;
+  useGitLsFiles?: boolean;
 }
 
 export class ProjectScanner {
   private readonly ignoreDirs: Set<string>;
   private readonly includeExtensions: Set<string> | null;
+  private readonly excludeExtensions: Set<string>;
+  private readonly useGitLsFiles: boolean;
 
   constructor(options: ProjectScanOptions = {}) {
     this.ignoreDirs = options.ignoreDirs ?? DEFAULT_IGNORE_DIRS;
     this.includeExtensions = options.includeExtensions ?? null;
+    this.excludeExtensions = options.excludeExtensions ?? DEFAULT_EXCLUDE_EXTENSIONS;
+    this.useGitLsFiles = options.useGitLsFiles ?? true;
   }
 
   async scanProject(projectDir: string, previousManifest?: ProjectManifest): Promise<ProjectScanResult> {
     // Resolve symlinks so path.relative works correctly with git rev-parse
     // (which always resolves symlinks). macOS: /var → /private/var.
     const rootPath = fs.realpathSync(path.resolve(projectDir));
-    const files = this.collectFiles(rootPath);
+    const files = await this.collectFiles(rootPath);
     const fileEntries = files.map((filePath) =>
       this.hashFile(rootPath, filePath)
     );
@@ -69,7 +94,37 @@ export class ProjectScanner {
     return { manifest, hasChanges };
   }
 
-  private collectFiles(rootPath: string): string[] {
+  private async collectFiles(rootPath: string): Promise<string[]> {
+    if (this.useGitLsFiles) {
+      const gitFiles = await this.tryGitLsFiles(rootPath);
+      if (gitFiles !== null) {
+        log.info(`Using git ls-files: ${gitFiles.length} tracked files`);
+        return gitFiles
+          .filter(f => {
+            const ext = path.extname(f).toLowerCase();
+            if (this.excludeExtensions.has(ext)) return false;
+            if (this.includeExtensions && !this.includeExtensions.has(ext)) return false;
+            return true;
+          })
+          .map(f => path.join(rootPath, f))
+          .sort();
+      }
+    }
+
+    log.info("Not a git repo or git ls-files disabled, falling back to directory walk");
+    return this.walkDirectory(rootPath);
+  }
+
+  private async tryGitLsFiles(rootPath: string): Promise<string[] | null> {
+    try {
+      const git = createSafeGit(rootPath);
+      return await git.lsFiles();
+    } catch {
+      return null;
+    }
+  }
+
+  private walkDirectory(rootPath: string): string[] {
     const results: string[] = [];
     const walk = (current: string) => {
       const entries = fs.readdirSync(current, { withFileTypes: true });
@@ -95,8 +150,11 @@ export class ProjectScanner {
           }
           walk(fullPath);
         } else if (entry.isFile()) {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (this.excludeExtensions.has(ext)) {
+            continue;
+          }
           if (this.includeExtensions) {
-            const ext = path.extname(entry.name).toLowerCase();
             if (!this.includeExtensions.has(ext)) {
               continue;
             }

@@ -73,9 +73,10 @@ export class TemporalCodeGraph {
       throw new Error("persistIngestion: ingestedAt is required");
     }
 
+    // Phase 1: Project node (single session)
+    log.info("Phase 1/8: Project node");
     const session = this.neo4j.getSession();
     try {
-      // 1. Create or merge Project node
       await session.run(
         `
         MERGE (p:Project { projectId: $projectId })
@@ -92,30 +93,31 @@ export class TemporalCodeGraph {
           ingestedAt: result.ingestedAt,
         }
       );
-
-      // 2. Batch persist files
-      await this.persistFilesBatch(session, result.projectId, result.ingestedAt, result.codeFiles);
-
-      // 3. Batch persist chunks
-      await this.persistChunksBatch(session, result.ingestedAt, result.codeFiles);
-
-      // 4. Batch persist symbols
-      await this.persistSymbolsBatch(session, result.ingestedAt, result.codeFiles);
-
-      // 5. Batch persist commits
-      await this.persistCommitsBatch(session, result.projectId, result.gitHistory.commits);
-
-      // 6. Batch persist commit parent relationships
-      await this.persistParentsBatch(session, result.gitHistory.commits);
-
-      // 7. Batch persist file changes
-      await this.persistFileChangesBatch(session, result.gitHistory.fileChanges);
-
-      // 8. Batch persist diff hunks
-      await this.persistDiffHunksBatch(session, result.gitHistory.hunks);
     } finally {
       await session.close();
     }
+
+    // Phases 2-8: each method uses runBatched() which manages its own sessions
+    log.info("Phase 2/8: Files", { count: result.codeFiles.length });
+    await this.persistFilesBatch(result.projectId, result.ingestedAt, result.codeFiles);
+
+    log.info("Phase 3/8: Chunks");
+    await this.persistChunksBatch(result.ingestedAt, result.codeFiles);
+
+    log.info("Phase 4/8: Symbols");
+    await this.persistSymbolsBatch(result.ingestedAt, result.codeFiles);
+
+    log.info("Phase 5/8: Commits", { count: result.gitHistory.commits.length });
+    await this.persistCommitsBatch(result.projectId, result.gitHistory.commits);
+
+    log.info("Phase 6/8: Parent relationships");
+    await this.persistParentsBatch(result.gitHistory.commits);
+
+    log.info("Phase 7/8: File changes", { count: result.gitHistory.fileChanges.length });
+    await this.persistFileChangesBatch(result.gitHistory.fileChanges);
+
+    log.info("Phase 8/8: Diff hunks", { count: result.gitHistory.hunks.length });
+    await this.persistDiffHunksBatch(result.gitHistory.hunks);
   }
 
   /**
@@ -387,27 +389,33 @@ export class TemporalCodeGraph {
   // ==========================================================================
 
   private async runBatched<T>(
-    session: import("neo4j-driver").Session,
     items: T[],
     cypher: string,
     buildParams: (batch: T[]) => Record<string, unknown>,
+    label: string,
   ): Promise<void> {
-    for (let i = 0; i < items.length; i += TemporalCodeGraph.BATCH_SIZE) {
+    const total = items.length;
+    for (let i = 0; i < total; i += TemporalCodeGraph.BATCH_SIZE) {
       const batch = items.slice(i, i + TemporalCodeGraph.BATCH_SIZE);
+      const batchIndex = Math.floor(i / TemporalCodeGraph.BATCH_SIZE);
+      const session = this.neo4j.getSession();
       try {
         await session.run(cypher, buildParams(batch));
+        if (batchIndex > 0 && batchIndex % 10 === 0) {
+          log.info(`${label}: ${Math.min(i + batch.length, total)}/${total}`);
+        }
       } catch (error) {
-        const batchIndex = Math.floor(i / TemporalCodeGraph.BATCH_SIZE);
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(
-          `Neo4j batch ${batchIndex} failed (items ${i}-${i + batch.length - 1} of ${items.length}): ${message}`
+          `Neo4j batch ${batchIndex} failed (items ${i}-${i + batch.length - 1} of ${total}): ${message}`
         );
+      } finally {
+        await session.close();
       }
     }
   }
 
   private async persistFilesBatch(
-    session: import("neo4j-driver").Session,
     projectId: string,
     ingestedAt: string,
     codeFiles: CodeFileResult[]
@@ -418,7 +426,7 @@ export class TemporalCodeGraph {
       sha256: f.sha256,
     }));
 
-    await this.runBatched(session, items,
+    await this.runBatched(items,
       `
       UNWIND $items AS item
       MATCH (p:Project { projectId: $projectId })
@@ -428,12 +436,12 @@ export class TemporalCodeGraph {
           f.lastIngestedAt = $ingestedAt
       MERGE (p)-[:HAS_FILE { ingestedAt: $ingestedAt }]->(f)
       `,
-      (batch) => ({ items: batch, projectId, ingestedAt })
+      (batch) => ({ items: batch, projectId, ingestedAt }),
+      "Files"
     );
   }
 
   private async persistChunksBatch(
-    session: import("neo4j-driver").Session,
     ingestedAt: string,
     codeFiles: CodeFileResult[]
   ): Promise<void> {
@@ -464,7 +472,7 @@ export class TemporalCodeGraph {
       }
     }
 
-    await this.runBatched(session, items,
+    await this.runBatched(items,
       `
       UNWIND $items AS item
       MATCH (f:File { fileId: item.fileId })
@@ -478,12 +486,12 @@ export class TemporalCodeGraph {
           c.lastIngestedAt = $ingestedAt
       MERGE (f)-[:HAS_CHUNK { ingestedAt: $ingestedAt }]->(c)
       `,
-      (batch) => ({ items: batch, ingestedAt })
+      (batch) => ({ items: batch, ingestedAt }),
+      "Chunks"
     );
   }
 
   private async persistSymbolsBatch(
-    session: import("neo4j-driver").Session,
     ingestedAt: string,
     codeFiles: CodeFileResult[]
   ): Promise<void> {
@@ -515,7 +523,7 @@ export class TemporalCodeGraph {
     if (symbolItems.length === 0) return;
 
     // Create/merge symbol nodes and link to files
-    await this.runBatched(session, symbolItems,
+    await this.runBatched(symbolItems,
       `
       UNWIND $items AS item
       MATCH (f:File { fileId: item.fileId })
@@ -528,11 +536,12 @@ export class TemporalCodeGraph {
           s.lastIngestedAt = $ingestedAt
       MERGE (f)-[:DEFINES_SYMBOL { ingestedAt: $ingestedAt }]->(s)
       `,
-      (batch) => ({ items: batch, ingestedAt })
+      (batch) => ({ items: batch, ingestedAt }),
+      "Symbols"
     );
 
     // Link symbols to overlapping chunks
-    await this.runBatched(session, symbolItems,
+    await this.runBatched(symbolItems,
       `
       UNWIND $items AS item
       MATCH (s:Symbol { symbolId: item.symbolId })
@@ -540,12 +549,12 @@ export class TemporalCodeGraph {
       WHERE c.lineStart <= item.endLine AND c.lineEnd >= item.startLine
       MERGE (c)-[:CONTAINS_SYMBOL { ingestedAt: $ingestedAt }]->(s)
       `,
-      (batch) => ({ items: batch, ingestedAt })
+      (batch) => ({ items: batch, ingestedAt }),
+      "Symbol-Chunk links"
     );
   }
 
   private async persistCommitsBatch(
-    session: import("neo4j-driver").Session,
     projectId: string,
     commits: GitCommit[]
   ): Promise<void> {
@@ -561,7 +570,7 @@ export class TemporalCodeGraph {
       message: c.message,
     }));
 
-    await this.runBatched(session, items,
+    await this.runBatched(items,
       `
       UNWIND $items AS item
       MATCH (p:Project { projectId: $projectId })
@@ -576,36 +585,42 @@ export class TemporalCodeGraph {
           c.message = item.message
       MERGE (p)-[:HAS_COMMIT]->(c)
       `,
-      (batch) => ({ items: batch, projectId })
+      (batch) => ({ items: batch, projectId }),
+      "Commits"
     );
   }
 
   private async persistParentsBatch(
-    session: import("neo4j-driver").Session,
     commits: GitCommit[]
   ): Promise<void> {
+    // Build set of ingested commit hashes so we never create bare orphan Commit nodes
+    // for parent hashes that fall outside the ingestion window (e.g., due to maxCommitAgeDays).
+    const ingestedHashes = new Set(commits.map((c) => c.hash));
+
     const parentItems: Array<{ hash: string; parentHash: string }> = [];
     for (const commit of commits) {
       for (const parentHash of commit.parentHashes) {
-        parentItems.push({ hash: commit.hash, parentHash });
+        if (ingestedHashes.has(parentHash)) {
+          parentItems.push({ hash: commit.hash, parentHash });
+        }
       }
     }
 
     if (parentItems.length === 0) return;
 
-    await this.runBatched(session, parentItems,
+    await this.runBatched(parentItems,
       `
       UNWIND $items AS item
       MATCH (c:Commit { hash: item.hash })
-      MERGE (parent:Commit { hash: item.parentHash })
+      MATCH (parent:Commit { hash: item.parentHash })
       MERGE (c)-[:PARENT]->(parent)
       `,
-      (batch) => ({ items: batch })
+      (batch) => ({ items: batch }),
+      "Parents"
     );
   }
 
   private async persistFileChangesBatch(
-    session: import("neo4j-driver").Session,
     fileChanges: GitFileChange[]
   ): Promise<void> {
     const items = fileChanges.map((change) => ({
@@ -615,7 +630,7 @@ export class TemporalCodeGraph {
       changeType: change.changeType,
     }));
 
-    await this.runBatched(session, items,
+    await this.runBatched(items,
       `
       UNWIND $items AS item
       MATCH (c:Commit { hash: item.commitHash })
@@ -623,12 +638,12 @@ export class TemporalCodeGraph {
       ON CREATE SET f.path = item.filePath
       MERGE (c)-[:MODIFIES { changeType: item.changeType }]->(f)
       `,
-      (batch) => ({ items: batch })
+      (batch) => ({ items: batch }),
+      "File changes"
     );
   }
 
   private async persistDiffHunksBatch(
-    session: import("neo4j-driver").Session,
     hunks: GitDiffHunk[]
   ): Promise<void> {
     const items = hunks.map((hunk) => ({
@@ -641,7 +656,7 @@ export class TemporalCodeGraph {
       newLines: hunk.newLines,
     }));
 
-    await this.runBatched(session, items,
+    await this.runBatched(items,
       `
       UNWIND $items AS item
       MATCH (c:Commit { hash: item.commitHash })
@@ -655,7 +670,8 @@ export class TemporalCodeGraph {
         newLines: item.newLines
       }]->(chunk)
       `,
-      (batch) => ({ items: batch })
+      (batch) => ({ items: batch }),
+      "Diff hunks"
     );
   }
 
