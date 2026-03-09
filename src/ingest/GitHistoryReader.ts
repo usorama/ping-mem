@@ -52,14 +52,17 @@ export class GitHistoryReader {
    * Read full git history from a repository.
    * Returns commits in topological order (parents before children when possible).
    */
-  async readHistory(projectDir: string, options?: { maxCommits?: number }): Promise<GitHistoryResult> {
+  async readHistory(projectDir: string, options?: { maxCommits?: number; maxCommitAgeDays?: number }): Promise<GitHistoryResult> {
     const gitRoot = await this.getGitRoot(projectDir);
     if (!gitRoot) {
       return { commits: [], fileChanges: [], hunks: [] };
     }
 
     const maxCommits = options?.maxCommits ?? 200;
-    const commits = await this.readCommits(gitRoot, maxCommits);
+    const since = options?.maxCommitAgeDays
+      ? `${options.maxCommitAgeDays} days ago`
+      : undefined;
+    const commits = await this.readCommits(gitRoot, maxCommits, since);
     log.info(`Found ${commits.length} commits, processing diffs...`);
     const fileChanges: GitFileChange[] = [];
     const hunks: GitDiffHunk[] = [];
@@ -103,7 +106,7 @@ export class GitHistoryReader {
     }
   }
 
-  private async readCommits(gitRoot: string, maxCommits: number): Promise<GitCommit[]> {
+  private async readCommits(gitRoot: string, maxCommits: number, since?: string): Promise<GitCommit[]> {
     // Use a delimiter that won't appear in commit messages
     const delimiter = "---COMMIT-SEPARATOR---";
     const format = [
@@ -120,7 +123,7 @@ export class GitHistoryReader {
     ].join("%n") + delimiter;
 
     const git = createSafeGit(gitRoot, { maxBuffer: 100 * 1024 * 1024 });
-    const output = await git.getLog(maxCommits, format);
+    const output = await git.getLog(maxCommits, format, since);
 
     const commits: GitCommit[] = [];
     const commitBlocks = output

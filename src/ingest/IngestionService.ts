@@ -28,6 +28,7 @@ export interface IngestProjectOptions {
   projectDir: string;
   forceReingest?: boolean;
   maxCommits?: number; // Max git commits to ingest (default 200)
+  maxCommitAgeDays?: number; // Only include commits from last N days (default: 30)
 }
 
 export interface IngestProjectResult {
@@ -100,6 +101,7 @@ export class IngestionService {
     if (options.maxCommits !== undefined) {
       ingestOptions.maxCommits = options.maxCommits;
     }
+    ingestOptions.maxCommitAgeDays = options.maxCommitAgeDays ?? 30;
 
     const ingestionResult = await this.orchestrator.ingest(options.projectDir, ingestOptions);
 
