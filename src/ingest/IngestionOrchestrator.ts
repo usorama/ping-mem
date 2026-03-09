@@ -139,6 +139,16 @@ export class IngestionOrchestrator {
   }
 
   /**
+   * Scan the project and return the current manifest without persisting.
+   * Used by IngestionService.verifyProject to expose the actual current tree hash.
+   */
+  async scan(projectDir: string): Promise<import("./types.js").ProjectScanResult> {
+    const projectPath = path.resolve(projectDir);
+    const storedManifest = this.manifestStore.load(projectPath);
+    return this.scanner.scanProject(projectPath, storedManifest ?? undefined);
+  }
+
+  /**
    * Load the stored manifest for a project directory.
    * Returns null if no manifest exists.
    */

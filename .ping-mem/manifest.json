@@ -1,7 +1,7 @@
 {
   "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
   "rootPath": "/projects/ping-mem",
-  "treeHash": "0740a9f1aeac51574e5417bd9590e6ebe0c6951b0c6f861b9862bbd2594be92c",
+  "treeHash": "58d0a1b4ddce31310dc38d8bae28de4978cd95220b6c0e49219f5161b80856df",
   "files": [
     {
       "path": ".cursor/mcp.json",
@@ -40,8 +40,8 @@
     },
     {
       "path": ".ping-mem/manifest.json",
-      "sha256": "45f0cc71ee09451fd01fcb6d8d7a698ca05b82828a122abff0882db40d7da30f",
-      "bytes": 55070
+      "sha256": "b40e43db912cafbd14603d8027245074dcf1ee7a3782cd5fef1f70f67cd8c166",
+      "bytes": 53343
     },
     {
       "path": ".serena/.gitignore",
@@ -189,6 +189,11 @@
       "bytes": 11008
     },
     {
+      "path": "docs/INSTITUTIONAL_LEARNINGS_2026-03-08.md",
+      "sha256": "008d865dfd119b86e4ca10b2406a886602f34cd029863098081713a968395b3d",
+      "bytes": 5958
+    },
+    {
       "path": "docs/PERFORMANCE.md",
       "sha256": "10eaed29554ba715602639841a0414e95daf60212bd126f2b1be9c6c2f8167cc",
       "bytes": 6788
@@ -244,6 +249,16 @@
       "bytes": 1791
     },
     {
+      "path": "docs/plans/2026-02-20-memory-enhancement-design.md",
+      "sha256": "e149cd5c44d3c1f63f2bef0125bdfd4f65f1fd77ffc30eadf96c41a1d76638b7",
+      "bytes": 20134
+    },
+    {
+      "path": "docs/plans/2026-02-20-memory-enhancement-plan.md",
+      "sha256": "0d74b528e0f9daaa9404e3f8fcc8540b1520e1e5446f436435b5ac23f575b88e",
+      "bytes": 37783
+    },
+    {
       "path": "docs/plans/2026-03-06-feat-multi-agent-memory-orchestration-plan.md",
       "sha256": "23ca5de3712cc3ea5a88f7aa6a6d837ef99e5ef70f4d346f672ee8cd1503e806",
       "bytes": 33608
@@ -252,6 +267,46 @@
       "path": "docs/plans/2026-03-08-feat-self-healing-observability-system-plan.md",
       "sha256": "d43b5cb650cae36fedbdcbb35bf088a7fb8b571acf734abd22f9c32ae24f4125",
       "bytes": 13455
+    },
+    {
+      "path": "docs/plans/2026-03-08-fix-veracity-audit-production-issues-plan.md",
+      "sha256": "8a2c327a6e6358e946f1a9641a8fcc25539be69df10e520c6216618b8c4880de",
+      "bytes": 30729
+    },
+    {
+      "path": "docs/plans/understory-integration-spec.md",
+      "sha256": "b87c426c25fb3bbd76118e56da0aee27f3946cba995d6eaa629ef7a583d60164",
+      "bytes": 58109
+    },
+    {
+      "path": "docs/research/01-contextgraph-video.md",
+      "sha256": "58984f35d9ec62fb19f0ffb090c46206664a047311759099e4cbdbc592d441e3",
+      "bytes": 4929
+    },
+    {
+      "path": "docs/research/02-kg-memory-encoding-paper.md",
+      "sha256": "e0d3c717ba0b8c7005799334e0ced91a0618ffaeadce2796b6e16f68a36aa17a",
+      "bytes": 4719
+    },
+    {
+      "path": "docs/research/03-contextgraph-repo.md",
+      "sha256": "ffb44ee29e2581b05c2811f48d18f82f9147a669b324f9c51b8695d5e1173993",
+      "bytes": 5506
+    },
+    {
+      "path": "docs/research/04-pingmem-architecture.md",
+      "sha256": "9df257b7e5accc3c1322fb1a3aa6d13c6c4695f22338b67e19f3543931a4ed5f",
+      "bytes": 7809
+    },
+    {
+      "path": "docs/research/05-synthesis-pros-cons.md",
+      "sha256": "112315300cf32ded17723a8b9dbc14395c5c3c650ddf4d4b31f39f12b98da594",
+      "bytes": 8731
+    },
+    {
+      "path": "docs/research/INDEX.md",
+      "sha256": "cdb48978ba3a6878f890adf5c9807e5f773c7e8e24f53a55371c41261e98911e",
+      "bytes": 3760
     },
     {
       "path": "examples/multi-tool-diagnostics/README.md",
@@ -625,8 +680,8 @@
     },
     {
       "path": "src/graph/TemporalCodeGraph.ts",
-      "sha256": "a8eac86dc12562d6b28268ee4a32c31f44e41f0d4faff8ac2302f061c413689d",
-      "bytes": 22898
+      "sha256": "42961267eaa15976014b20e008a53a5a34c215895486c90ed28a7db797f564ff",
+      "bytes": 23205
     },
     {
       "path": "src/graph/TemporalStore.ts",
@@ -935,18 +990,18 @@
     },
     {
       "path": "src/ingest/IngestionService.ts",
-      "sha256": "2bbe498792e69366f5f686135f74fbddc61843fedcf5e5d1b27b025b0cb4f452",
-      "bytes": 10617
+      "sha256": "25d41bec5706d5ccdf2c394dbd5b43ae6cdd048c652497da0ef668b689b53ccb",
+      "bytes": 10786
     },
     {
       "path": "src/ingest/ManifestStore.ts",
-      "sha256": "ab991f82d29752ca7d093996cb517a690004df7d129161d06cc719f169ee3da1",
-      "bytes": 1020
+      "sha256": "0bc2e6f2e827afa0d56d43c5a44123bf7cb8a672491f2c16dd59c3ba6c7cccf6",
+      "bytes": 1140
     },
     {
       "path": "src/ingest/ProjectScanner.ts",
-      "sha256": "ccb2967d2d1dfde9af5f170a7ddf20a90b451ae8d5d46bd9b6a6826959f594ae",
-      "bytes": 7539
+      "sha256": "d3607aa511919d27e4f10507de5308f7cd698f2e3c314e88d36bdd2a709f6e32",
+      "bytes": 7727
     },
     {
       "path": "src/ingest/SafeGit.ts",
@@ -960,8 +1015,8 @@
     },
     {
       "path": "src/ingest/UnifiedIngestionOrchestrator.ts",
-      "sha256": "b534ed00464a1b46bb59f5230e723a498c0ef88207e60f14f42460897596e0c0",
-      "bytes": 7374
+      "sha256": "02866db74f548310b66d2b6554649ee091868189043b8fdda9218d86f0970498",
+      "bytes": 7412
     },
     {
       "path": "src/ingest/UnifiedIngestionService.ts",
@@ -970,8 +1025,8 @@
     },
     {
       "path": "src/ingest/__tests__/ProjectScanner.test.ts",
-      "sha256": "77d030654b933ac4314c9353af0f33df58e35797140fde13e8ab08f53991a12b",
-      "bytes": 8248
+      "sha256": "e220f036e6d5d3014093ddfa597c1075c44ae37fdf7dd96bdc7aa315a718993b",
+      "bytes": 11016
     },
     {
       "path": "src/ingest/__tests__/SafeGit.pathTraversal.test.ts",
@@ -1349,6 +1404,11 @@
       "bytes": 16575
     },
     {
+      "path": "src/search/__tests__/GeminiEmbeddingProvider.test.ts",
+      "sha256": "7584b69f74792636a4e9fcc050e3c5c2d5f34613f2a9d5c6bfebaa6bce4e2a19",
+      "bytes": 12289
+    },
+    {
       "path": "src/search/__tests__/HybridSearchEngine.directionalSearch.test.ts",
       "sha256": "b8de0103830c5bb3fd2ae7b4aea7c4ca8acfbfd45a216ba2046a5847eac1b2a0",
       "bytes": 1430
@@ -1589,6 +1649,6 @@
       "bytes": 849
     }
   ],
-  "generatedAt": "2026-03-09T07:47:38.086Z",
+  "generatedAt": "2026-03-09T07:53:27.253Z",
   "schemaVersion": 1
 }

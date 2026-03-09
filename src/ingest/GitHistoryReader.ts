@@ -178,7 +178,14 @@ export class GitHistoryReader {
       if (parts.length < 2) continue;
       const statusPart = parts[0]!.trim();
       const changeType = statusPart[0] as "A" | "M" | "D" | "R" | "C";
-      const filePath = this.normalizePath(parts[1]!);
+
+      // For R (rename) and C (copy), git --name-status outputs:
+      //   <status>\t<old-path>\t<new-path>
+      // filePath must be the NEW (current) path; oldPath is the source.
+      const isRenameOrCopy = changeType === "R" || changeType === "C";
+      const filePath = isRenameOrCopy
+        ? this.normalizePath(parts[2]!)
+        : this.normalizePath(parts[1]!);
 
       const change: GitFileChange = {
         commitHash,
@@ -186,8 +193,8 @@ export class GitHistoryReader {
         changeType,
       };
 
-      if (parts.length > 2) {
-        change.oldPath = this.normalizePath(parts[2]!);
+      if (isRenameOrCopy && parts.length > 2) {
+        change.oldPath = this.normalizePath(parts[1]!);
       }
 
       changes.push(change);

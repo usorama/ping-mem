@@ -161,9 +161,6 @@ export class IngestionService {
    * Verify that the ingested manifest matches current project state.
    */
   async verifyProject(projectDir: string): Promise<VerifyProjectResult> {
-    const valid = await this.orchestrator.verify(projectDir);
-
-    // If valid, also extract current hashes for confirmation
     const manifest = this.orchestrator.getManifest(projectDir);
 
     if (!manifest) {
@@ -176,11 +173,17 @@ export class IngestionService {
       };
     }
 
+    // Scan the project fresh to get the actual current tree hash (not the cached one).
+    // This allows callers to see old vs. new hashes when valid=false.
+    const currentScan = await this.orchestrator.scan(projectDir);
+    const currentTreeHash = currentScan.manifest.treeHash;
+    const valid = currentTreeHash === manifest.treeHash && currentScan.manifest.projectId === manifest.projectId;
+
     return {
       projectId: manifest.projectId,
       valid,
       manifestTreeHash: manifest.treeHash,
-      currentTreeHash: manifest.treeHash, // If valid, they're the same
+      currentTreeHash,
       message: valid
         ? "Project manifest is up-to-date and matches on-disk files."
         : "Project has changed since last ingestion. Re-ingest to update.",

@@ -17,6 +17,9 @@ import type { ProjectManifest } from "./types.js";
 import * as fs from "fs";
 import * as crypto from "crypto";
 import * as path from "path";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("UnifiedIngestionOrchestrator");
 
 export type ProjectType = "code" | "documents" | "mixed";
 
@@ -85,7 +88,8 @@ export class UnifiedIngestionOrchestrator {
     const projectPath = path.resolve(projectDir);
 
     // Step 1: Scan project
-    const previousManifest = this.manifestStore.load(projectPath);
+    // When forceReingest=true, pass no previous manifest so hasChanges is always true.
+    const previousManifest = options.forceReingest ? null : this.manifestStore.load(projectPath);
     const scanResult = await this.scanner.scanProject(projectPath, previousManifest ?? undefined);
 
     if (!scanResult.hasChanges && !options.forceReingest) {
@@ -183,38 +187,43 @@ export class UnifiedIngestionOrchestrator {
     const results = [];
 
     for (const entry of fileEntries) {
-      const fullPath = path.join(projectRoot, entry.path);
-      const content = fs.readFileSync(fullPath, "utf-8");
-      const rawChunks = this.codeChunker.chunkFile(entry.path, content);
+      try {
+        const fullPath = path.join(projectRoot, entry.path);
+        const content = fs.readFileSync(fullPath, "utf-8");
+        const rawChunks = this.codeChunker.chunkFile(entry.path, content);
 
-      const chunks = rawChunks.map((chunk) => {
-        const hash = crypto.createHash("sha256");
-        hash.update(entry.path);
-        hash.update("\n");
-        hash.update(entry.sha256);
-        hash.update("\n");
-        hash.update(chunk.type);
-        hash.update("\n");
-        hash.update(String(chunk.start));
-        hash.update("\n");
-        hash.update(String(chunk.end));
-        hash.update("\n");
-        hash.update(chunk.content);
+        const chunks = rawChunks.map((chunk) => {
+          const hash = crypto.createHash("sha256");
+          hash.update(entry.path);
+          hash.update("\n");
+          hash.update(entry.sha256);
+          hash.update("\n");
+          hash.update(chunk.type);
+          hash.update("\n");
+          hash.update(String(chunk.start));
+          hash.update("\n");
+          hash.update(String(chunk.end));
+          hash.update("\n");
+          hash.update(chunk.content);
 
-        return {
-          chunkId: hash.digest("hex"),
-          type: chunk.type,
-          start: chunk.start,
-          end: chunk.end,
-          content: chunk.content,
-        };
-      });
+          return {
+            chunkId: hash.digest("hex"),
+            type: chunk.type,
+            start: chunk.start,
+            end: chunk.end,
+            content: chunk.content,
+          };
+        });
 
-      results.push({
-        filePath: entry.path,
-        sha256: entry.sha256,
-        chunks,
-      });
+        results.push({
+          filePath: entry.path,
+          sha256: entry.sha256,
+          chunks,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        log.warn("Skipping file that could not be chunked", { path: entry.path, error: message });
+      }
     }
 
     return results;
