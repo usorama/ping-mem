@@ -37,18 +37,22 @@ export function csrfProtection() {
       // Set CSRF token cookie on safe methods
       const token = generateCsrfToken();
       c.set("csrfToken", token);
-      c.header("Set-Cookie", `${CSRF_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict`);
+      // Double-submit CSRF pattern: cookie must be JS-readable (no HttpOnly) so client
+      // can read it and include it in the X-CSRF-Token request header for validation.
+      c.header("Set-Cookie", `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict; Secure`);
       return next();
     }
 
     // Validate CSRF token on state-changing methods
     const headerToken = c.req.header(CSRF_HEADER);
     const cookieHeader = c.req.header("cookie") ?? "";
-    const cookieToken = cookieHeader
+    const rawCookie = cookieHeader
       .split(";")
       .map((s) => s.trim())
-      .find((s) => s.startsWith(`${CSRF_COOKIE}=`))
-      ?.split("=")[1];
+      .find((s) => s.startsWith(`${CSRF_COOKIE}=`));
+    const cookieToken = rawCookie !== undefined
+      ? rawCookie.substring(`${CSRF_COOKIE}=`.length)
+      : undefined;
 
     if (!headerToken || !cookieToken || !timingSafeStringEqual(headerToken, cookieToken)) {
       return c.json({ error: "Forbidden", message: "Invalid or missing CSRF token" }, 403);

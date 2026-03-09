@@ -20,6 +20,7 @@ import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import { EventStore } from "../storage/EventStore.js";
 import { handleAdminRequest } from "./admin.js";
 import { createLogger } from "../util/logger.js";
+import { createHealthMonitor } from "../observability/HealthMonitor.js";
 
 const log = createLogger("HTTP Server");
 
@@ -46,13 +47,6 @@ export async function startHTTPServer(): Promise<void> {
       neo4jClient: services.neo4jClient,
       qdrantClient: services.qdrantClient,
     });
-    try {
-      await ingestionService.ensureConstraints();
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      log.error("Failed to create Neo4j constraints. Check Neo4j version, permissions, and connectivity.", { error: message });
-      throw new Error(`Neo4j constraint setup failed: ${message}`);
-    }
   }
 
   const transport = (process.env.PING_MEM_TRANSPORT as HTTPTransportType) ?? "streamable-http";
@@ -70,6 +64,7 @@ export async function startHTTPServer(): Promise<void> {
     diagnosticsDbPath ? { dbPath: diagnosticsDbPath } : undefined
   );
   const eventStore = new EventStore({ dbPath: runtimeConfig.pingMem.dbPath });
+  const healthMonitor = createHealthMonitor({ services, eventStore, diagnosticsStore });
 
   log.info(`Starting with transport: ${transport}`);
   log.info(`Listening on ${host}:${port}`);
@@ -99,6 +94,7 @@ export async function startHTTPServer(): Promise<void> {
       evolutionEngine: services.evolutionEngine,
       ingestionService,
       qdrantClient: services.qdrantClient,
+      healthMonitor,
     });
   } else {
     // SSE / Streamable HTTP mode
@@ -126,6 +122,7 @@ export async function startHTTPServer(): Promise<void> {
 
   // Start the server
   await serverInstance.start();
+  healthMonitor.start();
 
   // Create Node.js HTTP server
   const httpServer = createServer((req, res) => {
@@ -145,13 +142,8 @@ export async function startHTTPServer(): Promise<void> {
       .catch((error) => {
       log.error("Unhandled error", { error: error instanceof Error ? error.message : String(error) });
       if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff" });
-        res.end(
-          JSON.stringify({
-            error: "Internal Server Error",
-            message: "An internal error occurred",
-          })
-        );
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Internal Server Error" }));
       }
       });
   });
@@ -167,50 +159,69 @@ export async function startHTTPServer(): Promise<void> {
   });
 
   // Handle graceful shutdown
-  const shutdown = async () => {
+  let shuttingDown = false;
+  const isCrashSignal = (signal: string) =>
+    signal === "uncaughtException" || signal === "unhandledRejection";
+
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+
     log.info("Shutting down...");
-    httpServer.close();
+    log.info("Shutdown signal received", { signal });
+    healthMonitor.stop();
 
     const shutdownErrors: string[] = [];
-    try {
-      await serverInstance.stop();
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      log.error("Shutdown: serverInstance.stop() failed", { error: msg });
-      shutdownErrors.push(`serverInstance: ${msg}`);
-    }
-    try {
-      await eventStore.close();
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      log.error("Shutdown: eventStore.close() failed", { error: msg });
-      shutdownErrors.push(`eventStore: ${msg}`);
-    }
-    try {
-      diagnosticsStore.close();
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      log.error("Shutdown: diagnosticsStore.close() failed", { error: msg });
-      shutdownErrors.push(`diagnosticsStore: ${msg}`);
-    }
-    try {
-      adminStore.close();
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      log.error("Shutdown: adminStore.close() failed", { error: msg });
-      shutdownErrors.push(`adminStore: ${msg}`);
-    }
+
+    try { await new Promise<void>((resolve, reject) => { httpServer.close((err) => (err ? reject(err) : resolve())); }); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`httpServer: ${msg}`); }
+
+    try { await serverInstance.stop(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`serverInstance: ${msg}`); }
+
+    try { if (services.neo4jClient) await services.neo4jClient.disconnect(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`neo4j: ${msg}`); }
+
+    try { if (services.qdrantClient) await services.qdrantClient.disconnect(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`qdrant: ${msg}`); }
+
+    try { await eventStore.close(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`eventStore: ${msg}`); }
+
+    try { diagnosticsStore.close(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`diagnosticsStore: ${msg}`); }
+
+    try { adminStore.close(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`adminStore: ${msg}`); }
 
     if (shutdownErrors.length > 0) {
-      log.warn("Shutdown completed with errors", { errors: shutdownErrors });
-    } else {
-      log.info("Shutdown complete");
+      log.error("Shutdown completed with errors", { errors: shutdownErrors });
+      process.exit(1);
     }
-    process.exit(shutdownErrors.length > 0 ? 1 : 0);
+    log.info("Shutdown complete");
+    // Crash signals (uncaughtException, unhandledRejection) must exit non-zero
+    process.exit(isCrashSignal(signal) ? 1 : 0);
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+  process.on("uncaughtException", (error) => {
+    log.error("Uncaught exception", { error: error.message, stack: error.stack });
+    void shutdown("uncaughtException");
+  });
+  process.on("unhandledRejection", (reason) => {
+    log.error("Unhandled rejection", {
+      error: reason instanceof Error ? reason.message : String(reason),
+      stack: reason instanceof Error ? reason.stack : undefined,
+    });
+    void shutdown("unhandledRejection");
+  });
 }
 
 // ============================================================================

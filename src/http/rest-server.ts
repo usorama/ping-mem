@@ -9,13 +9,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { timingSafeStringEqual } from "../util/auth-utils.js";
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import * as path from "path";
 import { createLogger } from "../util/logger.js";
-import { timingSafeStringEqual } from "../util/auth-utils.js";
 
 const log = createLogger("REST Server");
 
@@ -58,6 +58,8 @@ import { MemoryPubSub } from "../pubsub/index.js";
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
+import { probeSystemHealth, sanitizeHealthError } from "../observability/health-probes.js";
+import type { HealthMonitor } from "../observability/HealthMonitor.js";
 import {
   SessionStartSchema,
   ContextSaveSchema,
@@ -111,6 +113,7 @@ export class RESTPingMemServer {
   private pubsub: MemoryPubSub;
   private knowledgeStore: KnowledgeStore;
   private qdrantClient: QdrantClientWrapper | null = null;
+  private healthMonitor: HealthMonitor | null = null;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -159,6 +162,9 @@ export class RESTPingMemServer {
     }
     if (config.qdrantClient) {
       this.qdrantClient = config.qdrantClient;
+    }
+    if (config.healthMonitor) {
+      this.healthMonitor = config.healthMonitor;
     }
 
     // Initialize Hono app
@@ -227,9 +233,7 @@ export class RESTPingMemServer {
             apiKey = authHeader.slice(7);
           }
         }
-        const isValid = this.config.apiKeyManager
-          ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
-          : (this.config.apiKey ? timingSafeStringEqual(apiKey ?? "", this.config.apiKey) : false);
+        const isValid = this.validateApiKey(apiKey ?? undefined);
         if (!isValid) {
           return c.json(
             {
@@ -277,10 +281,7 @@ export class RESTPingMemServer {
             apiKey = authHeader.slice(7);
           }
         }
-        const isValid = this.config.apiKeyManager
-          ? this.config.apiKeyManager.isValid(apiKey ?? undefined)
-          : (this.config.apiKey ? timingSafeStringEqual(apiKey ?? "", this.config.apiKey) : false);
-        if (!isValid) {
+        if (!this.validateApiKey(apiKey ?? undefined)) {
           return c.json(
             { error: "Unauthorized", message: "Invalid API key" },
             401
@@ -288,68 +289,63 @@ export class RESTPingMemServer {
         }
       }
 
-      let overallStatus: "ok" | "degraded" | "unhealthy" = "ok";
-      const components: Record<string, Record<string, unknown>> = {};
-
-      // SQLite health — run a lightweight query and measure latency
+      // Lightweight liveness check — only pings SQLite (core dependency).
+      // Full dependency probing is at /api/v1/observability/status.
       try {
-        const sqliteStart = performance.now();
         this.eventStore.getDatabase().prepare("SELECT 1").get();
-        const sqliteLatency = performance.now() - sqliteStart;
-        components.sqlite = { status: "healthy", latencyMs: Math.round(sqliteLatency * 100) / 100 };
-      } catch (err) {
-        components.sqlite = {
-          status: "unhealthy",
-          error: err instanceof Error ? err.message : String(err),
+        return c.json({
+          status: "ok",
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        log.error("Health check failed — SQLite unreachable", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return c.json({ status: "unhealthy", error: "SQLite unreachable" }, 503);
+      }
+    });
+
+    this.app.get("/api/v1/observability/status", async (c) => {
+      try {
+        // Use cached snapshot from health monitor if available (avoids duplicate probes)
+        const monitorStatus = this.healthMonitor?.getStatus() ?? null;
+        const snapshot = monitorStatus?.lastSnapshot ?? await probeSystemHealth({
+          eventStore: this.eventStore,
+          ...(this.graphManager ? { graphManager: this.graphManager } : {}),
+          ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
+          diagnosticsStore: this.diagnosticsStore,
+          skipIntegrityCheck: true,
+        });
+
+        const sanitizedSnapshot = {
+          ...snapshot,
+          components: Object.fromEntries(
+            Object.entries(snapshot.components).map(([key, comp]) => [
+              key,
+              comp.error ? { ...comp, error: sanitizeHealthError(comp.error) } : comp,
+            ])
+          ),
         };
-        overallStatus = "unhealthy";
-      }
 
-      // Neo4j health
-      if (this.graphManager) {
-        try {
-          await this.graphManager.getEntity("__health_check_nonexistent__");
-          components.neo4j = { status: "healthy", configured: true };
-        } catch (err) {
-          components.neo4j = {
-            status: "unhealthy",
-            configured: true,
-            error: err instanceof Error ? err.message : String(err),
-          };
-          overallStatus = overallStatus === "unhealthy" ? "unhealthy" : "degraded";
-        }
-      } else {
-        components.neo4j = { status: "not_configured", configured: false };
-      }
+        const sanitizedMonitor = monitorStatus ? {
+          ...monitorStatus,
+          lastSnapshot: monitorStatus.lastSnapshot ? sanitizedSnapshot : null,
+          activeAlerts: monitorStatus.activeAlerts.map((alert) => ({
+            ...alert,
+            message: alert.message.replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, "[redacted]")
+              .replace(/\/[^\s"']+/g, "[path]"),
+          })),
+        } : null;
 
-      // Qdrant health — actual ping via healthCheck()
-      if (this.qdrantClient) {
-        try {
-          const healthy = await this.qdrantClient.healthCheck();
-          components.qdrant = {
-            status: healthy ? "healthy" : "unhealthy",
-            configured: true,
-          };
-          if (!healthy) {
-            overallStatus = overallStatus === "unhealthy" ? "unhealthy" : "degraded";
-          }
-        } catch (err) {
-          components.qdrant = {
-            status: "unhealthy",
-            configured: true,
-            error: err instanceof Error ? err.message : String(err),
-          };
-          overallStatus = overallStatus === "unhealthy" ? "unhealthy" : "degraded";
-        }
-      } else {
-        components.qdrant = { status: "not_configured", configured: false };
+        return c.json({
+          data: {
+            health: sanitizedSnapshot,
+            monitor: sanitizedMonitor,
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
       }
-
-      return c.json({
-        status: overallStatus,
-        timestamp: new Date().toISOString(),
-        components,
-      });
     });
 
     // ============================================================================
@@ -1615,7 +1611,22 @@ export class RESTPingMemServer {
       diagnosticsStore: this.diagnosticsStore,
       ingestionService: this.config.ingestionService,
       knowledgeStore: this.knowledgeStore,
+      graphManager: this.graphManager ?? undefined,
+      qdrantClient: this.qdrantClient ?? undefined,
     });
+  }
+
+  /**
+   * Validate an API key using constant-time comparison
+   */
+  private validateApiKey(apiKey: string | undefined): boolean {
+    if (this.config.apiKeyManager) {
+      return this.config.apiKeyManager.isValid(apiKey);
+    }
+    if (!apiKey || !this.config.apiKey) {
+      return false;
+    }
+    return timingSafeStringEqual(apiKey, this.config.apiKey);
   }
 
   /**
@@ -1661,8 +1672,8 @@ export class RESTPingMemServer {
       if (codeErr.code === "MEMORY_EXISTS") return 409;
       if (codeErr.code === "INVALID_SESSION") return 400;
       if (codeErr.code === "AGENT_EXPIRED") return 410;
-      // Fallback to message-based detection — only for known domain error types
-      const isDomainError = "code" in error ||
+      // Fallback to message-based detection — only for known domain error class names
+      const isDomainError =
         /Memory|Agent|Quota|Lock|Evidence|Schema|Scope/.test(error.constructor.name);
       if (isDomainError) {
         if (error.message.includes("not found")) {

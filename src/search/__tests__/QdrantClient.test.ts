@@ -7,15 +7,7 @@
  * @module search/__tests__/QdrantClient.test
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import {
-  QdrantClientWrapper,
-  QdrantClientError,
-  QdrantConnectionError,
-  QdrantOperationError,
-  createQdrantClient,
-  createQdrantClientFromEnv,
-} from "../QdrantClient.js";
+import { describe, it, expect, beforeEach, afterEach, mock } from "bun:test";
 import type { QdrantClientConfig } from "../QdrantClient.js";
 import type { VectorEmbedding } from "../VectorIndex.js";
 
@@ -24,54 +16,63 @@ import type { VectorEmbedding } from "../VectorIndex.js";
 // ============================================================================
 
 // Mock the Qdrant SDK client
-const mockGetCollections = vi.fn();
-const mockCreateCollection = vi.fn();
-const mockGetCollection = vi.fn();
-const mockUpsert = vi.fn();
-const mockSearch = vi.fn();
-const mockDelete = vi.fn();
+const mockGetCollections = mock(() => Promise.resolve({ collections: [] }));
+const mockCreateCollection = mock(() => Promise.resolve({}));
+const mockGetCollection = mock(() => Promise.resolve({ points_count: 10 }));
+const mockUpsert = mock(() => Promise.resolve({}));
+const mockSearch = mock(() => Promise.resolve([]));
+const mockDelete = mock(() => Promise.resolve({}));
 
-vi.mock("@qdrant/js-client-rest", () => ({
-  QdrantClient: vi.fn().mockImplementation(() => ({
-    getCollections: mockGetCollections,
-    createCollection: mockCreateCollection,
-    getCollection: mockGetCollection,
-    upsert: mockUpsert,
-    search: mockSearch,
-    delete: mockDelete,
-  })),
+mock.module("@qdrant/js-client-rest", () => ({
+  QdrantClient: class {
+    getCollections = mockGetCollections;
+    createCollection = mockCreateCollection;
+    getCollection = mockGetCollection;
+    upsert = mockUpsert;
+    search = mockSearch;
+    delete = mockDelete;
+  },
 }));
 
 // Mock VectorIndex for fallback testing
-vi.mock("../VectorIndex.js", () => ({
-  VectorIndex: vi.fn().mockImplementation(() => ({
-    storeVector: vi.fn().mockResolvedValue(undefined),
-    semanticSearch: vi.fn().mockResolvedValue([
-      {
-        memoryId: "fallback-mem-001",
-        sessionId: "session-001",
-        content: "Fallback content",
-        similarity: 0.9,
-        distance: 0.1,
-        indexedAt: new Date(),
-      },
-    ]),
-    deleteVector: vi.fn().mockResolvedValue(true),
-    getStats: vi.fn().mockResolvedValue({
-      totalVectors: 5,
-      vectorDimensions: 768,
-      similarityThreshold: 0.7,
-      dbPath: ":memory:",
-    }),
-    close: vi.fn().mockResolvedValue(undefined),
-  })),
+mock.module("../VectorIndex.js", () => ({
+  VectorIndex: class {
+    storeVector = mock(() => Promise.resolve(undefined));
+    semanticSearch = mock(() =>
+      Promise.resolve([
+        {
+          memoryId: "fallback-mem-001",
+          sessionId: "session-001",
+          content: "Fallback content",
+          similarity: 0.9,
+          distance: 0.1,
+          indexedAt: new Date(),
+        },
+      ])
+    );
+    deleteVector = mock(() => Promise.resolve(true));
+    getStats = mock(() =>
+      Promise.resolve({
+        totalVectors: 5,
+        vectorDimensions: 768,
+        similarityThreshold: 0.7,
+        dbPath: ":memory:",
+      })
+    );
+    close = mock(() => Promise.resolve(undefined));
+  },
   VectorIndexError: class VectorIndexError extends Error {
-    constructor(message: string, public readonly code: string) {
+    public readonly code: string;
+    constructor(message: string, code: string) {
       super(message);
       this.name = "VectorIndexError";
+      this.code = code;
     }
   },
 }));
+
+// Import after mocks are set up (bun mock.module is process-global)
+const { QdrantClientWrapper, QdrantClientError, QdrantConnectionError, QdrantOperationError, createQdrantClient, createQdrantClientFromEnv } = await import("../QdrantClient.js");
 
 // ============================================================================
 // Test Configuration
@@ -90,14 +91,13 @@ const testConfig: QdrantClientConfig = {
 
 describe("QdrantClientWrapper - Unit Tests", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    // Default mock implementations
-    mockGetCollections.mockResolvedValue({ collections: [] });
-    mockCreateCollection.mockResolvedValue({});
-    mockGetCollection.mockResolvedValue({ points_count: 10 });
-    mockUpsert.mockResolvedValue({});
-    mockSearch.mockResolvedValue([]);
-    mockDelete.mockResolvedValue({});
+    // Reset all mocks to default implementations
+    mockGetCollections.mockReset().mockResolvedValue({ collections: [] });
+    mockCreateCollection.mockReset().mockResolvedValue({});
+    mockGetCollection.mockReset().mockResolvedValue({ points_count: 10 });
+    mockUpsert.mockReset().mockResolvedValue({});
+    mockSearch.mockReset().mockResolvedValue([]);
+    mockDelete.mockReset().mockResolvedValue({});
   });
 
   describe("Configuration", () => {
@@ -299,6 +299,7 @@ describe("QdrantClientWrapper - Unit Tests", () => {
   describe("Health Check", () => {
     it("should return true when server is healthy", async () => {
       mockGetCollections.mockResolvedValue({ collections: [] });
+      mockGetCollection.mockResolvedValue({ status: "green" });
 
       const client = new QdrantClientWrapper(testConfig);
       await client.connect();
@@ -315,9 +316,8 @@ describe("QdrantClientWrapper - Unit Tests", () => {
     });
 
     it("should return false when health check fails", async () => {
-      mockGetCollections
-        .mockResolvedValueOnce({ collections: [] }) // For connect
-        .mockRejectedValueOnce(new Error("Server error")); // For health check
+      mockGetCollections.mockResolvedValue({ collections: [] }); // For connect
+      mockGetCollection.mockRejectedValue(new Error("Server error")); // For health check
 
       const client = new QdrantClientWrapper(testConfig);
       await client.connect();
@@ -333,6 +333,7 @@ describe("QdrantClientWrapper - Unit Tests", () => {
 
     beforeEach(async () => {
       mockGetCollections.mockResolvedValue({ collections: [] });
+      mockGetCollection.mockResolvedValue({ status: "green" });
       client = new QdrantClientWrapper(testConfig);
       await client.connect();
     });
@@ -527,8 +528,16 @@ describe("QdrantClientWrapper - Unit Tests", () => {
         });
       });
 
-      it("should return false on delete failure", async () => {
+      it("should throw on non-'not found' delete failure", async () => {
         mockDelete.mockRejectedValue(new Error("Delete failed"));
+
+        await expect(client.deleteVector("mem-001")).rejects.toThrow(
+          QdrantOperationError
+        );
+      });
+
+      it("should return false when point not found", async () => {
+        mockDelete.mockRejectedValue(new Error("Point not found"));
 
         const result = await client.deleteVector("mem-001");
         expect(result).toBe(false);
@@ -657,7 +666,12 @@ describe("Error Classes", () => {
 
 describe("Factory Functions", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    mockGetCollections.mockReset().mockResolvedValue({ collections: [] });
+    mockCreateCollection.mockReset().mockResolvedValue({});
+    mockGetCollection.mockReset().mockResolvedValue({ points_count: 10 });
+    mockUpsert.mockReset().mockResolvedValue({});
+    mockSearch.mockReset().mockResolvedValue([]);
+    mockDelete.mockReset().mockResolvedValue({});
   });
 
   describe("createQdrantClient", () => {

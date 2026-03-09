@@ -9,6 +9,7 @@
  */
 
 import { Database } from "bun:sqlite";
+import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 
@@ -49,7 +50,16 @@ export class UserProfileStore {
 
   constructor(dbPath?: string) {
     const resolvedPath = dbPath ?? path.join(os.homedir(), ".ping-mem", "profiles.db");
+    if (resolvedPath !== ":memory:") {
+      fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
+    }
     this.db = new Database(resolvedPath);
+    if (resolvedPath !== ":memory:") {
+      this.db.exec("PRAGMA journal_mode = WAL");
+      this.db.exec("PRAGMA synchronous = NORMAL");
+      this.db.exec("PRAGMA wal_autocheckpoint = 1000");
+    }
+    this.db.exec("PRAGMA busy_timeout = 5000");
     this.initializeSchema();
   }
 

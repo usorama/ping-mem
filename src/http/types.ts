@@ -13,6 +13,8 @@ import type { IngestionService } from "../ingest/IngestionService.js";
 import type { ApiKeyManager } from "../admin/ApiKeyManager.js";
 import type { AdminStore } from "../admin/AdminStore.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
+import type { GraphManager } from "../graph/GraphManager.js";
+import type { HealthMonitor } from "../observability/HealthMonitor.js";
 
 // ============================================================================
 // HTTP Server Types
@@ -53,6 +55,10 @@ export interface HTTPServerConfig {
   ingestionService?: IngestionService | undefined;
   /** QdrantClientWrapper for health checks (optional) */
   qdrantClient?: QdrantClientWrapper | undefined;
+  /** GraphManager for health checks/UI probes (optional) */
+  graphManager?: GraphManager | undefined;
+  /** HealthMonitor for observability status endpoint (optional) */
+  healthMonitor?: HealthMonitor | undefined;
 }
 
 // Re-export PingMemServerConfig for convenience

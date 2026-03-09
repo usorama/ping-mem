@@ -165,6 +165,8 @@ export class EventStore {
     // Configure database
     if (this.config.walMode && this.config.dbPath !== ":memory:") {
       this.db.exec("PRAGMA journal_mode = WAL");
+      this.db.exec("PRAGMA synchronous = NORMAL");
+      this.db.exec("PRAGMA wal_autocheckpoint = 1000");
     }
     if (this.config.foreignKeys) {
       this.db.exec("PRAGMA foreign_keys = ON");

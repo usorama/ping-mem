@@ -8,10 +8,6 @@
  * @version 1.0.0
  */
 
-import { createLogger } from "../util/logger.js";
-
-const log = createLogger("Neo4jClient");
-
 import neo4j, {
   Driver,
   Session,
@@ -19,6 +15,10 @@ import neo4j, {
   Integer,
   Record as Neo4jRecord,
 } from "neo4j-driver";
+import { createServicePolicy, type ServicePolicy } from "../util/CircuitBreaker.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("Neo4jClient");
 
 // ============================================================================
 // Error Classes
@@ -56,7 +56,7 @@ export class Neo4jConnectionError extends Neo4jClientError {
  */
 export class Neo4jQueryError extends Neo4jClientError {
   public readonly query: string;
-  public readonly params: Record<string, unknown> | undefined;
+  public readonly paramKeys: string[] | undefined;
 
   constructor(
     message: string,
@@ -68,7 +68,7 @@ export class Neo4jQueryError extends Neo4jClientError {
     super(message, code, cause);
     this.name = "Neo4jQueryError";
     this.query = query;
-    this.params = params ?? undefined;
+    this.paramKeys = params ? Object.keys(params) : undefined;
     Object.setPrototypeOf(this, Neo4jQueryError.prototype);
   }
 }
@@ -150,6 +150,8 @@ export class Neo4jClient {
   private driver: Driver | null = null;
   private readonly config: ResolvedConfig;
   private connected = false;
+  private readonly servicePolicy: ServicePolicy;
+  private readonly writePolicy: ServicePolicy;
 
   constructor(config: Neo4jClientConfig) {
     this.config = {
@@ -164,6 +166,35 @@ export class Neo4jClient {
         config.maxTransactionRetryTime ?? DEFAULT_TX_RETRY_TIME,
       encrypted: config.encrypted,
     };
+
+    this.servicePolicy = createServicePolicy({
+      name: "neo4j",
+      consecutiveFailures: 5,
+      halfOpenAfterMs: 30_000,
+      maxRetries: 2,
+      timeoutMs: 15_000,
+    });
+
+    this.writePolicy = createServicePolicy({
+      name: "neo4j-write",
+      consecutiveFailures: 5,
+      halfOpenAfterMs: 30_000,
+      maxRetries: 0,
+      timeoutMs: 15_000,
+    });
+
+    const onCircuitChange = (state: "closed" | "open" | "half-open") => {
+      this.connected = state !== "open" && this.driver !== null;
+      if (state === "open") {
+        log.error("Circuit OPEN — Neo4j operations will fail fast", { state });
+      } else if (state === "half-open") {
+        log.info("Circuit half-open — attempting recovery", { state });
+      } else {
+        log.info("Circuit recovered", { state });
+      }
+    };
+    this.servicePolicy.onStateChange(onCircuitChange);
+    this.writePolicy.onStateChange(onCircuitChange);
   }
 
   /**
@@ -209,7 +240,7 @@ export class Neo4jClient {
           : undefined;
 
       throw new Neo4jConnectionError(
-        `Failed to connect to Neo4j at ${this.config.uri}: ${errorMessage}`,
+        `Failed to connect to Neo4j: ${errorMessage}`,
         errorCode,
         error instanceof Error ? error : undefined
       );
@@ -232,6 +263,10 @@ export class Neo4jClient {
    */
   isConnected(): boolean {
     return this.connected && this.driver !== null;
+  }
+
+  getCircuitState(): "closed" | "open" | "half-open" {
+    return this.servicePolicy.state;
   }
 
   /**
@@ -273,10 +308,15 @@ export class Neo4jClient {
     cypher: string,
     params?: Record<string, unknown>
   ): Promise<T[]> {
-    const session = this.getSession(neo4j.session.READ);
-
     try {
-      const result = await session.run(cypher, params);
+      const result = await this.servicePolicy.execute(async () => {
+        const session = this.getSession(neo4j.session.READ);
+        try {
+          return await session.run(cypher, params);
+        } finally {
+          await session.close();
+        }
+      });
 
       return result.records.map((record: Neo4jRecord) => {
         const obj: Record<string, unknown> = {};
@@ -301,8 +341,6 @@ export class Neo4jClient {
         errorCode,
         error instanceof Error ? error : undefined
       );
-    } finally {
-      await session.close();
     }
   }
 
@@ -326,10 +364,15 @@ export class Neo4jClient {
     cypher: string,
     params?: Record<string, unknown>
   ): Promise<T> {
-    const session = this.getSession(neo4j.session.WRITE);
-
     try {
-      const result = await session.run(cypher, params);
+      const result = await this.writePolicy.execute(async () => {
+        const session = this.getSession(neo4j.session.WRITE);
+        try {
+          return await session.run(cypher, params);
+        } finally {
+          await session.close();
+        }
+      });
 
       // If there are records, return the first one
       if (result.records.length > 0) {
@@ -369,8 +412,6 @@ export class Neo4jClient {
         errorCode,
         error instanceof Error ? error : undefined
       );
-    } finally {
-      await session.close();
     }
   }
 
@@ -384,10 +425,15 @@ export class Neo4jClient {
   async executeTransaction<T>(
     work: (session: Session) => Promise<T>
   ): Promise<T> {
-    const session = this.getSession(neo4j.session.WRITE);
-
     try {
-      return await work(session);
+      return await this.writePolicy.execute(async () => {
+        const session = this.getSession(neo4j.session.WRITE);
+        try {
+          return await work(session);
+        } finally {
+          await session.close();
+        }
+      });
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -403,8 +449,6 @@ export class Neo4jClient {
         errorCode,
         error instanceof Error ? error : undefined
       );
-    } finally {
-      await session.close();
     }
   }
 
@@ -421,9 +465,10 @@ export class Neo4jClient {
     try {
       await this.executeQuery("RETURN 1 as ping");
       return true;
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      log.warn("Neo4j ping failed", { error: message });
+    } catch (error) {
+      log.warn("Neo4j ping failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   }

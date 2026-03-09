@@ -4,7 +4,7 @@
  * @module graph/__tests__/Neo4jClient.test
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   Neo4jClient,
   Neo4jClientError,
@@ -163,13 +163,13 @@ describe("Error Classes", () => {
       expect(error.name).toBe("Neo4jQueryError");
       expect(error.message).toBe("Query failed");
       expect(error.query).toBe("MATCH (n) RETURN n");
-      expect(error.params).toEqual({ limit: 10 });
+      expect(error.paramKeys).toEqual(["limit"]);
       expect(error.code).toBe("N0002");
     });
 
     it("should handle undefined params", () => {
       const error = new Neo4jQueryError("Query failed", "MATCH (n) RETURN n");
-      expect(error.params).toBeUndefined();
+      expect(error.paramKeys).toBeUndefined();
     });
 
     it("should be instanceof Neo4jClientError", () => {

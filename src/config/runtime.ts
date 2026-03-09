@@ -15,6 +15,7 @@ import { TemporalStore } from "../graph/TemporalStore.js";
 import { LineageEngine } from "../graph/LineageEngine.js";
 import { EvolutionEngine } from "../graph/EvolutionEngine.js";
 import { QdrantClientWrapper } from "../search/QdrantClient.js";
+import type { HealthMonitor } from "../observability/HealthMonitor.js";
 import { createLogger } from "../util/logger.js";
 
 const log = createLogger("Runtime");
@@ -45,6 +46,7 @@ export interface RuntimeServices {
   lineageEngine?: LineageEngine;
   evolutionEngine?: EvolutionEngine;
   qdrantClient?: QdrantClientWrapper;
+  healthMonitor?: HealthMonitor;
 }
 
 function getNeo4jUsername(): string | undefined {

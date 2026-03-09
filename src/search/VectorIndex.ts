@@ -190,8 +190,10 @@ export class VectorIndex {
       loader.load(this.db);
 
       // Configure database
-      if (this.config.walMode) {
+      if (this.config.walMode && this.config.dbPath !== ":memory:") {
         this.db.exec("PRAGMA journal_mode = WAL");
+        this.db.exec("PRAGMA synchronous = NORMAL");
+        this.db.exec("PRAGMA wal_autocheckpoint = 1000");
       }
       this.db.exec("PRAGMA foreign_keys = ON");
       this.db.exec(`PRAGMA busy_timeout = ${this.config.busyTimeout}`);

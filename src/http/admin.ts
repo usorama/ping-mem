@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import * as fs from "fs";
 import * as path from "path";
 
+import { createLogger } from "../util/logger.js";
 import { AdminStore, type LLMConfigInput } from "../admin/AdminStore.js";
 import { ApiKeyManager } from "../admin/ApiKeyManager.js";
 import { IngestionService } from "../ingest/IngestionService.js";
@@ -9,7 +10,6 @@ import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import { EventStore } from "../storage/EventStore.js";
 import { ProjectScanner } from "../ingest/ProjectScanner.js";
 import { timingSafeStringEqual } from "../util/auth-utils.js";
-import { createLogger } from "../util/logger.js";
 import {
   deleteProjectSchema,
   rotateKeySchema,
@@ -22,8 +22,6 @@ import {
 } from "../validation/admin-schemas.js";
 import { parseBody, isParseSuccess } from "../validation/parse-body.js";
 
-const log = createLogger("admin");
-
 export interface AdminDependencies {
   adminStore: AdminStore;
   apiKeyManager: ApiKeyManager;
@@ -31,6 +29,8 @@ export interface AdminDependencies {
   diagnosticsStore: DiagnosticsStore;
   eventStore: EventStore;
 }
+
+const log = createLogger("Admin");
 
 const ADMIN_USER_ENV = "PING_MEM_ADMIN_USER";
 const ADMIN_PASS_ENV = "PING_MEM_ADMIN_PASS";
@@ -111,6 +111,15 @@ async function handleAdminApi(
     }
 
     const { projectDir, projectId } = result.data;
+
+    // Guard against path traversal before any filesystem operation
+    if (projectDir) {
+      const segments = projectDir.split(/[\\/]/);
+      if (segments.includes("..")) {
+        return respondJson(res, 400, { error: "projectDir must not contain path traversal sequences" });
+      }
+    }
+
     let resolvedProjectId: string | null;
     try {
       if (projectId) {
@@ -125,6 +134,7 @@ async function handleAdminApi(
       log.error("deleteProject: resolveProjectId failed", { error: message });
       return respondJson(res, 400, { error: "Invalid project directory or project not found" });
     }
+
     if (!resolvedProjectId) {
       return respondJson(res, 404, { error: "Project not found" });
     }
@@ -145,7 +155,7 @@ async function handleAdminApi(
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       log.error("deleteProject: diagnostics cleanup failed", { projectId: resolvedProjectId, error: msg });
-      warnings.push(`Diagnostics: ${msg}`);
+      warnings.push(msg);
     }
 
     if (projectDir) {
@@ -154,7 +164,7 @@ async function handleAdminApi(
       } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : String(error);
         log.error("deleteProject: manifest cleanup failed", { projectDir, error: msg });
-        warnings.push(`Manifest: ${msg}`);
+        warnings.push(msg);
       }
       try {
         const sessionIds = deps.eventStore.findSessionIdsByProjectDir(projectDir);
@@ -162,7 +172,7 @@ async function handleAdminApi(
       } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : String(error);
         log.error("deleteProject: session cleanup failed", { projectDir, error: msg });
-        warnings.push(`Sessions: ${msg}`);
+        warnings.push(msg);
       }
     }
 
@@ -170,14 +180,11 @@ async function handleAdminApi(
       deps.adminStore.deleteProject(resolvedProjectId);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
-      log.error("deleteProject: admin store cleanup failed", { projectId: resolvedProjectId, error: msg });
-      warnings.push(`AdminStore: ${msg}`);
+      log.error("deleteProject: adminStore cleanup failed", { projectId: resolvedProjectId, error: msg });
+      warnings.push(msg);
     }
 
-    return respondJson(res, 200, {
-      data: { projectId: resolvedProjectId },
-      ...(warnings.length > 0 ? { warnings: warnings.map(w => w.split(":")[0] ?? w) } : {}),
-    });
+    return respondJson(res, 200, { data: { projectId: resolvedProjectId, warnings } });
   }
 
   if (req.method === "GET" && pathName === "/api/admin/keys") {
@@ -219,12 +226,10 @@ async function handleAdminApi(
     try {
       const setResult = deps.adminStore.setLLMConfig(result.data);
       return respondJson(res, 200, { data: setResult });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unable to save LLM config";
-      log.error("Failed to save LLM config", { error: message });
+    } catch (error) {
       return respondJson(res, 500, {
         error: "LLMConfigError",
-        message: "Failed to save LLM configuration",
+        message: error instanceof Error ? error.message : "Unable to save LLM config",
       });
     }
   }
@@ -236,7 +241,6 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
   const adminUser = process.env[ADMIN_USER_ENV];
   const adminPass = process.env[ADMIN_PASS_ENV];
   if (!adminUser || !adminPass) {
-    log.warn("Admin authentication is disabled: PING_MEM_ADMIN_USER and PING_MEM_ADMIN_PASS not set");
     return true;
   }
 
@@ -248,18 +252,19 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
     return false;
   }
 
-  // RFC 7617: password is everything after the first colon
   const decoded = Buffer.from(encoded, "base64").toString("utf8");
+  // RFC 7617: password may contain colons — split only on first colon
   const colonIndex = decoded.indexOf(":");
   const user = colonIndex === -1 ? decoded : decoded.substring(0, colonIndex);
   const pass = colonIndex === -1 ? "" : decoded.substring(colonIndex + 1);
 
   // Use timing-safe comparison to prevent timing attacks
   // See: https://owasp.org/www-community/attacks/Timing_analysis
-  const userValid = timingSafeStringEqual(user, adminUser);
-  const passValid = timingSafeStringEqual(pass, adminPass);
+  const userValid = timingSafeStringEqual(user ?? "", adminUser);
+  const passValid = timingSafeStringEqual(pass ?? "", adminPass);
 
   if (!userValid || !passValid) {
+    log.warn("Admin auth failed — invalid credentials", { ip: (req.socket?.remoteAddress) ?? "unknown" });
     res.writeHead(401, { "WWW-Authenticate": "Basic" });
     res.end("Unauthorized");
     return false;
@@ -312,13 +317,12 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
 }
 
 function deleteProjectManifest(projectDir: string): void {
-  // Validate raw input BEFORE resolving to catch traversal attempts
+  // Prevent path traversal attacks
   const segments = projectDir.split(/[\\/]/);
   if (segments.includes("..")) {
     throw new Error("projectDir must not contain path traversal sequences");
   }
   const resolved = path.resolve(projectDir);
-
   const manifestPath = path.join(resolved, ".ping-mem", "manifest.json");
   if (fs.existsSync(manifestPath)) {
     fs.unlinkSync(manifestPath);
@@ -332,19 +336,9 @@ function deleteProjectManifest(projectDir: string): void {
   }
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 function renderAdminPage(): string {
-  const providerOptions = PROVIDERS.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
-  // Escape </script> sequences to prevent script tag breakout (defense-in-depth)
-  const providersJson = JSON.stringify(PROVIDERS).replace(/</g, "\\u003c");
+  const providerOptions = PROVIDERS.map((p) => `<option value="${p}">${p}</option>`).join("");
+  const providersJson = JSON.stringify(PROVIDERS);
 
   return `<!doctype html>
 <html lang="en">
@@ -536,6 +530,12 @@ function renderAdminPage(): string {
   </main>
 
   <script>
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
     const state = {
       apiKey: sessionStorage.getItem("pingMemApiKey") || "",
     };
@@ -567,45 +567,39 @@ function renderAdminPage(): string {
       return json.data;
     }
 
+    function createCell(text) {
+      const td = document.createElement("td");
+      td.textContent = text;
+      return td;
+    }
+
     async function refreshKeys() {
       const keys = await apiFetch("/api/admin/keys");
       const table = document.getElementById("keysTable");
-      while (table.firstChild) { table.removeChild(table.firstChild); }
+      table.textContent = "";
       keys.forEach((key) => {
         const row = document.createElement("tr");
-        const createdAt = new Date(key.createdAt).toLocaleString();
-        const status = key.active ? "Active" : "Inactive";
-        const cells = [
-          { text: String(key.id) },
-          { text: String(key.last4) },
-          { text: createdAt },
-          { text: status },
-        ];
-        cells.forEach((cell) => {
-          const td = document.createElement("td");
-          td.textContent = cell.text;
-          row.appendChild(td);
-        });
+        row.appendChild(createCell(key.id));
+        row.appendChild(createCell(key.last4));
+        row.appendChild(createCell(new Date(key.createdAt).toLocaleString()));
+        row.appendChild(createCell(key.active ? "Active" : "Inactive"));
         const actionTd = document.createElement("td");
         if (key.active) {
           const btn = document.createElement("button");
           btn.className = "ghost";
           btn.textContent = "Deactivate";
-          btn.dataset.id = String(key.id);
+          btn.dataset.id = key.id;
+          btn.addEventListener("click", async () => {
+            await apiFetch("/api/admin/keys/deactivate", {
+              method: "POST",
+              body: JSON.stringify({ id: key.id }),
+            });
+            refreshKeys();
+          });
           actionTd.appendChild(btn);
         }
         row.appendChild(actionTd);
         table.appendChild(row);
-      });
-
-      table.querySelectorAll("button").forEach((btn) => {
-        btn.addEventListener("click", async () => {
-          await apiFetch("/api/admin/keys/deactivate", {
-            method: "POST",
-            body: JSON.stringify({ id: btn.dataset.id }),
-          });
-          refreshKeys();
-        });
       });
     }
 
@@ -624,43 +618,32 @@ function renderAdminPage(): string {
     async function refreshProjects() {
       const projects = await apiFetch("/api/admin/projects");
       const table = document.getElementById("projectsTable");
-      while (table.firstChild) { table.removeChild(table.firstChild); }
+      table.textContent = "";
       projects.forEach((project) => {
         const row = document.createElement("tr");
         const lastIngested = project.lastIngestedAt
           ? new Date(project.lastIngestedAt).toLocaleString()
           : "-";
-        const cells = [
-          { text: String(project.projectDir) },
-          { text: String(project.projectId) },
-          { text: lastIngested },
-        ];
-        cells.forEach((cell) => {
-          const td = document.createElement("td");
-          td.textContent = cell.text;
-          row.appendChild(td);
-        });
+        row.appendChild(createCell(project.projectDir));
+        row.appendChild(createCell(project.projectId));
+        row.appendChild(createCell(lastIngested));
         const actionTd = document.createElement("td");
         const btn = document.createElement("button");
         btn.className = "secondary";
         btn.textContent = "Delete";
-        btn.dataset.dir = String(project.projectDir);
-        actionTd.appendChild(btn);
-        row.appendChild(actionTd);
-        table.appendChild(row);
-      });
-
-      table.querySelectorAll("button").forEach((btn) => {
         btn.addEventListener("click", async () => {
           if (!confirm("Delete all memory, graph, and diagnostics for this project?")) {
             return;
           }
           await apiFetch("/api/admin/projects", {
             method: "DELETE",
-            body: JSON.stringify({ projectDir: btn.dataset.dir }),
+            body: JSON.stringify({ projectDir: project.projectDir }),
           });
           refreshProjects();
         });
+        actionTd.appendChild(btn);
+        row.appendChild(actionTd);
+        table.appendChild(row);
       });
     }
 
@@ -695,15 +678,10 @@ function renderAdminPage(): string {
     document.getElementById("refreshProjects").addEventListener("click", refreshProjects);
     document.getElementById("saveLLMConfig").addEventListener("click", saveLLMConfig);
 
-    function showError(msg) {
-      const el = document.getElementById("apiKeyStatus");
-      if (el) { el.textContent = msg; el.className = "error"; }
-    }
-
     if (state.apiKey) {
-      refreshKeys().catch((e) => showError("Keys: " + e.message));
-      refreshProjects().catch((e) => showError("Projects: " + e.message));
-      loadLLMConfig().catch((e) => showError("LLM: " + e.message));
+      refreshKeys().catch(console.error);
+      refreshProjects().catch(console.error);
+      loadLLMConfig().catch(console.error);
     }
   </script>
 </body>

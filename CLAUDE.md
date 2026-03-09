@@ -1,24 +1,17 @@
 # CLAUDE.md - ping-mem
 
-**Version**: 2.0.0
-**Last Updated**: 2026-03-07
-**Project**: Universal Memory Layer for AI Agents + Multi-Agent Orchestration + Web UI
+**Version**: 2.0.0 | **Last Updated**: 2026-03-09
+
+## What is ping-mem?
+
+Universal Memory Layer for AI agents — persistent, intelligent, contextually-aware memory across sessions, tools, and applications. Self-contained infrastructure consumed by other projects (openclaw, sn-assist, ro-new, etc.).
 
 ---
 
 ## Agent Workflow Reference
 
-**ALL agents working on this project MUST follow** the ping-mem Agent Workflow documented at:
-**`~/.claude/ping-mem-agent-workflow.md`**
+All agents: start session with auto-ingest.
 
-This workflow covers:
-- Session start with auto-ingest
-- Code search before changes
-- Context save (decisions, progress, errors)
-- Verification with local tools
-- Session end
-
-Quick start:
 ```json
 {
   "name": "context_session_start",
@@ -30,1258 +23,175 @@ Quick start:
 }
 ```
 
----
-
-## What is ping-mem?
-
-**ping-mem** is a **Universal Memory Layer** for AI agents that provides persistent, intelligent, and contextually-aware memory across sessions, tools, and applications. It serves as reusable infrastructure that any AI application can leverage.
-
-**Key Insight**: ping-mem is an application that's self-contained for use of AI Agents from other applications and use cases, serving deterministic, repeatable, reproducable memory with/without history, so Agents are always in the know.
+Full workflow: `~/.claude/ping-mem-agent-workflow.md`
 
 ---
 
-## Cross-Project Integration Contract
-
-**ping-mem is shared infrastructure.** Other projects (openclaw, sn-assist, ro-new, etc.) depend on it for codebase intelligence and cross-project awareness. This section defines the contract that ping-mem MUST honor.
-
-### How Other Projects Consume ping-mem
-
-```
-┌────────────────────────────────────────────────────────────┐
-│  Consumer Project (e.g., openclaw, sn-assist)              │
-│  Agent reads/writes via REST API or MCP                    │
-└────────────────────────┬───────────────────────────────────┘
-                         │ HTTP (REST) or MCP (stdio)
-┌────────────────────────▼───────────────────────────────────┐
-│  ping-mem Infrastructure                                   │
-│  ┌──────────┐  ┌──────────┐  ┌─────────┐  ┌──────────┐   │
-│  │ REST API │  │ MCP      │  │ Neo4j   │  │ Qdrant   │   │
-│  │ :3003    │  │ (stdio)  │  │ :7687   │  │ :6333    │   │
-│  └──────────┘  └──────────┘  └─────────┘  └──────────┘   │
-└────────────────────────────────────────────────────────────┘
-```
-
-### REST API Contract (Codebase Operations)
-
-All codebase endpoints require the REST server to have IngestionService configured (Neo4j + Qdrant running). If not configured, endpoints return **503 "Ingestion service not configured"**.
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| POST | `/api/v1/codebase/ingest` | Ingest a project (body: `{projectDir, forceReingest?}`) |
-| POST | `/api/v1/codebase/verify` | Verify project manifest integrity |
-| GET | `/api/v1/codebase/search?query=...&projectId=...&type=...&limit=...` | Semantic code search |
-| GET | `/api/v1/codebase/timeline?projectId=...&filePath=...&limit=...` | Temporal commit history |
-| GET | `/health` | Health check (always 200 if server running) |
-| POST | `/api/v1/agents/register` | Register or update agent identity (body: `{agentId, role, admin?, ttlMs?, quotaBytes?, quotaCount?}`) |
-| GET | `/api/v1/agents/quotas` | Get quota status for all or specific agent |
-| DELETE | `/api/v1/agents/:agentId` | Deregister an agent |
-| POST | `/api/v1/knowledge/ingest` | Ingest a knowledge entry (body: `{projectId, title, solution, symptoms?, rootCause?, tags?}`) |
-| POST | `/api/v1/knowledge/search` | Full-text knowledge search (body: `{query, projectId?, crossProject?, tags?, limit?}`) |
-| GET | `/api/v1/events/stream` | SSE stream of real-time memory events |
-
-**Important**: Codebase search is a **GET** endpoint with query params, NOT POST.
-
-### Project Registration & Auto-Ingestion
-
-Projects must be registered for automatic ingestion:
-
-```bash
-# Register a project (adds to auto-ingest list)
-echo "/path/to/project" >> ~/.ping-mem/registered-projects.txt
-
-# Registered projects file
-cat ~/.ping-mem/registered-projects.txt
-```
-
-**Auto-ingestion triggers:**
-- Git post-commit hook (global hook, every commit)
-- launchd periodic job (every 10 minutes)
-- Manual: `bun run scripts/force-ingest.ts <projectDir>`
-
-### Project Identity (Path-Independent)
-
-**CRITICAL**: ProjectId is computed from git identity, NOT filesystem paths.
-
-```
-projectId = SHA-256(remoteUrl + "::" + relativeToGitRoot)
-```
-
-This ensures the same project produces the same projectId regardless of:
-- Local clone path vs Docker mount path
-- CI runner paths vs developer machines
-- Different OS path separators
-
-**Example**: A project at `/Users/dev/myproject` and Docker-mounted at `/projects/myproject` with the same git remote will produce identical projectIds.
-
-### Docker Volume Mapping
-
-When running in Docker, host paths are mounted differently:
-
-```yaml
-# docker-compose.yml
-volumes:
-  - /Users/umasankr/Projects:/projects:rw
-```
-
-| Host Path | Container Path |
-|-----------|---------------|
-| `/Users/umasankr/Projects/openclaw` | `/projects/openclaw` |
-| `/Users/umasankr/Projects/ping-mem` | `/projects/ping-mem` |
-
-The path-independent projectId ensures Neo4j graph nodes and Qdrant vectors created by Docker match those created locally.
-
-### Consumer Integration Checklist
-
-For any project integrating with ping-mem:
-
-1. **Register**: Add project path to `~/.ping-mem/registered-projects.txt`
-2. **Verify ingestion**: `curl http://localhost:3003/api/v1/codebase/search?query=test&limit=1`
-3. **Check health**: `curl http://localhost:3003/health`
-4. **If 503**: Ensure Docker containers are running (`docker ps | grep ping-mem`)
-5. **Force reingest**: `bun run scripts/force-ingest.ts /path/to/project`
-
-### Failure Modes for Consumers
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem-rest` container |
-| Empty search results | Project not ingested into Qdrant | Run force-ingest script |
-| Wrong projectId | Path mismatch (Docker vs local) | Verify git remote URL is consistent |
-| Connection refused :3003 | REST container down | `docker-compose up -d ping-mem-rest` |
-| ECONNREFUSED :6333 | Qdrant down | `docker restart ping-mem-qdrant` |
-
----
-
-## Code Ingestion System (v1.1.0)
-
-**ping-mem now includes a deterministic, time-aware codebase understanding system** that ingests code + git history and provides:
-
-## Diagnostics + Worklog System (v1.3.0)
-
-**ping-mem now includes a comprehensive diagnostics system** that enables:
-- Bit-for-bit reproducible diagnostics tracking across CI runs
-- Multi-tool quality tracking (TypeScript, ESLint, Prettier)
-- Symbol-level attribution (function/class-level error tracking)
-- LLM-powered summaries with provenance and caching
-- Performance benchmarks for scalability validation
-- Temporal bug tracking with full provenance
-- Content-addressable analysis IDs for regression detection
-- Automated quality gate recording via CLI and CI/CD
-
-### Key Features
-
-1. **Deterministic Storage**
- - SQLite-backed DiagnosticsStore with deterministic IDs
- - analysisId = sha256(projectId + treeHash + tool + config + findings)
- - findingId = sha256(analysisId + location + rule + message)
- - symbolId = sha256(filePath + name + kind + startLine)
-
-2. **Multi-Tool SARIF Integration**
- - Full SARIF 2.1.0 parser for standardized tool output
- - TypeScript SARIF generator (tsc-sarif)
- - ESLint SARIF generator (eslint-sarif) - Prettier SARIF generator (prettier-sarif) - Batch processing via `--sarifPaths` - Normalized findings (cross-platform paths, whitespace, severity)
-
-3. **Symbol-Level Attribution** - AST-based symbol extraction (TypeScript/JavaScript)
- - Regex-based extraction (Python)
- - Findings mapped to containing symbols (functions, classes, methods)
- - Neo4j persistence: `(Chunk)-[:CONTAINS_SYMBOL]->(Symbol)`
- - Query findings by symbol via `diagnostics_by_symbol`
-
-4. **LLM-Powered Summaries** - Optional OpenAI-based summarization
- - Content-addressable caching (same analysisId -> cached summary)
- - Cost tracking (tokens, USD)
- - Graceful fallback to raw findings
- - MCP tool: `diagnostics_summarize` with `useLLM` flag
-
-5. **Performance Benchmarks** - Comprehensive test suite (100, 1k, 10k, 100k findings)
- - Memory usage benchmarks
- - CI integration with regression detection
- - Performance budgets documented
-
-6. **CLI Collector**
- - Automated diagnostics ingestion: `bun run diagnostics:collect`
- - Batch SARIF processing: `--sarifPaths` - Computes configHash, environmentHash, tool identity
- - Records DIAGNOSTICS_INGESTED events to EventStore
-
-7. **CI/CD Integration**
- - GitHub Actions workflow for all three tools - Performance benchmark workflow - REST API endpoints for non-MCP clients
- - Artifact uploads (SARIF files + diagnostics DB)
-
-8. **Worklog Events**
- - Track tool runs, git operations, agent tasks
- - Full provenance for "what happened when"
- - MCP tools: worklog_record, worklog_list
-
----
-
-## Admin System (v1.4.0)
-
-**Admin panel and API key management system:**
-
-### Key Features
-1. **Admin Web UI** (`/admin`) - HTML-based admin panel with Basic Auth
-2. **API Key Management** - Rotate, deactivate, seed API keys (AES-256-GCM encrypted)
-3. **Project Management** - List/delete ingested projects with full cleanup
-4. **LLM Provider Config** - Configure OpenAI, Anthropic, OpenRouter, etc. for LLM summaries
-5. **Production Docker Compose** (`docker-compose.prod.yml`) - Full stack with Neo4j, Qdrant, ping-mem
-
-### Environment Variables (v1.4.0)
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `PING_MEM_API_KEY` | For auth | | Seed API key for authentication |
-| `PING_MEM_ADMIN_USER` | For admin | | Admin panel Basic Auth username |
-| `PING_MEM_ADMIN_PASS` | For admin | | Admin panel Basic Auth password |
-| `PING_MEM_SECRET_KEY` | For encryption | | Secret for AES-256-GCM key encryption |
-| `PING_MEM_ADMIN_DB_PATH` | No | `~/.ping-mem/admin.db` | Admin SQLite DB path |
-| `PING_MEM_DIAGNOSTICS_DB_PATH` | No | `~/.ping-mem/diagnostics.db` | Diagnostics DB path |
-
----
-
-## Multi-Agent Memory (v2.0.0)
-
-**Multi-agent orchestration with isolation, quotas, and knowledge sharing:**
-
-### Key Features
-1. **Agent Registration** - Register and deregister agents with configurable TTL
-2. **Per-Agent Quotas** - Byte and count limits per agent, enforced at write time
-3. **Agent-Scoped Memory Isolation** - Each agent's memory is isolated by agentId
-4. **Knowledge Store** - Cross-project FTS5 full-text search over structured knowledge entries
-5. **Causal Reasoning** - Graph-based lineage tracking and causal chain queries
-6. **Multi-Model Embedding** - Support for OpenAI, Gemini, and deterministic hash-based embeddings
-7. **Event-Driven Architecture** - MemoryPubSub real-time event bus with SessionManager integration
-
----
-
-## Web UI (v2.0.0)
-
-**Server-rendered HTMX web interface for all ping-mem features:**
-
-| Route | Purpose |
-|-------|---------|
-| `/ui` | Dashboard (stats, recent events) |
-| `/ui/memories` | Memory Explorer (search, filter, detail) |
-| `/ui/diagnostics` | Diagnostics (SARIF runs, findings) |
-| `/ui/ingestion` | Ingestion Monitor (project status) |
-| `/ui/agents` | Agent Registry (quotas, TTL, status) |
-| `/ui/knowledge` | Knowledge Base (FTS search, detail) |
-| `/ui/sessions` | Sessions (timeline, events) |
-| `/ui/events` | Event Log (paginated, filterable) |
-| `/ui/worklog` | Worklog (entries by kind/session) |
-| `/admin` | Admin Panel (API keys, projects, LLM config) |
-
----
-
-## Code Ingestion System (v1.1.0) - Continued
-
-**Deterministic, time-aware codebase understanding:**
-
-### Core Capabilities
-
-1. **Deterministic Project Scanning**
-   - Merkle tree hashing for project-wide integrity
-   - Content-addressable IDs (SHA-256 based)
-   - Manifest-based change detection (`.ping-mem/manifest.json`)
-   - Project ID derived from git identity
-
-2. **Code Chunking**
-   - Separates code vs comments vs docstrings
-   - TypeScript/JavaScript: `//` and `/* */` comments
-   - Python: `#` comments and `"""` / `'''` docstrings
-   - Deterministic chunk IDs for reproducibility
-
-3. **Git History Ingestion**
-   - Full commit DAG extraction
-   - File change tracking (A/M/D/R/C)
-   - Unified diff parsing with hunk→chunk mapping
-   - Commit messages for explicit "why" provenance
-
-4. **Temporal Code Graph (Neo4j)**
-   - Bi-temporal model for point-in-time queries
-   - Nodes: Project, File, Chunk, Commit
-   - Relationships: HAS_FILE, HAS_CHUNK, MODIFIES, CHANGES
-   - Queries: files at time, file history, commit timeline
-
-5. **Semantic Code Search (Qdrant)**
-   - Deterministic vectorization (hash-based, no ML)
-   - Full provenance metadata per chunk
-   - Search by query with project/file/type filters
-
-6. **Explicit-only "Why" Extraction**
-   - Parses commit messages for reasons
-   - Supports: `Why:`, `Reason:`, `Fixes #`, `Closes #`, ADR refs
-   - **Never guesses or infers** – only explicit sources
-
-### Code Ingestion Usage Example
-
-```bash
-# Ingest a project (via MCP tool)
-codebase_ingest({
-  projectDir: "/path/to/project",
-  forceReingest: false
-})
-
-# Search code
-codebase_search({
-  query: "authentication logic",
-  projectId: "...",
-  type: "code",
-  limit: 10
-})
-
-# Query timeline
-codebase_timeline({
-  projectId: "...",
-  filePath: "src/auth.ts",  # optional
-  limit: 50
-})
-```
-
-### Diagnostics Usage Example (v1.3.0)
-
-```bash
-# Generate SARIF files (all tools)
-bun run diagnostics:tsc-sarif --output diagnostics/tsc.sarif
-bun run diagnostics:eslint-sarif --output diagnostics/eslint.sarif
-bun run diagnostics:prettier-sarif --output diagnostics/prettier.sarif
-
-# Collect diagnostics (batch mode)
-bun run diagnostics:collect \
- --projectDir . \
- --configHash $(sha256sum package.json tsconfig.json) \
- --sarifPaths "diagnostics/tsc.sarif,diagnostics/eslint.sarif,diagnostics/prettier.sarif"
-
-# Or via MCP tool
-diagnostics_ingest({
- projectId: "ping-mem-abc123",
- treeHash: "deadbeef",
- toolName: "tsc",
- toolVersion: "5.3.3",
- configHash: "config-hash",
- sarif: sarifPayload
-})
-
-# Query latest diagnostics
-diagnostics_latest({
- projectId: "ping-mem-abc123",
- toolName: "tsc"
-})
-
-# Compare two runs
-diagnostics_diff({
- analysisIdA: "before-commit",
- analysisIdB: "after-commit"
-})
-
-# Compare across toolsdiagnostics_compare_tools({
- projectId: "ping-mem-abc123",
- treeHash: "deadbeef",
- toolNames: ["tsc", "eslint", "prettier"]
-})
-
-# Group findings by symboldiagnostics_by_symbol({
- analysisId: "analysis-123",
- groupBy: "symbol"
-})
-
-# Get LLM summarydiagnostics_summarize({
- analysisId: "analysis-123",
- useLLM: true  // Requires OPENAI_API_KEY
-})
-
-# Record worklog event
-worklog_record({
- kind: "diagnostics",
- title: "TypeScript type check",
- status: "success",
- toolName: "tsc",
- durationMs: 1234
-})
-```
-
----
-
-## Quick Start
-
-### Installation
-
-```bash
-# Clone repository
-git clone https://github.com/ping-gadgets/ping-mem.git
-cd ping-mem
-
-# Install dependencies
-bun install
-
-# Build TypeScript
-bun run build
-```
-
-### Basic Usage (SQLite only)
-
-```bash
-# Run MCP server (for Claude Code integration)
-bun run dist/mcp/cli.js
-
-# Or start HTTP server (REST mode)
-bun run start
-
-# Or start HTTP server (SSE mode for real-time)
-bun run start:sse
-```
-
-### Full Stack (with Neo4j and Qdrant) - Required for Code Ingestion
-
-```bash
-# Start dependencies with Docker
-docker-compose up -d neo4j qdrant
-
-# Set environment variables (REQUIRED for ingestion)
-export NEO4J_URI="bolt://localhost:7687"
-export NEO4J_USERNAME="neo4j"
-export NEO4J_PASSWORD="your-password"
-export QDRANT_URL="http://localhost:6333"
-export QDRANT_COLLECTION_NAME="ping-mem-vectors"
-export QDRANT_VECTOR_DIMENSIONS="768"
-
-# Run with full ingestion capabilities
-bun run dist/mcp/cli.js
-```
-
-**Note**: Neo4j and Qdrant are **required** for code ingestion features. Core memory operations work without them.
-
----
-
-## Integration Examples
-
-### 1. Claude Code Integration (stdio transport)
-
-Add to your Claude Code MCP settings (`~/.claude/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "ping-mem": {
-      "command": "bun",
-      "args": [
-        "run",
-        "/Users/umasankr/Projects/ping-mem/dist/mcp/cli.js"
-      ],
-      "env": {
-        "PING_MEM_DB_PATH": "~/.claude/ping-mem.db",
-        "PING_MEM_VECTOR_SEARCH": "false"
-      }
-    }
-  }
-}
-```
-
-**Usage in Claude Code**:
-- MCP tools available as `ping_mem_*` functions
-- Automatic session management on startup
-- Context persistence across conversations
-
-### 2. Node.js Applications (REST)
-
-```typescript
-import { createRESTClient } from "ping-mem/client";
-
-// Create client
-const client = createRESTClient({
-  baseUrl: "http://localhost:3000"
-});
-
-// Start session
-await client.startSession({
-  name: "my-app-session",
-  projectDir: process.cwd()
-});
-
-// Save memory
-await client.save("user-pref", "dark-mode", {
-  category: "note",
-  priority: "high"
-});
-
-// Search memories
-const results = await client.search({
-  query: "theme",
-  limit: 10
-});
-
-// Close client
-await client.close();
-```
-
-**Start HTTP server**:
-```bash
-# Terminal 1: Start ping-mem HTTP server
-bun run start:rest
-
-# Terminal 2: Run your Node.js app
-node my-app.js
-```
-
-### 3. Python Scripts (REST API)
-
-```python
-import requests
-
-BASE_URL = "http://localhost:3000"
-
-# Start session
-response = requests.post(f"{BASE_URL}/session/start", json={
-    "name": "python-session"
-})
-session_id = response.json()["sessionId"]
-
-# Save memory
-requests.post(f"{BASE_URL}/context/save", json={
-    "key": "decision",
-    "value": "Use PostgreSQL for production",
-    "category": "decision",
-    "priority": "high"
-}, headers={"X-Session-ID": session_id})
-
-# Search memories
-response = requests.get(f"{BASE_URL}/context/search", params={
-    "query": "database",
-    "limit": 5
-}, headers={"X-Session-ID": session_id})
-
-print(response.json())
-```
-
-**Start HTTP server**:
-```bash
-# Terminal 1: Start ping-mem
-bun run start:rest
-
-# Terminal 2: Run Python script
-python script.py
-```
-
-### 4. curl Examples
-
-```bash
-# Set base URL
-BASE="http://localhost:3000"
-
-# Start session
-SESSION=$(curl -s -X POST "$BASE/session/start" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"curl-session"}' \
-  | jq -r '.sessionId')
-
-# Save memory
-curl -X POST "$BASE/context/save" \
-  -H "Content-Type: application/json" \
-  -H "X-Session-ID: $SESSION" \
-  -d '{
-    "key": "auth-decision",
-    "value": "JWT with RS256",
-    "category": "decision",
-    "priority": "high"
-  }'
-
-# Get memory by key
-curl -X GET "$BASE/context/get/key:auth-decision" \
-  -H "X-Session-ID: $SESSION"
-
-# Search memories
-curl -X GET "$BASE/context/search?query=auth&limit=5" \
-  -H "X-Session-ID: $SESSION"
-
-# Get status
-curl -X GET "$BASE/status" \
-  -H "X-Session-ID: $SESSION"
-
-# Create checkpoint
-curl -X POST "$BASE/context/checkpoint" \
-  -H "Content-Type: application/json" \
-  -H "X-Session-ID: $SESSION" \
-  -d '{"name":"pre-deployment"}'
-```
-
----
-
-## Architecture Reference
-
-### Core Components
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     ping-mem Architecture                    │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              Interfaces                             │    │
-│  │  • MCP Server (stdio) - Claude Code integration     │    │
-│  │  • HTTP Server (REST/SSE) - Universal access        │    │
-│  │  • Client SDK (TypeScript) - Application library    │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                          │                                   │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              Core Layer                              │    │
-│  │  • MemoryManager - CRUD operations                  │    │
-│  │  • SessionManager - Session lifecycle               │    │
-│  │  • EventStore - Immutable append-only log           │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                          │                                   │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              Ingestion Layer                        │    │
-│  │  • ProjectScanner - Merkle tree + manifest          │    │
-│  │  • CodeChunker - Code vs comment separation         │    │
-│  │  • GitHistoryReader - Commit DAG + diffs            │    │
-│  │  • IngestionService - Orchestrates pipeline         │    │
-│  │  • DeterministicVectorizer - Hash-based vectors     │    │
-│  │  • CodeIndexer - Qdrant code search                 │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                          │                                   │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              Storage Layer                           │    │
-│  │  • SQLite (bun:sqlite) - Core memory storage        │    │
-│  │  • Neo4j - Temporal code graph (required for ingestion) │    │
-│  │  • Qdrant - Semantic search (required for ingestion) │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                               │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Component Details
-
-#### 0. Ingestion Layer (`src/ingest/`, `src/search/`)
-Deterministic code ingestion system (v1.1.0)
-
-- **ProjectScanner** (`src/ingest/ProjectScanner.ts`)
-  - Merkle tree hashing for project integrity
-  - Content-addressable project/file IDs
-  - Manifest storage (`.ping-mem/manifest.json`)
-  - Change detection for incremental updates
-
-- **CodeChunker** (`src/ingest/CodeChunker.ts`)
-  - Separates code vs comments vs docstrings
-  - Supports TypeScript, JavaScript, Python
-  - Deterministic chunk IDs (SHA-256 based)
-  - Line number tracking for provenance
-
-- **GitHistoryReader** (`src/ingest/GitHistoryReader.ts`)
-  - Full commit DAG extraction
-  - File change tracking (A/M/D/R/C)
-  - Unified diff parsing with hunk ranges
-  - Commit message parsing for "why" provenance
-
-- **IngestionService** (`src/ingest/IngestionService.ts`)
-  - High-level API for agents
-  - Methods: `ingestProject()`, `verifyProject()`, `searchCode()`, `queryTimeline()`
-  - Explicit-only "why" extraction (never inferred)
-
-- **TemporalCodeGraph** (`src/graph/TemporalCodeGraph.ts`)
-  - Neo4j persistence for temporal queries
-  - Nodes: Project, File, Chunk, Commit
-  - Relationships: HAS_FILE, HAS_CHUNK, MODIFIES, CHANGES
-  - Queries: files at time, file history, commit timeline
-
-- **DeterministicVectorizer** (`src/search/DeterministicVectorizer.ts`)
-  - Hash-based feature vectors (no ML)
-  - Bit-for-bit reproducible
-  - N-gram generation (1-3 grams)
-  - L2 normalization
-
-- **CodeIndexer** (`src/search/CodeIndexer.ts`)
-  - Qdrant indexing for code chunks
-  - Full provenance metadata per chunk
-  - Semantic search with filters
-
-#### 1. MemoryManager (`src/memory/`)
-- **Purpose**: Core CRUD operations for memory items
-- **Key Methods**:
-  - `save(key, value, options)` - Store memory with metadata
-  - `get(key)` - Retrieve by exact key
-  - `search(query, filters)` - Semantic/fuzzy search
-  - `update(key, value)` - Update existing memory
-  - `delete(key)` - Remove memory
-
-#### 2. SessionManager (`src/session/`)
-- **Purpose**: Manage session lifecycle and isolation
-- **Key Methods**:
-  - `startSession(name, options)` - Create new session
-  - `endSession(sessionId)` - Close session
-  - `getSession(sessionId)` - Get session info
-  - `listSessions(limit)` - List recent sessions
-
-#### 3. EventStore (`src/storage/`)
-- **Purpose**: Immutable event log for audit trail
-- **Event Types**:
-  - `SESSION_STARTED`
-  - `CONTEXT_SAVED`
-  - `CONTEXT_UPDATED`
-  - `CHECKPOINT_CREATED`
-  - `SESSION_ENDED`
-- **Features**:
-  - Append-only (no mutations)
-  - Temporal ordering
-  - Replay capability
-
-#### 4. Graph Layer (Neo4j - Optional)
-- **EntityExtractor** (`src/graph/EntityExtractor.ts`)
-  - Extract entities from text (NER)
-  - Extract relationships between entities
-
-- **GraphManager** (`src/graph/GraphManager.ts`)
-  - Store entities as nodes
-  - Store relationships as edges
-  - Query graph patterns
-
-- **RelationshipManager** (`src/graph/RelationshipManager.ts`)
-  - Track temporal relationships
-  - Lineage tracking (upstream/downstream)
-
-#### 5. Search Layer (Qdrant - Optional)
-- **VectorIndex** (`src/search/VectorIndex.ts`)
-  - Generate embeddings (OpenAI)
-  - Store in Qdrant
-  - Semantic similarity search
-
-- **HybridSearchEngine** (`src/search/HybridSearchEngine.ts`)
-  - Combine semantic + keyword + graph
-  - Relevance scoring
-
-- **LineageEngine** (`src/search/LineageEngine.ts`)
-  - Trace entity relationships
-  - Find upstream/downstream dependencies
-
-- **EvolutionEngine** (`src/search/EvolutionEngine.ts`)
-  - Track entity changes over time
-  - Temporal queries
-
-### MCP Tools
-
-All tools are prefixed with `ping_mem_` when loaded in Claude Code:
-
-#### Context Tools (Core)
-| Tool | Purpose |
-|------|---------|
-| `context_session_start` | Start new session with project tracking |
-| `context_save` | Save memory with auto-entity extraction |
-| `context_get` | Retrieve memory by key or filters |
-| `context_search` | Search by natural language query |
-| `context_checkpoint` | Create named checkpoint |
-| `context_restore` | Restore from checkpoint |
-| `context_status` | Get session and server status |
-| `context_link` | Link two entities with relationship |
-| `context_query_relationships` | Query entity graph |
-| `context_hybrid_search` | Combined semantic/graph search |
-| `context_get_lineage` | Trace entity lineage |
-
-#### Codebase Tools (v1.1.0)
-| Tool | Purpose |
-|------|---------|
-| `codebase_ingest` | Ingest project with deterministic hashing |
-| `codebase_verify` | Verify manifest integrity |
-| `codebase_search` | Semantic code search with provenance |
-| `codebase_timeline` | Query temporal history with explicit "why" |
-
-#### Diagnostics Tools (v1.2.0 - v1.3.0)
-| Tool | Purpose | Version |
-|------|---------|---------|
-| `diagnostics_ingest` | Ingest SARIF or normalized findings with full provenance | v1.2.0 |
-| `diagnostics_latest` | Query latest run by project/tool/tree | v1.2.0 |
-| `diagnostics_list` | List findings for a specific analysis | v1.2.0 |
-| `diagnostics_diff` | Compare two analyses (introduced/resolved/unchanged) | v1.2.0 |
-| `diagnostics_summary` | Aggregate finding counts by severity | v1.2.0 |
-| `diagnostics_compare_tools` | Compare diagnostics across multiple tools | v1.3.0 |
-| `diagnostics_by_symbol` | Group findings by symbol or file | v1.3.0 |
-| `diagnostics_summarize` | LLM-powered summary with caching and fallback | v1.3.0 |
-
-#### Worklog Tools (v1.2.0)
-| Tool | Purpose |
-|------|---------|
-| `worklog_record` | Record deterministic worklog event (tool/diagnostics/git/task) |
-| `worklog_list` | List worklog events for a session |
-
-#### Agent Tools (v2.0.0)
-| Tool | Purpose |
-|------|---------|
-| `agent_register` | Register or update an agent identity with quota and TTL |
-| `agent_quota_status` | Get quota usage for a registered agent |
-| `agent_deregister` | Remove an agent registration and release resources |
-
-#### Knowledge Tools (v2.0.0)
-| Tool | Purpose |
-|------|---------|
-| `knowledge_ingest` | Ingest a knowledge entry (upsert by projectId + title) |
-| `knowledge_search` | Full-text search across knowledge entries with FTS5 |
-| `knowledge_get` | Retrieve a specific knowledge entry by ID |
-
-#### Memory PubSub Tools (v2.0.0)
-| Tool | Purpose |
-|------|---------|
-| `memory_subscribe` | Subscribe to real-time memory change events |
-| `memory_unsubscribe` | Unsubscribe from memory events |
-| `memory_compress` | Compress memories into digest facts (heuristic or LLM) |
-
----
-
-## Deployment Instructions
-
-### Local Development
-
-```bash
-# 1. Install dependencies
-bun install
-
-# 2. Build TypeScript
-bun run build
-
-# 3. Run tests
-bun test
-
-# 4. Type check
-bun run typecheck
-
-# 5. Start server
-bun run start           # REST mode
-bun run start:sse       # SSE mode
-```
-
-### Docker Deployment
-
-```bash
-# Build image
-docker build -t ping-mem:latest .
-
-# Run container
-docker run -d \
-  -v ping-mem-data:/data \
-  -p 3000:3000 \
-  -e PING_MEM_DB_PATH=/data/ping-mem.db \
-  ping-mem:latest
-```
-
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `PING_MEM_DB_PATH` | No | `:memory:` | SQLite database path |
-| `NEO4J_URI` | **For ingestion** | | Neo4j Bolt URI (e.g., `bolt://localhost:7687`) |
-| `NEO4J_USERNAME` | **For ingestion** | `neo4j` | Neo4j username |
-| `NEO4J_PASSWORD` | **For ingestion** | | Neo4j password |
-| `QDRANT_URL` | **For ingestion** | | Qdrant REST URL (e.g., `http://localhost:6333`) |
-| `QDRANT_COLLECTION_NAME` | **For ingestion** | `ping-mem-vectors` | Qdrant collection name |
-| `QDRANT_VECTOR_DIMENSIONS` | **For ingestion** | `768` | Vector dimensions |
-| `OPENAI_API_KEY` | Optional | | OpenAI API key (ML-based embeddings + SemanticCompressor LLM mode) |
-| `PING_MEM_MAX_AGENTS` | No | `100` | Maximum number of registered agents |
-| `PING_MEM_PORT` | No | `3000` | HTTP server port |
-| `PING_MEM_TRANSPORT` | No | `rest` | HTTP transport mode (`rest`, `sse`, `streamable-http`) |
-| `PING_MEM_API_KEY` | For auth | | Seed API key for request authentication |
-| `PING_MEM_ADMIN_USER` | For admin | | Admin panel Basic Auth username |
-| `PING_MEM_ADMIN_PASS` | For admin | | Admin panel Basic Auth password |
-| `PING_MEM_SECRET_KEY` | For encryption | | Secret for AES-256-GCM key encryption |
-| `PING_MEM_ADMIN_DB_PATH` | No | `~/.ping-mem/admin.db` | Admin SQLite DB path |
-| `PING_MEM_DIAGNOSTICS_DB_PATH` | No | `~/.ping-mem/diagnostics.db` | Diagnostics DB path |
-
-**Note**: Neo4j and Qdrant are **required for code ingestion** (v1.1.0+), but core memory operations work with SQLite only.
-
-### Configuration Priority
-
-1. Environment variables
-2. CLI arguments
-3. Default values
+## Key Ports & Endpoints
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| ping-mem (MCP/SSE) | 3000 | MCP stdio, SSE streaming |
+| ping-mem-rest | 3003 | REST API |
+| Neo4j | 7687 | Temporal code graph |
+| Qdrant | 6333 | Semantic search |
+
+### Critical REST API Endpoints
+
+| Method | Endpoint | Notes |
+|--------|----------|-------|
+| GET | `/health` | Lightweight liveness (SQLite SELECT 1 only) |
+| GET | `/api/v1/observability/status` | Full system health probe |
+| POST | `/api/v1/codebase/ingest` | `{projectDir, forceReingest?}` |
+| GET | `/api/v1/codebase/search` | Query params: `query`, `projectId`, `type`, `limit` — **GET not POST** |
+| GET | `/api/v1/codebase/timeline` | `projectId`, `filePath`, `limit` |
+| POST | `/api/v1/agents/register` | `{agentId, role, admin?, ttlMs?, quotaBytes?, quotaCount?}` |
+| POST | `/api/v1/knowledge/ingest` | `{projectId, title, solution, symptoms?, rootCause?, tags?}` |
+| POST | `/api/v1/knowledge/search` | `{query, projectId?, crossProject?, tags?, limit?}` |
+| GET | `/api/v1/events/stream` | SSE real-time events |
 
 ---
 
 ## Development Commands
 
 ```bash
-# Install dependencies
-bun install
+bun install          # Install deps
+bun run build        # Compile TypeScript
+bun test             # Run tests (ALWAYS bun, never vitest/jest)
+bun run typecheck    # Type check (0 errors required)
+bun run lint         # Lint
 
-# Build TypeScript
-bun run build
+# Servers
+bun run start        # REST mode (default)
+bun run start:sse    # SSE mode
+bun run start:rest   # REST explicit
 
-# Run tests
-bun test
-
-# Type check (MUST pass with 0 errors)
-bun run typecheck
-
-# Lint
-bun run lint
-
-# Watch mode for development
-bun run dev
-
-# Start HTTP servers
-bun run start           # REST mode (default)
-bun run start:sse       # SSE mode (real-time)
-bun run start:rest      # REST mode (explicit)
-
-# Run MCP server directly
+# MCP
 bun run dist/mcp/cli.js
+
+# Diagnostics
+bun run diagnostics:collect --projectDir . --sarifPaths "..."
+bun run scripts/force-ingest.ts <projectDir>
 ```
 
-### Project Structure
+**Quality gate** (must all pass before commit): `bun run typecheck && bun run lint && bun test`
+
+---
+
+## Project Structure (Key Files)
 
 ```
-ping-mem/
-├── src/
-│   ├── config/            # Runtime configuration
-│   │   └── runtime.ts          # Centralized service initialization
-│   ├── mcp/               # MCP server implementation
-│   │   ├── PingMemServer.ts    # Main MCP server
-│   │   └── cli.ts              # CLI entry point
-│   ├── http/              # HTTP server (REST/SSE)
-│   │   ├── rest-server.ts      # REST API
-│   │   ├── sse-server.ts       # SSE streaming
-│   │   ├── ui/                 # Web UI views and partials (HTMX server-rendered)
-│   │   └── types.ts            # HTTP types
-│   ├── client/            # Client SDK
-│   │   ├── rest-client.ts      # REST client
-│   │   ├── sse-client.ts       # SSE client
-│   │   └── types.ts            # Client types
-│   ├── ingest/            # Code ingestion system
-│   │   ├── ProjectScanner.ts   # Merkle tree + manifest
-│   │   ├── ManifestStore.ts    # Manifest persistence
-│   │   ├── CodeChunker.ts      # Code vs comment separation
-│   │   ├── GitHistoryReader.ts # Git commit + diff parsing
-│   │   ├── IngestionOrchestrator.ts # Pipeline coordinator
-│   │   ├── IngestionService.ts # High-level agent API
-│   │   ├── types.ts            # Type definitions
-│   │   └── index.ts            # Exports
-│   ├── graph/             # Knowledge graph layer
-│   │   ├── Neo4jClient.ts      # Neo4j connection
-│   │   ├── TemporalCodeGraph.ts # Bi-temporal code graph
-│   │   ├── EntityExtractor.ts  # NER
-│   │   ├── GraphManager.ts     # Graph operations
-│   │   └── RelationshipManager.ts
-│   ├── search/            # Search engines
-│   │   ├── QdrantClient.ts     # Qdrant connection
-│   │   ├── CodeIndexer.ts      # Code search
-│   │   ├── DeterministicVectorizer.ts # Hash-based vectors
-│   │   ├── VectorIndex.ts      # Vector search
-│   │   ├── HybridSearchEngine.ts
-│   │   ├── LineageEngine.ts
-│   │   └── EvolutionEngine.ts
-│   ├── knowledge/         # KnowledgeStore (FTS5 knowledge entries) — v2.0
-│   ├── memory/            # Memory operations + SemanticCompressor
-│   ├── pubsub/            # MemoryPubSub (real-time event bus) — v2.0
-│   ├── session/           # Session management
-│   ├── storage/           # SQLite event store + WriteLockManager
-│   ├── types/             # TypeScript definitions + agent error classes
-│   └── validation/        # Input validation (Zod schemas)
-├── examples/              # Usage examples
-│   └── resume-tracking/   # Resume tracking demo
-├── dist/                  # Compiled JavaScript
-├── package.json
-├── tsconfig.json
-├── IMPLEMENTATION_SUMMARY.md # v1.1.0 implementation details
-└── README.md
+src/
+  config/runtime.ts          # Centralized service initialization
+  mcp/PingMemServer.ts       # MCP server
+  http/rest-server.ts        # REST API (Hono)
+  http/admin.ts              # Admin panel + API key mgmt
+  http/server.ts             # HTTP entry point
+  http/ui/                   # HTMX server-rendered UI
+  ingest/IngestionService.ts # High-level ingestion API
+  ingest/ProjectScanner.ts   # Merkle tree + manifest (path-independent projectId)
+  observability/HealthMonitor.ts   # Self-healing health monitor
+  observability/health-probes.ts   # SQLite/Neo4j/Qdrant probes
+  util/auth-utils.ts         # timingSafeStringEqual, sha256, randomHex
+  util/CircuitBreaker.ts     # Circuit breaker with handler isolation
+  storage/EventStore.ts      # Immutable append-only SQLite log
+  memory/                    # Core CRUD + SemanticCompressor
+  session/SessionManager.ts  # Session lifecycle
+  pubsub/                    # MemoryPubSub real-time events
+  knowledge/                 # KnowledgeStore FTS5
+  graph/TemporalCodeGraph.ts # Neo4j bi-temporal code graph
+  search/CodeIndexer.ts      # Qdrant code search
+.ping-mem/manifest.json      # Incremental ingestion state
 ```
 
 ---
 
-## Serena MCP Integration
+## Cross-Project Integration Contract
 
-**Status**: Active | **Projects**: ping-mem, livekit-tutor | **Indexed**: 387 files
+**ProjectId**: `SHA-256(remoteUrl + "::" + relativeToGitRoot)` — path-independent, same across Docker/local.
 
-**Serena** is an AI-powered coding assistant MCP server providing semantic code navigation, symbol search, and LSP integration. It's configured for this project with deterministic verification workflows.
+**Docker volume**: Host `/Users/umasankr/Projects` → Container `/projects`
 
-### Quick Reference
+**Registered projects**: `~/.ping-mem/registered-projects.txt`
 
-| Task | Serena Tool | Verification Tool |
-|------|------------|-------------------|
-| Find symbol | `serena_find_symbol` | `grep -r "Symbol" src/` |
-| Find references | `serena_find_referencing_symbols` | `grep -r "Symbol" src/` |
-| Get file overview | `serena_get_symbols_overview` | `grep "^export" file.ts` |
-| Search pattern | `serena_search_for_pattern` | `grep -rE "pattern" src/` |
+### Failure Modes
 
-### Verification Protocol (MANDATORY)
-
-**ALWAYS follow this pattern when using Serena**:
-
-```
-1. Query Serena (semantic search)
-   ↓
-2. Verify with Local Tools (Grep/Glob/Read)
-   ↓
-3. Cross-check Results
-   ↓
-4. Document Discrepancies
-```
-
-**Example**:
-```bash
-# 1. Serena query
-serena_find_symbol({query: "EventStore", symbol_types: ["class"]})
-# → Returns: src/storage/EventStore.ts:15
-
-# 2. Local verification
-grep -r "class EventStore" src/ --include="*.ts"
-# → Returns: src/storage/EventStore.ts:15:export class EventStore {
-
-# 3. Cross-check: ✅ Match confirmed
-```
-
-### Risk Mitigation
-
-- **Symbol Search**: Always verify with Grep (Serena may miss ignored files)
-- **File Edits**: Run `git diff`, `bun run typecheck`, `bun test` after edits
-- **Stale Index**: Re-index after external changes or branch switches
-- **LSP Issues**: Restart language server if content is outdated
-
-### Re-indexing
-
-```bash
-# ping-mem
-cd ~/Projects/ping-mem
-uvx --from git+https://github.com/oraios/serena serena project index .
-
-# livekit-tutor
-cd ~/Projects/livekit-gemini-voice-tutor-prototype
-uvx --from git+https://github.com/oraios/serena serena project index .
-```
-
-### Documentation
-
-- **Full Guide**: `docs/SERENA_INTEGRATION.md`
-- **Quick Ref**: `docs/SERENA_QUICK_REF.md`
-- **Official Docs**: https://oraios.github.io/serena/
-
-### Activation
-
-**Requirements**:
-- Claude Code restart (to load MCP server)
-- Tools appear with `serena_*` prefix
-- `.serena/project.yml` exists in project root
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem-rest` container |
+| Empty search results | Project not ingested | Run force-ingest script |
+| Connection refused :3003 | REST container down | `docker-compose up -d ping-mem-rest` |
+| ECONNREFUSED :6333 | Qdrant down | `docker restart ping-mem-qdrant` |
 
 ---
 
-## Related Projects
+## Environment Variables
 
-### rad-engineer-v3
-
-**Location**: `/Users/umasankr/Projects/rad-engineer-v3`
-
-**Relationship**: ping-mem is infrastructure that rad-engineer consumes
-
-```
-┌────────────────────────────────────────────────┐
-│              rad-engineer (Application)         │
-│  • 17 Specialized Agents                       │
-│  • Verification Harness                        │
-│  • Orchestration Engine                        │
-│  • Deterministic Execution                     │
-└─────────────────────────┬──────────────────────┘
-                          │ uses
-┌─────────────────────────▼──────────────────────┐
-│              ping-mem (Infrastructure)          │
-│  • Event Store (audit trail)                   │
-│  • Episodic Memory (session history)           │
-│  • Knowledge Graph (entity relations)          │
-│  • Checkpoint/Restore (crash recovery)         │
-└────────────────────────────────────────────────┘
-```
-
-**How rad-engineer uses ping-mem**:
-1. **Event Sourcing**: Every agent action logged to event store
-2. **Checkpoint/Restore**: Save state before risky operations
-3. **Agent Context**: Each agent has isolated memory context
-4. **Verification Results**: Store contract validation outcomes
-5. **Session Replay**: Reconstruct agent workflows from events
-
-### Other Consumers
-
-ping-mem is designed as **universal infrastructure**. Potential consumers:
-- AI coding assistants (session continuity)
-- Research tools (knowledge accumulation)
-- Autonomous agents (long-running state)
-- Any MCP-compatible tool
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PING_MEM_DB_PATH` | No | `:memory:` | SQLite database path |
+| `NEO4J_URI` | For ingestion | | `bolt://localhost:7687` |
+| `NEO4J_USERNAME` / `NEO4J_PASSWORD` | For ingestion | | Neo4j credentials |
+| `QDRANT_URL` | For ingestion | | `http://localhost:6333` |
+| `QDRANT_COLLECTION_NAME` | No | `ping-mem-vectors` | |
+| `OPENAI_API_KEY` | Optional | | ML embeddings + LLM summaries |
+| `PING_MEM_API_KEY` | For auth | | Seed API key |
+| `PING_MEM_ADMIN_USER` / `PING_MEM_ADMIN_PASS` | For admin | | Basic Auth |
+| `PING_MEM_SECRET_KEY` | For encryption | | AES-256-GCM key encryption |
+| `PING_MEM_PORT` | No | 3000 | HTTP port |
 
 ---
 
-## Key Design Principles
+## MCP Tools Reference
 
-### 1. Interface Agnostic
-- Works with any LLM (Claude, GPT-4, local models)
-- No assumptions about AI interface
-- Pure memory infrastructure
+**Core**: `context_session_start`, `context_save`, `context_get`, `context_search`, `context_checkpoint`, `context_restore`, `context_status`, `context_link`
 
-### 2. Transport Agnostic
-- MCP (stdio) for Claude Code
-- REST API for HTTP clients
-- SSE for real-time streaming
-- Future: WebSocket, gRPC
+**Codebase**: `codebase_ingest`, `codebase_verify`, `codebase_search`, `codebase_timeline`
 
-### 3. Storage Flexibility
-- **Core Memory**: SQLite (zero dependencies, always available)
-- **Ingestion System** (v1.1.0): Neo4j + Qdrant **required at startup**
-  - Neo4j: Temporal code graph (mandatory for ingestion)
-  - Qdrant: Semantic code search (mandatory for ingestion)
-- **Future**: PostgreSQL, Redis
+**Diagnostics**: `diagnostics_ingest`, `diagnostics_latest`, `diagnostics_diff`, `diagnostics_by_symbol`, `diagnostics_summarize`
 
-### 4. Event Sourcing
-- Immutable append-only log
-- Complete audit trail
-- State replay capability
-- Crash recovery
+**Agents**: `agent_register`, `agent_quota_status`, `agent_deregister`
 
-### 5. Session Isolation
-- Each session has isolated memory
-- Optional cross-session queries
-- Multi-project support (4-tier: org/project/user/session)
+**Knowledge**: `knowledge_ingest`, `knowledge_search`, `knowledge_get`
+
+**Worklog**: `worklog_record`, `worklog_list`
+
+**PubSub**: `memory_subscribe`, `memory_unsubscribe`, `memory_compress`
 
 ---
 
-## Quality Gates
+## Web UI Routes
 
-| Gate | Command | Requirement |
-|------|---------|-------------|
-| TypeScript | `bun run typecheck` | 0 errors |
-| Tests | `bun test` | 100% pass |
-| Build | `bun run build` | No errors |
+`/ui` dashboard · `/ui/memories` · `/ui/diagnostics` · `/ui/ingestion` · `/ui/agents` · `/ui/knowledge` · `/ui/sessions` · `/ui/events` · `/ui/worklog` · `/admin`
 
 ---
 
-## Documentation
+## Key Design Decisions
 
-- **README.md**: Quick start and basic usage
-- **IMPLEMENTATION_SUMMARY.md**: v1.1.0 ingestion system implementation details
-- **src/client/README.md**: Client SDK documentation
-- **rad-engineer docs**: `/Users/umasankr/Projects/rad-engineer-v3/docs/ping-mem/`
-  - BRIEF.md: Executive summary
-  - ARCHITECTURE.md: Full technical architecture
-  - PRD.md: Product requirements
-  - SPECIFICATION.md: Detailed specifications
+- **SQLite**: Core storage (always available, no deps)
+- **Neo4j + Qdrant**: Required for ingestion features; optional for core memory
+- **Event sourcing**: Immutable append-only EventStore, all state derived from events
+- **Ingestion pipeline**: ProjectScanner → CodeChunker → GitHistoryReader → Neo4j → Qdrant
+- **Explicit "why" only**: Commit message `Why:`, `Reason:`, `Fixes #` — never inferred
+- **Security**: AES-256-GCM API keys, timingSafeEqual auth, CSRF protection, rate limiting
 
----
-
-## Release History
-
-### v2.0.0 (2026-03-07)
-- Multi-agent memory orchestration (registration, quotas, TTL, isolation)
-- Knowledge store with cross-project FTS5 search
-- Causal reasoning and graph-based lineage
-- Multi-model embedding support (OpenAI, Gemini, deterministic)
-- Web UI with HTMX server-rendered views (10 routes)
-- Event-driven architecture with MemoryPubSub
-- Memory compression (heuristic and LLM modes)
-- All 66 audit findings resolved (security, quality, features)
-
-### v1.4.0 (2026-02-18)
-- Admin web UI with Basic Auth
-- API key management (AES-256-GCM encrypted)
-- Project management and LLM provider config
-- Production Docker Compose deployment
-
-### v1.3.0 (2026-01-29)
-- Multi-tool SARIF integration (ESLint, Prettier, TypeScript)
-- Symbol-level attribution (AST-based for TS, regex for Python)
-- LLM-powered summaries with OpenAI + caching
-- Performance benchmarks
-
-### v1.2.0 (2026-01-29)
-- Deterministic Diagnostics + Worklog System
-- DiagnosticsStore with content-addressable IDs
-- SARIF 2.1.0 parser, CLI collector, REST endpoints, MCP tools
-
-### v1.1.0 (2026-01-29)
-- Deterministic temporal code ingestion
-- ProjectScanner, CodeChunker, GitHistoryReader
-- Neo4j temporal code graph, Qdrant code indexing
-
-### v1.0.0 (2026-01-27)
-- Initial standalone release
-
----
-
-## Deployment Endpoints
+## Deployment
 
 | Environment | Endpoint | Credentials |
 |-------------|----------|-------------|
-| **Production** | `https://ping-mem.ping-gadgets.com` | `~/Projects/.creds/cloudflare.json` |
-| **Local** | `http://localhost:3000` | None |
+| Production | `https://ping-mem.ping-gadgets.com` | `~/Projects/.creds/cloudflare.json` |
+| Local | `http://localhost:3000` | None |
 
 ---
 
-## Troubleshooting
+## Serena MCP
 
-### Issue: "bun:sqlite not found"
+Enabled for semantic code navigation. Always verify Serena results with Grep/Glob.
 
-```bash
-# Ensure you're using Bun runtime
-bun --version
-# If not installed, install Bun:
-curl -fsSL https://bun.sh/install | bash
-```
-
-### Issue: "Module not found"
-
-```bash
-# Rebuild TypeScript
-bun run build
-
-# Clear cache and reinstall
-rm -rf node_modules bun.lockb
-bun install
-```
-
-### Issue: Neo4j connection failed
-
-```bash
-# Check Neo4j is running
-docker ps | grep neo4j
-
-# Check connection
-bolt://localhost:7687
-
-# Verify credentials in .env
-cat .env | grep NEO4J
-```
-
-### Issue: Vector search not working
-
-```bash
-# Check Qdrant is running
-curl http://localhost:6333/collections
-
-# Verify OpenAI API key
-echo $OPENAI_API_KEY
-
-# Test embedding generation
-curl https://api.openai.com/v1/embeddings \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"input":"test","model":"text-embedding-3-small"}'
-```
+Re-index: `uvx --from git+https://github.com/oraios/serena serena project index .`
 
 ---
 
-## Version History
+## Codebase Audit Status
 
-| Version | Date | Changes |
-|---------|------|---------|
-| 2.0.0 | 2026-03-07 | **Multi-Agent Memory Orchestration** - Agent registration/quotas/TTL, knowledge store with FTS5, causal reasoning, multi-model embeddings, Web UI (HTMX), MemoryPubSub, memory compression, all 66 audit findings resolved |
-| 1.4.0 | 2026-02-18 | **Admin + Production Deployment** - Admin web UI, API key management (AES-256-GCM), LLM provider config, production Docker Compose, deployment architecture |
-| 1.3.0 | 2026-01-29 | **Multi-Tool + Symbol Attribution + LLM Summaries** - ESLint/Prettier SARIF, SymbolExtractor, LLM summaries with OpenAI, performance benchmarks |
-| 1.2.0 | 2026-01-29 | **Deterministic Diagnostics + Worklog** - DiagnosticsStore, SARIF 2.1.0 parser, CLI collector, REST endpoints, MCP tools |
-| 1.1.0 | 2026-01-29 | **Deterministic Temporal Code Ingestion** - ProjectScanner, CodeChunker, GitHistoryReader, TemporalCodeGraph, DeterministicVectorizer, CodeIndexer |
-| 1.0.0 | 2026-01-27 | Initial standalone release |
-
----
-
-**License**: MIT
-**Repository**: https://github.com/ping-gadgets/ping-mem
-**Issues**: https://github.com/ping-gadgets/ping-mem/issues
-
-## Codebase Audit Summary (2026-02-01)
-
-**Status: All 66 findings resolved in v2.0.0 (Waves 1-5)**
-
-### Original Audit Statistics (All Fixed)
-| Priority | Count | Resolution |
-|----------|-------|------------|
-| **P0 Critical** | 7 | Fixed: SQL injection, command injection, timing attacks, Zod validation |
-| **P1 High** | 19 | Fixed: Session leaks, race conditions, CORS, `any` types, rate limiting |
-| **P2 Medium** | 22 | Fixed: Test coverage, resource leaks, type safety |
-| **P3 Low** | 18 | Fixed: Logging, docs, code style |
-| **Total** | **66** | All resolved |
+All 66 audit findings resolved in v2.0.0. Current branch `feat/self-healing-health-monitor` (PR #24) under active PR Zero review.

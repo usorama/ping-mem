@@ -11,13 +11,14 @@
 
 import { QdrantClient as QdrantSDKClient } from "@qdrant/js-client-rest";
 import type { MemoryId, SessionId } from "../types/index.js";
+import { createServicePolicy, type ServicePolicy } from "../util/CircuitBreaker.js";
+import { createLogger } from "../util/logger.js";
 import {
   VectorIndex,
   type VectorEmbedding,
   type VectorSearchResult,
   type VectorIndexConfig,
 } from "./VectorIndex.js";
-import { createLogger } from "../util/logger.js";
 
 const log = createLogger("QdrantClient");
 
@@ -152,6 +153,7 @@ export class QdrantClientWrapper {
   private connected = false;
   private usingFallback = false;
   private fallbackIndex: VectorIndex | null = null;
+  private readonly servicePolicy: ServicePolicy;
 
   constructor(config: QdrantClientConfig) {
     this.config = {
@@ -164,6 +166,27 @@ export class QdrantClientWrapper {
       enableFallback: config.enableFallback ?? DEFAULT_ENABLE_FALLBACK,
       fallbackConfig: config.fallbackConfig,
     };
+
+    this.servicePolicy = createServicePolicy({
+      name: "qdrant",
+      consecutiveFailures: 5,
+      halfOpenAfterMs: 30_000,
+      maxRetries: 2,
+      timeoutMs: 15_000,
+    });
+
+    this.servicePolicy.onStateChange((state) => {
+      if (state === "open") {
+        this.connected = false;
+      } else if (!this.usingFallback) {
+        this.connected = this.client !== null;
+      }
+      if (state === "closed") {
+        log.info("Circuit recovered", { state });
+      } else {
+        log.warn("Circuit state changed", { state });
+      }
+    });
   }
 
   /**
@@ -203,10 +226,8 @@ export class QdrantClientWrapper {
       this.client = null;
 
       if (this.config.enableFallback) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
         log.warn("Qdrant connection failed, falling back to local VectorIndex", {
-          url: this.config.url,
-          error: errorMessage,
+          error: error instanceof Error ? error.message : String(error),
         });
         await this.initializeFallback();
         this.connected = true;
@@ -250,6 +271,10 @@ export class QdrantClientWrapper {
     return this.usingFallback;
   }
 
+  getCircuitState(): "closed" | "open" | "half-open" {
+    return this.servicePolicy.state;
+  }
+
   /**
    * Perform health check on Qdrant server
    *
@@ -261,12 +286,13 @@ export class QdrantClientWrapper {
     }
 
     try {
-      // Use getCollections as a health check - it's a lightweight operation
-      await this.client.getCollections();
+      // Check specific collection rather than listing all (avoids leaking other collection names)
+      await this.client.getCollection(this.config.collectionName);
       return true;
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      log.warn("Qdrant health check failed", { url: this.config.url, error: message });
+    } catch (error) {
+      log.warn("healthCheck failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return false;
     }
   }
@@ -332,22 +358,24 @@ export class QdrantClientWrapper {
     }
 
     try {
-      await this.client.upsert(this.config.collectionName, {
-        wait: true,
-        points: [
-          {
-            id: vectorData.memoryId,
-            vector: Array.from(vectorData.embedding),
-            payload: {
-              session_id: vectorData.sessionId,
-              content: vectorData.content,
-              category: vectorData.category ?? null,
-              indexed_at: new Date().toISOString(),
-              metadata: vectorData.metadata ?? null,
+      await this.servicePolicy.execute(() =>
+        this.client!.upsert(this.config.collectionName, {
+          wait: true,
+          points: [
+            {
+              id: vectorData.memoryId,
+              vector: Array.from(vectorData.embedding),
+              payload: {
+                session_id: vectorData.sessionId,
+                content: vectorData.content,
+                category: vectorData.category ?? null,
+                indexed_at: new Date().toISOString(),
+                metadata: vectorData.metadata ?? null,
+              },
             },
-          },
-        ],
-      });
+          ],
+        })
+      );
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -431,9 +459,8 @@ export class QdrantClientWrapper {
         searchParams.filter = { must: mustConditions };
       }
 
-      const results = await this.client.search(
-        this.config.collectionName,
-        searchParams
+      const results = await this.servicePolicy.execute(() =>
+        this.client!.search(this.config.collectionName, searchParams)
       );
 
       return results.map((result) => {
@@ -500,15 +527,26 @@ export class QdrantClientWrapper {
     }
 
     try {
-      await this.client.delete(this.config.collectionName, {
-        wait: true,
-        points: [memoryId],
-      });
+      await this.servicePolicy.execute(() =>
+        this.client!.delete(this.config.collectionName, {
+          wait: true,
+          points: [memoryId],
+        })
+      );
       return true;
-    } catch (error: unknown) {
+    } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      log.error("deleteVector failed", { memoryId, error: message });
-      return false;
+      const isNotFound = message.includes("not found") || message.includes("Not found");
+      if (isNotFound) {
+        log.warn("deleteVector: point not found", { memoryId });
+        return false;
+      }
+      throw new QdrantOperationError(
+        `Failed to delete vector ${memoryId}: ${message}`,
+        "delete",
+        "DELETE_FAILED",
+        error instanceof Error ? error : undefined
+      );
     }
   }
 
@@ -545,8 +583,8 @@ export class QdrantClientWrapper {
     }
 
     try {
-      const collectionInfo = await this.client.getCollection(
-        this.config.collectionName
+      const collectionInfo = await this.servicePolicy.execute(() =>
+        this.client!.getCollection(this.config.collectionName)
       );
 
       return {
@@ -568,6 +606,13 @@ export class QdrantClientWrapper {
   }
 
   /**
+   * Get the collection name for this client instance.
+   */
+  getCollectionName(): string {
+    return this.config.collectionName;
+  }
+
+  /**
    * Initialize local fallback VectorIndex
    */
   private async initializeFallback(): Promise<void> {
@@ -575,13 +620,6 @@ export class QdrantClientWrapper {
       vectorDimensions: this.config.vectorDimensions,
       ...this.config.fallbackConfig,
     });
-  }
-
-  /**
-   * Get the collection name for this client instance
-   */
-  getCollectionName(): string {
-    return this.config.collectionName;
   }
 
   /**
