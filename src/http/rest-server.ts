@@ -229,7 +229,7 @@ export class RESTPingMemServer {
       c.header("Referrer-Policy", "strict-origin-when-cross-origin");
       c.header(
         "Content-Security-Policy",
-        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; img-src 'self' data:; connect-src 'self'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
+        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
       );
       if (process.env["PING_MEM_BEHIND_PROXY"] === "true") {
         c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
@@ -477,10 +477,8 @@ export class RESTPingMemServer {
 
         const savedMemory = await memoryManager.save(body.key, body.value, options);
 
-        // Update session memory count
-        if (sessionId) {
-          await this.sessionManager.incrementMemoryCount(sessionId as SessionId);
-        }
+        // Update session memory count (sessionId verified non-null above)
+        await this.sessionManager.incrementMemoryCount(sessionId);
 
         // Track relevance for the new memory
         this.relevanceEngine.ensureTracking(
@@ -788,6 +786,9 @@ export class RESTPingMemServer {
         if (!query) {
           return c.json({ error: "BadRequest", message: "query is required" }, 400);
         }
+        if (query.length > 2000) {
+          return c.json({ error: "BadRequest", message: "query exceeds maximum length" }, 400);
+        }
         const projectId = c.req.query("projectId");
         if (projectId !== undefined && projectId.length > 128) {
           return c.json({ error: "BadRequest", message: "projectId exceeds maximum length" }, 400);
@@ -798,8 +799,7 @@ export class RESTPingMemServer {
         }
         const filePath = rawFilePath;
         const rawType = c.req.query("type");
-        const VALID_CODE_TYPES = new Set(["code", "comment", "docstring"]);
-        if (rawType !== undefined && !VALID_CODE_TYPES.has(rawType)) {
+        if (rawType !== undefined && !RESTPingMemServer.VALID_CODE_TYPES.has(rawType)) {
           return c.json({ error: "BadRequest", message: "Invalid type: must be one of: code, comment, docstring" }, 400);
         }
         const type = rawType as "code" | "comment" | "docstring" | undefined;
@@ -870,12 +870,21 @@ export class RESTPingMemServer {
             400
           );
         }
+        if (projectId.length > 128) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "projectId exceeds maximum length" }, 400);
+        }
+        const toolName = c.req.query("toolName") ?? undefined;
+        const toolVersion = c.req.query("toolVersion") ?? undefined;
+        const treeHash = c.req.query("treeHash") ?? undefined;
+        if ((toolName && toolName.length > 200) || (toolVersion && toolVersion.length > 200) || (treeHash && treeHash.length > 200)) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Query parameter exceeds maximum length" }, 400);
+        }
 
         const run = this.diagnosticsStore.getLatestRun({
           projectId,
-          toolName: c.req.query("toolName") ?? undefined,
-          toolVersion: c.req.query("toolVersion") ?? undefined,
-          treeHash: c.req.query("treeHash") ?? undefined,
+          toolName,
+          toolVersion,
+          treeHash,
         });
 
         return c.json<RESTSuccessResponse<Record<string, unknown>>>({
@@ -889,6 +898,9 @@ export class RESTPingMemServer {
     this.app.get("/api/v1/diagnostics/findings/:analysisId", async (c) => {
       try {
         const analysisId = c.req.param("analysisId");
+        if (!analysisId || analysisId.length > 500) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid analysisId" }, 400);
+        }
         const findings = this.diagnosticsStore.listFindings(analysisId);
         return c.json<RESTSuccessResponse<Record<string, unknown>>>({
           data: { analysisId, count: findings.length, findings },
@@ -921,6 +933,9 @@ export class RESTPingMemServer {
     this.app.get("/api/v1/diagnostics/summary/:analysisId", async (c) => {
       try {
         const analysisId = c.req.param("analysisId");
+        if (!analysisId || analysisId.length > 500) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid analysisId" }, 400);
+        }
         const findings = this.diagnosticsStore.listFindings(analysisId);
         const bySeverity: Record<string, number> = {};
         for (const finding of findings) {
@@ -942,6 +957,9 @@ export class RESTPingMemServer {
     this.app.post("/api/v1/diagnostics/summarize/:analysisId", async (c) => {
       try {
         const analysisId = c.req.param("analysisId");
+        if (!analysisId || analysisId.length > 500) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid analysisId" }, 400);
+        }
         const parseResult = DiagnosticsSummarizeSchema.safeParse(await c.req.json());
         if (!parseResult.success) {
           return c.json<RESTErrorResponse>(
@@ -1001,6 +1019,9 @@ export class RESTPingMemServer {
     this.app.get("/api/v1/context/:key", async (c) => {
       try {
         const key = c.req.param("key");
+        if (key.length > 1000) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Key too long" }, 400);
+        }
         const sessionId = this.getSessionIdFromRequest(c);
 
         if (!sessionId) {
@@ -1050,6 +1071,9 @@ export class RESTPingMemServer {
     this.app.delete("/api/v1/context/:key", async (c) => {
       try {
         const key = c.req.param("key");
+        if (key.length > 1000) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Key too long" }, 400);
+        }
         const sessionId = this.getSessionIdFromRequest(c);
 
         if (!sessionId) {
@@ -1096,6 +1120,9 @@ export class RESTPingMemServer {
             400
           );
         }
+        if (query.length > 2000) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "query exceeds maximum length" }, 400);
+        }
 
         const sessionId = this.getSessionIdFromRequest(c);
         if (!sessionId) {
@@ -1117,10 +1144,18 @@ export class RESTPingMemServer {
           queryParams.category = c.req.query("category") as MemoryCategory;
         }
         if (c.req.query("channel")) {
-          queryParams.channel = c.req.query("channel");
+          const rawChannel = c.req.query("channel")!;
+          if (rawChannel.length > 200) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "channel exceeds maximum length" }, 400);
+          }
+          queryParams.channel = rawChannel;
         }
         if (c.req.query("priority")) {
-          queryParams.priority = c.req.query("priority") as MemoryPriority;
+          const rawPriority = c.req.query("priority")!;
+          if (!RESTPingMemServer.VALID_PRIORITIES.has(rawPriority)) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid priority: must be high, normal, or low" }, 400);
+          }
+          queryParams.priority = rawPriority as MemoryPriority;
         }
         if (c.req.query("limit")) {
           const rawLim = parseInt(c.req.query("limit")!, 10);
@@ -1446,6 +1481,9 @@ export class RESTPingMemServer {
       const channel = c.req.query("channel");
       const category = c.req.query("category");
       const agentId = c.req.query("agentId");
+      if ((channel && channel.length > 200) || (category && category.length > 200)) {
+        return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Filter parameter exceeds maximum length" }, 400);
+      }
 
       // Validate agentId exists and is not expired if provided
       if (agentId) {
@@ -1467,10 +1505,14 @@ export class RESTPingMemServer {
       }
       this.sseConnectionCount++;
 
+      // Track cleanup state shared between start() and cancel()
+      let sseHeartbeat: ReturnType<typeof setInterval>;
+      let sseSubscriptionId: string;
+      let sseReleaseConnection: (() => void) | null = null;
+
       const stream = new ReadableStream({
         start: (controller) => {
           const encoder = new TextEncoder();
-          let heartbeat: ReturnType<typeof setInterval>;
           // Use a once-guard so any cleanup path (abort, error, stream cancel) only decrements once
           let released = false;
           const releaseConnection = (): void => {
@@ -1479,8 +1521,9 @@ export class RESTPingMemServer {
               this.sseConnectionCount = Math.max(0, this.sseConnectionCount - 1);
             }
           };
+          sseReleaseConnection = releaseConnection;
 
-          const subscriptionId = this.pubsub.subscribe(
+          sseSubscriptionId = this.pubsub.subscribe(
             {
               ...(channel ? { channel } : {}),
               ...(category ? { category } : {}),
@@ -1491,8 +1534,8 @@ export class RESTPingMemServer {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
               } catch (err) {
                 // Stream closed — clean up subscription and heartbeat
-                this.pubsub?.unsubscribe(subscriptionId);
-                clearInterval(heartbeat);
+                this.pubsub?.unsubscribe(sseSubscriptionId);
+                clearInterval(sseHeartbeat);
                 releaseConnection();
                 if (err instanceof TypeError && /closed|errored/i.test(String(err.message))) return;
                 log.error("SSE failed to send event", { error: err instanceof Error ? err.message : String(err) });
@@ -1501,12 +1544,12 @@ export class RESTPingMemServer {
           );
 
           // Heartbeat every 30 seconds
-          heartbeat = setInterval(() => {
+          sseHeartbeat = setInterval(() => {
             try {
               controller.enqueue(encoder.encode(`: heartbeat\n\n`));
             } catch (err) {
-              clearInterval(heartbeat);
-              this.pubsub?.unsubscribe(subscriptionId);
+              clearInterval(sseHeartbeat);
+              this.pubsub?.unsubscribe(sseSubscriptionId);
               releaseConnection();
               if (!(err instanceof TypeError && /closed|errored/i.test(String(err.message)))) {
                 log.error("SSE heartbeat error", { error: err instanceof Error ? err.message : String(err) });
@@ -1516,8 +1559,8 @@ export class RESTPingMemServer {
 
           // Clean up on abort
           c.req.raw.signal.addEventListener("abort", () => {
-            clearInterval(heartbeat);
-            this.pubsub.unsubscribe(subscriptionId);
+            clearInterval(sseHeartbeat);
+            this.pubsub.unsubscribe(sseSubscriptionId);
             releaseConnection();
             try {
               controller.close();
@@ -1528,6 +1571,12 @@ export class RESTPingMemServer {
               }
             }
           });
+        },
+        cancel: () => {
+          // Fires when consumer calls reader.cancel() or stream is otherwise cancelled
+          clearInterval(sseHeartbeat);
+          if (sseSubscriptionId) this.pubsub?.unsubscribe(sseSubscriptionId);
+          sseReleaseConnection?.();
         },
       });
 
@@ -1695,6 +1744,15 @@ export class RESTPingMemServer {
     return timingSafeStringEqual(apiKey, this.config.apiKey);
   }
 
+  /** UUID format regex for validating X-Session-ID header values */
+  private static readonly UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  /** Valid priority values for query parameter validation */
+  private static readonly VALID_PRIORITIES = new Set(["high", "normal", "low"]);
+
+  /** Valid code types for codebase search */
+  private static readonly VALID_CODE_TYPES = new Set(["code", "comment", "docstring"]);
+
   /**
    * Exact set of domain error names whose messages are safe to expose to clients.
    * Uses error.name (explicitly set in each error constructor via this.name = "...")
@@ -1706,9 +1764,6 @@ export class RESTPingMemServer {
    * infrastructure failures (VECTOR_INDEX_NOT_CONFIGURED, AGENT_EXPIRED)
    * that map via error.code or default to 500.
    */
-  /** UUID format regex for validating X-Session-ID header values */
-  private static readonly UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
   private static readonly DOMAIN_ERROR_NAMES = new Set([
     "MemoryKeyNotFoundError",
     "MemoryKeyExistsError",
@@ -1935,9 +1990,12 @@ export class RESTPingMemServer {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = [];
       let size = 0;
+      let settled = false;
       req.on("data", (chunk: Buffer) => {
+        if (settled) return;
         size += chunk.length;
         if (size > MAX_BODY_BYTES) {
+          settled = true;
           req.destroy();
           reject(new Error("Request body too large"));
           return;
@@ -1945,9 +2003,13 @@ export class RESTPingMemServer {
         chunks.push(chunk);
       });
       req.on("end", () => {
+        if (settled) return;
+        settled = true;
         resolve(Buffer.concat(chunks).toString("utf-8"));
       });
       req.on("error", (error) => {
+        if (settled) return;
+        settled = true;
         reject(error);
       });
     });
