@@ -11,7 +11,6 @@ interface ProbeMetric {
 
 interface ProbeResult {
   source: "sqlite" | "neo4j" | "qdrant";
-  status: "healthy" | "degraded" | "unhealthy";
   metrics: ProbeMetric[];
 }
 

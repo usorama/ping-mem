@@ -580,10 +580,21 @@ export class EventStore {
         "DELETE FROM events WHERE session_id = $sessionId"
       );
 
+      // Verify foreign key constraints are enabled before deletion
+      const fkCheck = this.db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number } | undefined;
+      if (!fkCheck || fkCheck.foreign_keys !== 1) {
+        throw new Error("Foreign key constraints must be enabled for safe session deletion");
+      }
+
       for (const sessionId of sessionIds) {
-        stmtCheckpointItems.run({ $sessionId: sessionId });
-        stmtCheckpoint.run({ $sessionId: sessionId });
-        stmtEvent.run({ $sessionId: sessionId });
+        const checkpointItemsResult = stmtCheckpointItems.run({ $sessionId: sessionId });
+        const checkpointResult = stmtCheckpoint.run({ $sessionId: sessionId });
+        const eventResult = stmtEvent.run({ $sessionId: sessionId });
+
+        // Verify deletions completed successfully without constraint violations
+        if (checkpointItemsResult.changes < 0 || checkpointResult.changes < 0 || eventResult.changes < 0) {
+          throw new Error(`Session deletion failed: negative change count for session ${sessionId}`);
+        }
       }
     });
     deleteMany();

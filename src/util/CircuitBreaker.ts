@@ -86,19 +86,21 @@ export function createServicePolicy(opts: {
   };
 
 
+  const updateStateAndNotify = (newState: ServiceState) => {
+    currentState = newState;
+    notifyHandlers(newState);
+  };
+
   breaker.onBreak(() => {
-    currentState = "open";
-    notifyHandlers("open");
+    updateStateAndNotify("open");
   });
 
   breaker.onHalfOpen(() => {
-    currentState = "half-open";
-    notifyHandlers("half-open");
+    updateStateAndNotify("half-open");
   });
 
   breaker.onReset(() => {
-    currentState = "closed";
-    notifyHandlers("closed");
+    updateStateAndNotify("closed");
   });
 
   return {

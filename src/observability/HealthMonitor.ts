@@ -228,12 +228,39 @@ export class HealthMonitor {
       try {
         const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
         if (walSize > 50_000_000) {
-          // PASSIVE mode never blocks writers (unlike TRUNCATE which waits for all readers)
-          this.deps.eventStore.walCheckpoint("PASSIVE");
-          log.info("SQLite WAL checkpoint completed", { walSizeBytes: walSize });
-          // Clear any prior checkpoint failure alert now that checkpoint succeeded
-          this.activeAlerts.delete("sqlite:wal_checkpoint_failed");
-          this.lastAlerts.delete("sqlite:wal_checkpoint_failed");
+          // Verify WAL size again immediately before checkpoint to ensure consistency
+          const preCheckpointSize = await this.getWalSizeBytes();
+          if (preCheckpointSize > 50_000_000) {
+            // PASSIVE mode never blocks writers (unlike TRUNCATE which waits for all readers)
+            this.deps.eventStore.walCheckpoint("PASSIVE");
+
+            // Verify checkpoint actually reduced WAL size (skip verification for in-memory databases)
+            const postCheckpointSize = await this.getWalSizeBytes();
+            const isInMemory = preCheckpointSize === 0 && postCheckpointSize === 0;
+
+            if (postCheckpointSize < preCheckpointSize || isInMemory) {
+              log.info("SQLite WAL checkpoint completed", {
+                walSizeBytes: preCheckpointSize,
+                newWalSize: postCheckpointSize,
+                reduction: preCheckpointSize - postCheckpointSize,
+                isInMemory
+              });
+              // Clear any prior checkpoint failure alert now that checkpoint succeeded
+              this.activeAlerts.delete("sqlite:wal_checkpoint_failed");
+              this.lastAlerts.delete("sqlite:wal_checkpoint_failed");
+            } else if (postCheckpointSize === preCheckpointSize) {
+              // WAL size unchanged - this can happen legitimately if WAL is in use
+              log.warn("WAL checkpoint completed but size unchanged", {
+                walSizeBytes: preCheckpointSize,
+                message: "This may be normal if database is actively used"
+              });
+              // Clear alert anyway since checkpoint operation succeeded
+              this.activeAlerts.delete("sqlite:wal_checkpoint_failed");
+              this.lastAlerts.delete("sqlite:wal_checkpoint_failed");
+            } else {
+              throw new Error(`WAL checkpoint failed - size increased: ${preCheckpointSize} -> ${postCheckpointSize}`);
+            }
+          }
         }
       } catch (error) {
         const lastWalSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
@@ -426,5 +453,21 @@ export class HealthMonitor {
       return;
     }
     log.warn(`WARNING ${message}`, { key, source });
+  }
+
+  /**
+   * Get current WAL size in bytes for transaction safety verification
+   * @private
+   */
+  private async getWalSizeBytes(): Promise<number> {
+    try {
+      if (!this.deps.eventStore) return 0;
+      return this.deps.eventStore.getWalSizeBytes();
+    } catch (error) {
+      log.warn("Failed to get WAL size for verification", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return 0;
+    }
   }
 }

@@ -37,6 +37,8 @@ const adminRateLimitMap = new Map<string, { count: number; resetAt: number }>();
  *  Exported so tests can import the constant rather than hard-coding the magic number 20. */
 export const ADMIN_RATE_LIMIT_MAX = 20;
 const ADMIN_RATE_LIMIT_WINDOW_MS = 60_000;
+/** Hard cap to prevent memory exhaustion under sustained IP enumeration attacks */
+const MAX_RATE_LIMIT_ENTRIES = 10_000;
 
 /** Brute-force lockout: lock after 5 failed Basic Auth attempts for 30 min.
  *  lastSeen tracks the timestamp of the most recent failure for stale-entry eviction. */
@@ -45,6 +47,8 @@ const AUTH_LOCKOUT_THRESHOLD = 5;
 const AUTH_LOCKOUT_MS = 30 * 60_000;
 /** Partial-failure entries (count > 0, not yet locked) expire after this idle window */
 const AUTH_FAILURE_STALE_MS = 10 * 60_000; // 10 minutes
+/** Hard cap to prevent memory exhaustion under sustained brute force attacks */
+const MAX_AUTH_FAILURE_ENTRIES = 5_000;
 
 /**
  * Return the client IP address.
@@ -94,14 +98,25 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
   const now = Date.now();
 
   // Evict expired entries to prevent unbounded map growth under IP churn / spoofing attacks.
-  // Both scans are O(n) in the number of unique IPs seen. This is acceptable because the admin
-  // endpoint is not a high-throughput path (single human operator). Under an active IP-churn
-  // attack the maps grow transiently, but AUTH_FAILURE_STALE_MS and the rate-limit window
-  // bound the maximum entry lifetime. A hard cap or background sweep would be more robust
-  // under extreme sustained attack but adds complexity not warranted for this use case.
+  // Hard caps prevent memory exhaustion during sustained attacks.
+  let evictedCount = 0;
   for (const [key, entry] of adminRateLimitMap) {
-    if (now > entry.resetAt) adminRateLimitMap.delete(key);
+    if (now > entry.resetAt) {
+      adminRateLimitMap.delete(key);
+      evictedCount++;
+    }
   }
+
+  // Enforce hard cap on rate limit map size - evict oldest entries if over limit
+  if (adminRateLimitMap.size >= MAX_RATE_LIMIT_ENTRIES) {
+    const sortedEntries = Array.from(adminRateLimitMap.entries())
+      .sort(([, a], [, b]) => a.resetAt - b.resetAt);
+    const toEvict = sortedEntries.slice(0, Math.max(1, sortedEntries.length - MAX_RATE_LIMIT_ENTRIES + 1000));
+    for (const [key] of toEvict) {
+      adminRateLimitMap.delete(key);
+    }
+  }
+
   // Evict expired authFailureMap entries to prevent unbounded growth under distributed probing:
   // (a) Expired lockouts: lock window passed and count was reset to 0.
   // (b) Stale partial-failure entries: count > 0 but not yet locked, idle for > STALE window.
@@ -110,6 +125,16 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
     const expiredLockout = record.lockedUntil > 0 && now > record.lockedUntil && record.count === 0;
     const stalePartial = record.lockedUntil === 0 && record.count > 0 && (now - record.lastSeen) > AUTH_FAILURE_STALE_MS;
     if (expiredLockout || stalePartial) {
+      authFailureMap.delete(key);
+    }
+  }
+
+  // Enforce hard cap on auth failure map size - evict oldest entries if over limit
+  if (authFailureMap.size >= MAX_AUTH_FAILURE_ENTRIES) {
+    const sortedEntries = Array.from(authFailureMap.entries())
+      .sort(([, a], [, b]) => a.lastSeen - b.lastSeen);
+    const toEvict = sortedEntries.slice(0, Math.max(1, sortedEntries.length - MAX_AUTH_FAILURE_ENTRIES + 500));
+    for (const [key] of toEvict) {
       authFailureMap.delete(key);
     }
   }
