@@ -132,7 +132,8 @@ function clearAuthFailures(ip: string): void {
  *  Providers without a detectable key prefix (Mistral, Cohere, Azure OpenAI,
  *  Bedrock secret keys, Custom) cannot be pattern-matched and are not redacted.
  *  Error paths for those providers should not include raw key values in messages. */
-function sanitizeAdminError(message: string): string {
+/** @internal Exported for unit testing only — not part of the public API */
+export function sanitizeAdminError(message: string): string {
   return (
     message
       // OpenAI, Anthropic (sk-ant-...), OpenRouter (sk-or-...), DeepSeek, etc.
@@ -145,7 +146,7 @@ function sanitizeAdminError(message: string): string {
       .replace(/\bfw_[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // xAI / Grok
       .replace(/\bxai-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
-      // Together AI — canonical format (together_api_...) and legacy tok/togx variants
+      // Together AI — canonical format (together_api_...) and legacy tog_/togx_ variants
       .replace(/\btogether_api_[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       .replace(/\btog[a-z]?[_-][A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // Perplexity

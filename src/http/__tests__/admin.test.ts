@@ -9,6 +9,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   checkBasicAuth,
   checkAdminRateLimit,
+  sanitizeAdminError,
   _resetAdminRateLimitMapsForTest,
   _getAuthFailureMapForTest,
 } from "../admin.js";
@@ -428,5 +429,64 @@ describe("admin.ts - brute-force lockout", () => {
 
     // Stale partial-failure entry must be evicted
     expect(failureMap.has(staleIp)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sanitizeAdminError — LLM provider API key redaction
+// ---------------------------------------------------------------------------
+
+describe("admin.ts - sanitizeAdminError", () => {
+  it("redacts OpenAI / Anthropic / OpenRouter / DeepSeek sk-... keys", () => {
+    expect(sanitizeAdminError("Error: sk-abc1234567890XYZ failed")).toBe("Error: [REDACTED] failed");
+    expect(sanitizeAdminError("sk-ant-api03-abcDEFghiJKL1234567890 rejected")).toBe("[REDACTED] rejected");
+    expect(sanitizeAdminError("sk-or-v1-abcdefghij1234567890XYZ extra")).toBe("[REDACTED] extra");
+  });
+
+  it("redacts Gemini AIza... keys", () => {
+    expect(sanitizeAdminError("key=AIzaSyAbcdefghijklmnopqrstuvwxyz12345678 invalid")).toBe("key=[REDACTED] invalid");
+  });
+
+  it("redacts Groq gsk_... keys", () => {
+    expect(sanitizeAdminError("groq error: gsk_abcdefghij1234567890ABCDEF")).toBe("groq error: [REDACTED]");
+  });
+
+  it("redacts Fireworks fw_... keys", () => {
+    expect(sanitizeAdminError("fw_abcdefghijklmnopqrst bad request")).toBe("[REDACTED] bad request");
+  });
+
+  it("redacts xAI xai-... keys", () => {
+    expect(sanitizeAdminError("xai-abcdefghijklmnopqrstuvwxyz1234567 denied")).toBe("[REDACTED] denied");
+  });
+
+  it("redacts Together AI together_api_... keys (canonical format)", () => {
+    expect(sanitizeAdminError("together_api_abcdefghijklmnopqrstuvwxyz12345 error")).toBe("[REDACTED] error");
+  });
+
+  it("redacts Together AI legacy tog_/togx_ keys", () => {
+    expect(sanitizeAdminError("tog_abcdefghijklmnopqrst error")).toBe("[REDACTED] error");
+    expect(sanitizeAdminError("togx_abcdefghijklmnopqrst error")).toBe("[REDACTED] error");
+  });
+
+  it("redacts Perplexity pplx-... keys", () => {
+    expect(sanitizeAdminError("pplx-abcdefghijklmnopqrstuvwxyz12345 bad")).toBe("[REDACTED] bad");
+  });
+
+  it("redacts AWS Access Key IDs (AKIA/ASIA/AROA/AIDA)", () => {
+    expect(sanitizeAdminError("AKIAIOSFODNN7EXAMPLE credential")).toBe("[REDACTED] credential");
+    expect(sanitizeAdminError("ASIAIOSFODNN7EXAMPLE credential")).toBe("[REDACTED] credential");
+  });
+
+  it("does not modify messages without API keys", () => {
+    const safe = "LLM config save failed: invalid model name";
+    expect(sanitizeAdminError(safe)).toBe(safe);
+  });
+
+  it("redacts multiple keys in the same message", () => {
+    const msg = "sk-abc1234567890 and AIzaSyAbcdefghijklmnopqrstuvwxyz12345678 both failed";
+    const result = sanitizeAdminError(msg);
+    expect(result).toContain("[REDACTED]");
+    expect(result).not.toContain("sk-abc1234567890");
+    expect(result).not.toContain("AIzaSyAbcdefghijklmnopqrstuvwxyz12345678");
   });
 });
