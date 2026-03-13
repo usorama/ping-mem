@@ -151,7 +151,7 @@ export class RESTPingMemServer {
     };
 
     // Initialize core components — use shared EventStore if provided (avoids dual SQLite connections)
-    const injectedEventStore = (this.config as { eventStore?: EventStore }).eventStore;
+    const injectedEventStore = this.config.eventStore;
     this.ownsEventStore = injectedEventStore === undefined;
     this.eventStore = injectedEventStore ?? new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
     this.sessionManager = new SessionManager({ eventStore: this.eventStore });
@@ -1892,7 +1892,7 @@ export class RESTPingMemServer {
   private async readRequestBody(req: IncomingMessage): Promise<string> {
     const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MB
     return new Promise((resolve, reject) => {
-      let data = "";
+      const chunks: Buffer[] = [];
       let size = 0;
       req.on("data", (chunk: Buffer) => {
         size += chunk.length;
@@ -1901,10 +1901,10 @@ export class RESTPingMemServer {
           reject(new Error("Request body too large"));
           return;
         }
-        data += chunk;
+        chunks.push(chunk);
       });
       req.on("end", () => {
-        resolve(data);
+        resolve(Buffer.concat(chunks).toString("utf-8"));
       });
       req.on("error", (error) => {
         reject(error);

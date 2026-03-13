@@ -67,7 +67,7 @@ function getRemoteIp(req: IncomingMessage): string {
       // log injection when the IP is later written to structured logs.
       // A trusted upstream proxy should have already validated this, but defense-in-depth
       // applies here because attacker-controlled XFF may reach this code before proxy validation.
-      if (firstIp) return firstIp.replace(/[^\w.:[\]-]/g, "?").slice(0, 64);
+      if (firstIp) return firstIp.replace(/[^\w\.\:\,\[\]\-]/g, "?").slice(0, 64);
     }
   }
   return req.socket?.remoteAddress ?? "unknown";

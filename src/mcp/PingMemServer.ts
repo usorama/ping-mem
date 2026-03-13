@@ -274,7 +274,7 @@ export class PingMemServer {
   ): Promise<Record<string, unknown>> {
     for (const mod of this.modules) {
       if (mod.tools.some(t => t.name === name)) {
-        const result = mod.handle(name, args);
+        const result = await mod.handle(name, args);
         if (result !== undefined) {
           return result;
         }
