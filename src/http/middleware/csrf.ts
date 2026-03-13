@@ -46,7 +46,12 @@ export function csrfProtection() {
       c.set("csrfToken", token);
       // Cookie must be JS-readable (no HttpOnly) so client can read it and include it in
       // the X-CSRF-Token request header for validation.
-      const secureFlag = c.req.url.startsWith("https://") || process.env.NODE_ENV === "production" ? "; Secure" : "";
+      // Detect HTTPS: direct TLS, reverse proxy (X-Forwarded-Proto), or explicit production env
+      const isSecure = c.req.url.startsWith("https://")
+        || c.req.header("x-forwarded-proto") === "https"
+        || process.env.NODE_ENV === "production"
+        || process.env.PING_MEM_BEHIND_PROXY === "true";
+      const secureFlag = isSecure ? "; Secure" : "";
       c.header("Set-Cookie", `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict${secureFlag}`);
       return next();
     }

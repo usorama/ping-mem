@@ -683,6 +683,11 @@ export class RESTPingMemServer {
           );
         }
         const projectDir = path.resolve(parseResult.data.projectDir);
+        const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
+        const isDirSafe = allowedRoots.some((root) => root && projectDir.startsWith(root + path.sep));
+        if (!isDirSafe) {
+          return c.json({ error: "BadRequest", message: "projectDir must be within an allowed root" }, 400);
+        }
         const forceReingest = parseResult.data.forceReingest;
 
         const result = await this.config.ingestionService.ingestProject({
@@ -744,6 +749,11 @@ export class RESTPingMemServer {
           );
         }
         const projectDir = path.resolve(parseResult.data.projectDir);
+        const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
+        const isDirSafe = allowedRoots.some((root) => root && projectDir.startsWith(root + path.sep));
+        if (!isDirSafe) {
+          return c.json({ error: "BadRequest", message: "projectDir must be within an allowed root" }, 400);
+        }
         const result = await this.config.ingestionService.verifyProject(projectDir);
         return c.json({ data: result });
       } catch (error) {
@@ -1424,6 +1434,14 @@ export class RESTPingMemServer {
         start: (controller) => {
           const encoder = new TextEncoder();
           let heartbeat: ReturnType<typeof setInterval>;
+          // Use a once-guard so any cleanup path (abort, error, stream cancel) only decrements once
+          let released = false;
+          const releaseConnection = (): void => {
+            if (!released) {
+              released = true;
+              this.sseConnectionCount = Math.max(0, this.sseConnectionCount - 1);
+            }
+          };
 
           const subscriptionId = this.pubsub.subscribe(
             {
@@ -1438,6 +1456,7 @@ export class RESTPingMemServer {
                 // Stream closed — clean up subscription and heartbeat
                 this.pubsub?.unsubscribe(subscriptionId);
                 clearInterval(heartbeat);
+                releaseConnection();
                 if (err instanceof TypeError && /closed|errored/i.test(String(err.message))) return;
                 log.error("SSE failed to send event", { error: err instanceof Error ? err.message : String(err) });
               }
@@ -1451,6 +1470,7 @@ export class RESTPingMemServer {
             } catch (err) {
               clearInterval(heartbeat);
               this.pubsub?.unsubscribe(subscriptionId);
+              releaseConnection();
               if (!(err instanceof TypeError && /closed|errored/i.test(String(err.message)))) {
                 log.error("SSE heartbeat error", { error: err instanceof Error ? err.message : String(err) });
               }
@@ -1461,7 +1481,7 @@ export class RESTPingMemServer {
           c.req.raw.signal.addEventListener("abort", () => {
             clearInterval(heartbeat);
             this.pubsub.unsubscribe(subscriptionId);
-            this.sseConnectionCount = Math.max(0, this.sseConnectionCount - 1);
+            releaseConnection();
             try {
               controller.close();
             } catch (err) {
@@ -1849,10 +1869,7 @@ export class RESTPingMemServer {
     await this.eventStore.close();
     // Close diagnostics store (SQLite)
     this.diagnosticsStore.close();
-    // Close admin store (SQLite) if provided
-    if (this.config.adminStore) {
-      this.config.adminStore.close();
-    }
+    // adminStore is externally owned (injected via config from server.ts) — caller closes it
     // Clear cached memory managers
     this.memoryManagers.clear();
     this.managerPromises.clear();

@@ -1,5 +1,5 @@
 import type { RuntimeServices } from "../config/runtime.js";
-import { probeSystemHealth, getIntegrityOk, type HealthSnapshot } from "./health-probes.js";
+import { probeSystemHealth, type HealthSnapshot } from "./health-probes.js";
 import type { EventStore } from "../storage/EventStore.js";
 import { createLogger } from "../util/logger.js";
 
@@ -56,7 +56,8 @@ const THRESHOLDS: Record<ProbeSource, ThresholdRule[]> = {
     { metric: "orphan_node_count", warnAbove: 50, critAbove: 500 },
   ],
   qdrant: [
-    { metric: "point_count_drift_pct", warnAbove: 5, critAbove: 15 },
+    // warnAbove matches the ratchet threshold so normal growth (<=15%) never triggers spurious alerts
+    { metric: "point_count_drift_pct", warnAbove: 15, critAbove: 30 },
   ],
 };
 
@@ -221,6 +222,9 @@ export class HealthMonitor {
           // PASSIVE mode never blocks writers (unlike TRUNCATE which waits for all readers)
           this.deps.eventStore.walCheckpoint("PASSIVE");
           log.info("SQLite WAL checkpoint completed", { walSizeBytes: walSize });
+          // Clear any prior checkpoint failure alert now that checkpoint succeeded
+          this.activeAlerts.delete("sqlite:wal_checkpoint_failed");
+          this.lastAlerts.delete("sqlite:wal_checkpoint_failed");
         }
       } catch (error) {
         const lastWalSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
@@ -245,12 +249,15 @@ export class HealthMonitor {
 
       // SQLite integrity check (expensive — only runs in quality tick, not fast tick)
       try {
-        const integrityOk = getIntegrityOk(this.deps.eventStore);
+        const integrityOk = this.deps.eventStore.getIntegrityOk();
         this.checkThresholds({
           source: "sqlite",
           status: integrityOk === 1 ? "healthy" : "unhealthy",
           metrics: [{ name: "integrity_ok", value: integrityOk, unit: "boolean" }],
         });
+        // Clear any prior integrity failure alert on successful check
+        this.activeAlerts.delete("sqlite:integrity_check_failed");
+        this.lastAlerts.delete("sqlite:integrity_check_failed");
         probeSucceeded = true;
       } catch (error) {
         log.warn("SQLite integrity check failed", { error: error instanceof Error ? error.message : String(error) });

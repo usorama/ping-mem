@@ -799,6 +799,11 @@ export class EventStore {
    * Execute a WAL checkpoint. Mode: PASSIVE (default) never blocks writers.
    */
   walCheckpoint(mode: "PASSIVE" | "TRUNCATE" | "FULL" | "RESTART" = "PASSIVE"): void {
+    // Runtime allowlist guards against injection if called outside TypeScript type system
+    const VALID_MODES = new Set(["PASSIVE", "TRUNCATE", "FULL", "RESTART"]);
+    if (!VALID_MODES.has(mode)) {
+      throw new Error(`Invalid WAL checkpoint mode: ${mode}`);
+    }
     if (this.config.dbPath === ":memory:") {
       return; // no WAL for in-memory
     }

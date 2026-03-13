@@ -60,10 +60,6 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
-export function getIntegrityOk(eventStore: EventStore): number {
-  return eventStore.getIntegrityOk();
-}
-
 export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSnapshot> {
   let status: "ok" | "degraded" | "unhealthy" = "ok";
 
@@ -101,7 +97,10 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
   if (deps.neo4jClient) {
     try {
       const start = performance.now();
-      await deps.neo4jClient.ping();
+      const ok = await deps.neo4jClient.ping();
+      if (!ok) {
+        throw new Error("ping returned false");
+      }
       neo4j = {
         status: "healthy",
         configured: true,
@@ -120,14 +119,14 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
     }
   } else if (deps.graphManager) {
     // Fallback: graphManager without direct neo4jClient access
+    const gmStart = performance.now();
     try {
-      const start = performance.now();
       // Use a known-safe operation: listing empty set
       await deps.graphManager.getEntity("__ping__");
       neo4j = {
         status: "healthy",
         configured: true,
-        latencyMs: roundMs(performance.now() - start),
+        latencyMs: roundMs(performance.now() - gmStart),
       };
     } catch (error) {
       const msg = toErrorMessage(error);
@@ -137,7 +136,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
         neo4j = {
           status: "healthy",
           configured: true,
-          latencyMs: 0,
+          latencyMs: roundMs(performance.now() - gmStart),
         };
       } else {
         log.warn("Neo4j probe (graphManager) failed", { error: msg });
@@ -202,7 +201,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
       diagnostics = {
         status: "unhealthy",
         configured: true,
-        error: toErrorMessage(error),
+        error: sanitizeHealthError(error),
       };
       if (status !== "unhealthy") {
         status = "degraded";

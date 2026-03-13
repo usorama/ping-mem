@@ -122,7 +122,7 @@ async function handleAdminApi(
       // Block paths outside safe roots (home dirs, /projects, /Users, /home, /tmp)
       const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
       const isSafe = allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
-      if (!isSafe && !path.isAbsolute(resolved)) {
+      if (!isSafe) {
         return respondJson(res, 400, { error: "projectDir must not contain path traversal sequences" });
       }
     }

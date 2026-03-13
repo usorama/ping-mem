@@ -221,8 +221,10 @@ export async function startHTTPServer(): Promise<void> {
     log.error("HTTP server error", { code: error.code, message: error.message });
     if (error.code === "EADDRINUSE") {
       log.error(`Port ${port} is already in use. Exiting.`);
-      process.exit(1);
     }
+    // All fatal server errors trigger graceful shutdown (not process.exit directly
+    // so that eventStore, adminStore, diagnosticsStore are closed cleanly)
+    void shutdown("http_server_error");
   });
 
   httpServer.listen(port, host, () => {

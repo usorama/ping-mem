@@ -478,9 +478,14 @@ export class Neo4jClient {
       await this.executeQuery("RETURN 1 as ping");
       return true;
     } catch (error) {
-      log.warn("Neo4j ping failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const msg = error instanceof Error ? error.message : String(error);
+      log.warn("Neo4j ping failed", { error: msg });
+      // If the error indicates the driver is unreachable, reflect that in connected state
+      const isUnreachable = msg.includes("ECONNREFUSED") || msg.includes("ServiceUnavailable") ||
+        msg.includes("SessionExpired") || msg.includes("connection") || msg.includes("timeout");
+      if (isUnreachable) {
+        this.connected = false;
+      }
       return false;
     }
   }
