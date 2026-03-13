@@ -413,10 +413,19 @@ export class AdminStore {
   }
 
   private generateUUID(): string {
-    // Use crypto.randomUUID() (Node.js 14.17+ / Bun) for RFC 4122-compliant v4 UUIDs.
-    // Previous implementation used a timestamp-prefixed bespoke format whose leading bits
-    // were time-based and monotonically increasing, making key IDs partially predictable.
-    return crypto.randomUUID();
+    // crypto.randomBytes-based v4 UUID — cryptographically secure without the
+    // cross-test contamination that crypto.randomUUID() exhibits under Bun's
+    // concurrent test runner when combined with src/graph/__tests__/.
+    const bytes = crypto.randomBytes(16);
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80; // variant RFC 4122
+    return [
+      bytes.subarray(0, 4).toString("hex"),
+      bytes.subarray(4, 6).toString("hex"),
+      bytes.subarray(6, 8).toString("hex"),
+      bytes.subarray(8, 10).toString("hex"),
+      bytes.subarray(10, 16).toString("hex"),
+    ].join("-");
   }
 
   private generateApiKey(): string {
