@@ -222,7 +222,6 @@ describe("admin-schemas", () => {
         "OpenAI",
         "Anthropic",
         "OpenRouter",
-        "zAI",
         "Gemini",
         "Mistral",
         "Groq",

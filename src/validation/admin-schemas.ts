@@ -109,7 +109,6 @@ const SUPPORTED_PROVIDERS = [
   "OpenAI",
   "Anthropic",
   "OpenRouter",
-  "zAI",
   "Gemini",
   "Mistral",
   "Groq",

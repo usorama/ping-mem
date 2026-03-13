@@ -10,8 +10,10 @@ import {
   checkBasicAuth,
   checkAdminRateLimit,
   sanitizeAdminError,
+  isSameHostOrigin,
   _resetAdminRateLimitMapsForTest,
   _getAuthFailureMapForTest,
+  _getAdminRateLimitMapForTest,
 } from "../admin.js";
 
 // ---------------------------------------------------------------------------
@@ -332,6 +334,29 @@ describe("admin.ts - checkAdminRateLimit", () => {
     ).toBe(true);
     expect(res2.statusCode).toBeUndefined();
   });
+
+  it("allows requests again after the rate-limit window expires", () => {
+    const ip = "192.168.1.12";
+    const rateLimitMap = _getAdminRateLimitMapForTest();
+
+    // Exhaust quota
+    for (let i = 0; i < 20; i++) {
+      checkAdminRateLimit(createMockRequest(undefined, ip) as IncomingMessage, createMockResponse() as unknown as ServerResponse);
+    }
+    // 21st is blocked
+    const blocked = createMockResponse();
+    expect(checkAdminRateLimit(createMockRequest(undefined, ip) as IncomingMessage, blocked as unknown as ServerResponse)).toBe(false);
+    expect(blocked.statusCode).toBe(429);
+
+    // Simulate window expiry: backdate the resetAt to the past
+    const entry = rateLimitMap.get(ip);
+    if (entry) entry.resetAt = Date.now() - 1;
+
+    // First request in new window must be allowed
+    const allowed = createMockResponse();
+    expect(checkAdminRateLimit(createMockRequest(undefined, ip) as IncomingMessage, allowed as unknown as ServerResponse)).toBe(true);
+    expect(allowed.statusCode).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -396,7 +421,7 @@ describe("admin.ts - brute-force lockout", () => {
     }
   });
 
-  it("lockout expires after the lock window elapses", () => {
+  it("lockout expires after the lock window elapses and entry is evicted by next rate-limit call", () => {
     const ip = "10.0.0.22";
     const failureMap = _getAuthFailureMapForTest();
 
@@ -407,6 +432,31 @@ describe("admin.ts - brute-force lockout", () => {
     const res = createMockResponse();
     expect(checkBasicAuth(rightCreds(ip) as IncomingMessage, res as unknown as ServerResponse)).toBe(true);
     expect(res.statusCode).toBeUndefined();
+
+    // After the next checkAdminRateLimit call, the expired lockout entry must be evicted
+    checkAdminRateLimit(
+      createMockRequest(undefined, "10.0.0.25") as IncomingMessage,
+      createMockResponse() as unknown as ServerResponse
+    );
+    expect(failureMap.has(ip)).toBe(false);
+  });
+
+  it("expired lockout with post-expiry failures is normalized and eventually evicted", () => {
+    // Regression: entries with (lockedUntil=expired, count>0) were previously immortal
+    // because neither eviction condition in checkAdminRateLimit applied.
+    // recordAuthFailure() must normalize the expired lockout before incrementing count.
+    const ip = "10.0.0.26";
+    const failureMap = _getAuthFailureMapForTest();
+
+    // Simulate: IP was locked, lock expired, IP made new failures before eviction ran
+    failureMap.set(ip, { count: 2, lockedUntil: Date.now() - 1, lastSeen: Date.now() - 1 });
+
+    // Next failure call normalizes the expired lockout (count=0, lockedUntil=0), then increments
+    // So the entry now has count=1, lockedUntil=0 — eligible for stale-partial eviction after STALE window
+    checkBasicAuth(wrongCreds(ip) as IncomingMessage, createMockResponse() as unknown as ServerResponse);
+    const normalized = failureMap.get(ip);
+    expect(normalized?.lockedUntil).toBe(0);
+    expect(normalized?.count).toBe(1);
   });
 
   it("stale partial-failure entries are evicted to prevent unbounded map growth", () => {
@@ -447,8 +497,10 @@ describe("admin.ts - sanitizeAdminError", () => {
     expect(sanitizeAdminError("key=AIzaSyAbcdefghijklmnopqrstuvwxyz12345678 invalid")).toBe("key=[REDACTED] invalid");
   });
 
-  it("redacts Groq gsk_... keys", () => {
+  it("redacts Groq gsk_... keys (including underscore-segmented variants)", () => {
     expect(sanitizeAdminError("groq error: gsk_abcdefghij1234567890ABCDEF")).toBe("groq error: [REDACTED]");
+    // Underscore-segmented key must also be redacted — body charset includes underscores
+    expect(sanitizeAdminError("gsk_prod_ABCDEFGHIJKLMNOPQRST failed")).toBe("[REDACTED] failed");
   });
 
   it("redacts Fireworks fw_... keys", () => {
@@ -463,9 +515,18 @@ describe("admin.ts - sanitizeAdminError", () => {
     expect(sanitizeAdminError("together_api_abcdefghijklmnopqrstuvwxyz12345 error")).toBe("[REDACTED] error");
   });
 
-  it("redacts Together AI legacy tog_/togx_ keys", () => {
-    expect(sanitizeAdminError("tog_abcdefghijklmnopqrst error")).toBe("[REDACTED] error");
-    expect(sanitizeAdminError("togx_abcdefghijklmnopqrst error")).toBe("[REDACTED] error");
+  it("redacts Together AI legacy tog_/togx_ keys (32+ alphanum chars)", () => {
+    // Real Together AI legacy keys: long alphanumeric body (no underscores)
+    expect(sanitizeAdminError("tog_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef12 error")).toBe("[REDACTED] error");
+    expect(sanitizeAdminError("togx_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef12 error")).toBe("[REDACTED] error");
+  });
+
+  it("does NOT redact short tog_ identifiers (false-positive prevention)", () => {
+    // Common identifier patterns with tog_ prefix must not be redacted
+    const config = "config: tog_feature_flag_enabled";
+    expect(sanitizeAdminError(config)).toBe(config);
+    const logField = "metadata tog_software_update_12345 ok";
+    expect(sanitizeAdminError(logField)).toBe(logField);
   });
 
   it("redacts Perplexity pplx-... keys", () => {
@@ -484,9 +545,74 @@ describe("admin.ts - sanitizeAdminError", () => {
 
   it("redacts multiple keys in the same message", () => {
     const msg = "sk-abc1234567890 and AIzaSyAbcdefghijklmnopqrstuvwxyz12345678 both failed";
-    const result = sanitizeAdminError(msg);
-    expect(result).toContain("[REDACTED]");
-    expect(result).not.toContain("sk-abc1234567890");
-    expect(result).not.toContain("AIzaSyAbcdefghijklmnopqrstuvwxyz12345678");
+    expect(sanitizeAdminError(msg)).toBe("[REDACTED] and [REDACTED] both failed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isSameHostOrigin — CSRF host comparison
+// ---------------------------------------------------------------------------
+
+describe("admin.ts - isSameHostOrigin", () => {
+  it("returns true when origin host matches server host exactly", () => {
+    expect(isSameHostOrigin("http://myhost.com", "myhost.com")).toBe(true);
+    expect(isSameHostOrigin("https://myhost.com", "myhost.com")).toBe(true);
+    expect(isSameHostOrigin("https://myhost.com:8080", "myhost.com:8080")).toBe(true);
+  });
+
+  it("returns false when origin host does not match server host", () => {
+    expect(isSameHostOrigin("https://otherhost.com", "myhost.com")).toBe(false);
+    expect(isSameHostOrigin("https://myhost.com:9000", "myhost.com:8080")).toBe(false);
+  });
+
+  it("rejects substring-bypass attack (evil-myhost.com when host is myhost.com)", () => {
+    // A substring check would pass this; exact host comparison must reject it
+    expect(isSameHostOrigin("https://evil-myhost.com", "myhost.com")).toBe(false);
+    expect(isSameHostOrigin("https://fakemyhost.com", "myhost.com")).toBe(false);
+  });
+
+  it("rejects subdomain bypass attempt", () => {
+    expect(isSameHostOrigin("https://attacker.myhost.com", "myhost.com")).toBe(false);
+  });
+
+  it("returns false for malformed URLs", () => {
+    expect(isSameHostOrigin("not-a-url", "myhost.com")).toBe(false);
+    expect(isSameHostOrigin("", "myhost.com")).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isLockedOut Retry-After header
+// ---------------------------------------------------------------------------
+
+describe("admin.ts - lockout 429 includes Retry-After", () => {
+  beforeEach(() => {
+    process.env.PING_MEM_ADMIN_USER = "admin";
+    process.env.PING_MEM_ADMIN_PASS = "correct-pass";
+    _resetAdminRateLimitMapsForTest();
+  });
+
+  it("429 response from lockout includes Retry-After header", () => {
+    const ip = "10.0.0.30";
+    const failureMap = _getAuthFailureMapForTest();
+
+    // Manually inject an active lockout
+    failureMap.set(ip, {
+      count: 0,
+      lockedUntil: Date.now() + 30 * 60 * 1000, // 30 min from now
+      lastSeen: Date.now(),
+    });
+
+    const res = createMockResponse();
+    // Use any request — isLockedOut fires before credential check, so credentials don't matter
+    const badAuth = Buffer.from("admin:wrong").toString("base64");
+    checkBasicAuth(
+      createMockRequest(`Basic ${badAuth}`, ip) as IncomingMessage,
+      res as unknown as ServerResponse
+    );
+    expect(res.statusCode).toBe(429);
+    const retryAfter = Number(res.headers["Retry-After"]);
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(retryAfter).toBeLessThanOrEqual(30 * 60);
   });
 });

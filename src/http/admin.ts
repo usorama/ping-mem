@@ -4,6 +4,24 @@ import * as path from "path";
 import * as crypto from "node:crypto";
 
 import { createLogger } from "../util/logger.js";
+import { AdminStore, type LLMConfigInput } from "../admin/AdminStore.js";
+import { ApiKeyManager } from "../admin/ApiKeyManager.js";
+import { IngestionService } from "../ingest/IngestionService.js";
+import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
+import { EventStore } from "../storage/EventStore.js";
+import { ProjectScanner } from "../ingest/ProjectScanner.js";
+import { timingSafeStringEqual } from "../util/auth-utils.js";
+import {
+  deleteProjectSchema,
+  rotateKeySchema,
+  deactivateKeySchema,
+  setLLMConfigSchema,
+  type DeleteProjectInput,
+  type RotateKeyInput,
+  type DeactivateKeyInput,
+  type SetLLMConfigInput,
+} from "../validation/admin-schemas.js";
+import { parseBody, isParseSuccess } from "../validation/parse-body.js";
 
 // ============================================================================
 // Admin rate limiting + brute-force protection (not routed through Hono)
@@ -47,7 +65,8 @@ function getRemoteIp(req: IncomingMessage): string {
  *  using exact URL-hostname equality, not substring matching.
  *  Substring matching (`origin.includes(host)`) can be bypassed by a domain
  *  whose name contains the server hostname as a substring (e.g., evil-myhost.com). */
-function isSameHostOrigin(header: string, host: string): boolean {
+/** @internal Exported for unit testing only */
+export function isSameHostOrigin(header: string, host: string): boolean {
   try {
     return new URL(header).host === host;
   } catch {
@@ -93,8 +112,10 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
 
 function isLockedOut(ip: string, res: ServerResponse): boolean {
   const record = authFailureMap.get(ip);
-  if (record && Date.now() < record.lockedUntil) {
-    res.writeHead(429, { "Content-Type": "application/json" });
+  const now = Date.now();
+  if (record && now < record.lockedUntil) {
+    const retryAfter = Math.ceil((record.lockedUntil - now) / 1000);
+    res.writeHead(429, { "Content-Type": "application/json", "Retry-After": String(retryAfter) });
     res.end(JSON.stringify({ error: "Too Many Requests", message: "Account locked due to repeated failures. Try again later." }));
     return true;
   }
@@ -104,6 +125,14 @@ function isLockedOut(ip: string, res: ServerResponse): boolean {
 function recordAuthFailure(ip: string): void {
   const now = Date.now();
   const record = authFailureMap.get(ip) ?? { count: 0, lockedUntil: 0, lastSeen: now };
+  // If a previous lockout has expired, normalize it so stale-partial eviction can fire later.
+  // Without this, entries with (lockedUntil=expired, count>0) are unreachable by either
+  // eviction path in checkAdminRateLimit (expiredLockout requires count===0; stalePartial
+  // requires lockedUntil===0), creating permanent accumulation under IP-churn probing.
+  if (record.lockedUntil > 0 && now > record.lockedUntil) {
+    record.lockedUntil = 0;
+    record.count = 0;
+  }
   record.count++;
   record.lastSeen = now;
   if (record.count >= AUTH_LOCKOUT_THRESHOLD) {
@@ -125,7 +154,7 @@ function clearAuthFailures(ip: string): void {
  *  - Groq: gsk_...
  *  - Fireworks AI: fw_...
  *  - xAI / Grok: xai-...
- *  - Together AI: together_api_... (canonical) and legacy tog_/togx_ formats
+ *  - Together AI: together_api_... (canonical) and legacy tog_/togx_ formats (32+ alphanum chars)
  *  - Perplexity: pplx-...
  *  - AWS Access Key IDs: AKIA.../ASIA.../AROA.../AIDA...
  *
@@ -141,14 +170,16 @@ export function sanitizeAdminError(message: string): string {
       // Gemini / Google AI Studio
       .replace(/\bAIza[A-Za-z0-9_-]{35,}\b/g, "[REDACTED]")
       // Groq
-      .replace(/\bgsk_[A-Za-z0-9]{10,}\b/g, "[REDACTED]")
+      .replace(/\bgsk_[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // Fireworks AI
       .replace(/\bfw_[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // xAI / Grok
       .replace(/\bxai-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
-      // Together AI — canonical format (together_api_...) and legacy tog_/togx_ variants
+      // Together AI — canonical format (together_api_...) and legacy tog_/togx_ variants.
+      // The legacy pattern uses [A-Za-z0-9]{32,} (no underscores, long minimum) to avoid
+      // false-positive redaction of common identifiers like tog_feature_flag_name.
       .replace(/\btogether_api_[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
-      .replace(/\btog[a-z]?[_-][A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
+      .replace(/\btog[a-z]?[_-][A-Za-z0-9]{32,}\b/g, "[REDACTED]")
       // Perplexity
       .replace(/\bpplx-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // AWS Access Key IDs (AKIA/ASIA/AROA/AIDA prefix)
@@ -166,24 +197,11 @@ export function _resetAdminRateLimitMapsForTest(): void {
 export function _getAuthFailureMapForTest(): Map<string, { count: number; lockedUntil: number; lastSeen: number }> {
   return authFailureMap;
 }
-import { AdminStore, type LLMConfigInput } from "../admin/AdminStore.js";
-import { ApiKeyManager } from "../admin/ApiKeyManager.js";
-import { IngestionService } from "../ingest/IngestionService.js";
-import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
-import { EventStore } from "../storage/EventStore.js";
-import { ProjectScanner } from "../ingest/ProjectScanner.js";
-import { timingSafeStringEqual } from "../util/auth-utils.js";
-import {
-  deleteProjectSchema,
-  rotateKeySchema,
-  deactivateKeySchema,
-  setLLMConfigSchema,
-  type DeleteProjectInput,
-  type RotateKeyInput,
-  type DeactivateKeyInput,
-  type SetLLMConfigInput,
-} from "../validation/admin-schemas.js";
-import { parseBody, isParseSuccess } from "../validation/parse-body.js";
+
+/** @internal Test-only: expose the rate-limit map for window-reset tests */
+export function _getAdminRateLimitMapForTest(): Map<string, { count: number; resetAt: number }> {
+  return adminRateLimitMap;
+}
 
 export interface AdminDependencies {
   adminStore: AdminStore;
@@ -202,7 +220,6 @@ const PROVIDERS = [
   "OpenAI",
   "Anthropic",
   "OpenRouter",
-  "zAI",
   "Gemini",
   "Mistral",
   "Groq",
@@ -739,12 +756,6 @@ function renderAdminPage(nonce: string): string {
   </main>
 
   <script nonce="${nonce}">
-    function escapeHtml(str) {
-      const div = document.createElement("div");
-      div.textContent = str;
-      return div.innerHTML;
-    }
-
     // API key is stored in memory only (not sessionStorage) to reduce XSS exposure window.
     // Refreshing the page clears the key — a deliberate security trade-off.
     const state = {
