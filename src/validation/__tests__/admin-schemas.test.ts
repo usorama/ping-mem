@@ -10,6 +10,7 @@ import {
   rotateKeySchema,
   deactivateKeySchema,
   setLLMConfigSchema,
+  SUPPORTED_PROVIDERS,
 } from "../admin-schemas.js";
 
 describe("admin-schemas", () => {
@@ -241,26 +242,10 @@ describe("admin-schemas", () => {
       }
     });
 
-    it("should accept all supported providers", () => {
-      const providers = [
-        "OpenAI",
-        "Anthropic",
-        "OpenRouter",
-        "Gemini",
-        "Mistral",
-        "Groq",
-        "Cohere",
-        "Together",
-        "Perplexity",
-        "Azure OpenAI",
-        "Bedrock",
-        "DeepSeek",
-        "xAI",
-        "Fireworks",
-        "Custom",
-      ];
-
-      for (const provider of providers) {
+    it("should accept all supported providers (driven by SUPPORTED_PROVIDERS — auto-covers new additions)", () => {
+      // Iterate over the canonical source-of-truth list so that adding a new provider
+      // to admin-schemas.ts is automatically covered here without updating the test.
+      for (const provider of SUPPORTED_PROVIDERS) {
         const result = setLLMConfigSchema.safeParse({
           provider,
           apiKey: "test-key",
@@ -344,6 +329,17 @@ describe("admin-schemas", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.model).toBe("gpt-4");
+      }
+    });
+
+    it("should reject non-http/https schemes in baseUrl (prevents SSRF via file:// and ftp://)", () => {
+      for (const badUrl of ["file:///etc/passwd", "ftp://files.example.com/"]) {
+        const result = setLLMConfigSchema.safeParse({
+          provider: "OpenAI",
+          apiKey: "test-key",
+          baseUrl: badUrl,
+        });
+        expect(result.success).toBe(false);
       }
     });
 

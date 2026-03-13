@@ -61,7 +61,11 @@ function getRemoteIp(req: IncomingMessage): string {
       // X-Forwarded-For can be a comma-separated list; first entry is the original client
       const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
       const firstIp = raw?.split(",")[0]?.trim();
-      if (firstIp) return firstIp;
+      // Sanitize the XFF value before returning: strip non-IP characters to prevent
+      // log injection when the IP is later written to structured logs.
+      // A trusted upstream proxy should have already validated this, but defense-in-depth
+      // applies here because attacker-controlled XFF may reach this code before proxy validation.
+      if (firstIp) return firstIp.replace(/[^\w.:[\]-]/g, "?").slice(0, 64);
     }
   }
   return req.socket?.remoteAddress ?? "unknown";
@@ -218,10 +222,15 @@ export function sanitizeAdminError(message: string): string {
 
 /** @internal Exported for unit testing only.
  *  Checks whether projectDir is a subdirectory of an allowed root.
- *  Uses path.resolve to normalise before checking, catching ../ and similar sequences. */
+ *  Uses path.resolve to normalise before checking, catching ../ and similar sequences.
+ *
+ *  NOTE: /tmp is intentionally excluded from the allowed roots. /tmp is world-writable
+ *  on all POSIX systems — any process (including untrusted containers sharing the host's
+ *  /tmp) can create directories there. Including it would allow an authenticated attacker
+ *  to trigger EventStore, DiagnosticsStore, and manifest deletions for arbitrary /tmp paths. */
 export function _isProjectDirSafe(projectDir: string): boolean {
   const resolved = path.resolve(projectDir);
-  const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
+  const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home"];
   return allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
 }
 
@@ -262,8 +271,11 @@ export async function handleAdminRequest(
   res: ServerResponse,
   deps: AdminDependencies
 ): Promise<boolean> {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
-  const pathName = url.pathname;
+  // Use a fixed placeholder base URL so the Host header cannot influence URL parsing.
+  // req.url from Node.js is always a path string (never a full absolute URL), so the
+  // placeholder base is only used to satisfy the URL constructor's requirement for an
+  // absolute base when resolving relative paths.
+  const pathName = new URL(req.url ?? "/", "http://localhost").pathname;
 
   if (pathName === "/admin" || pathName === "/admin/") {
     if (!checkAdminRateLimit(req, res)) {
@@ -279,7 +291,10 @@ export async function handleAdminRequest(
       "Content-Type": "text/html; charset=utf-8",
       // frame-ancestors 'none' is the modern replacement for X-Frame-Options: DENY.
       // Both are included for maximum browser compatibility.
-      "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src 'self' data:; frame-ancestors 'none'`,
+      // connect-src 'self': restricts fetch() calls to same origin (all /api/admin/* calls).
+      // form-action 'none': no HTML forms are used; blocks form-submission hijacking from XSS.
+      // base-uri 'none': prevents a <base> tag injection from redirecting relative URLs.
+      "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src 'self' data:; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -332,6 +347,11 @@ export async function handleAdminRequest(
       }
       // No origin AND no referer: allow — server-to-server / CLI callers omit browser headers;
       // X-API-Key is the primary auth layer for those callers.
+      // KNOWN LIMITATION: a browser that omits both headers (e.g., via a privacy proxy that
+      // strips Referer, or a direct <form> POST without JavaScript) also passes this check.
+      // Full CSRF elimination would require a Double-Submit Cookie or Synchronizer Token.
+      // The current design accepts this residual risk because X-API-Key is a high-entropy
+      // secret that must be explicitly obtained and configured by the caller.
     }
     await handleAdminApi(req, res, deps, pathName);
     return true;
@@ -428,7 +448,10 @@ async function handleAdminApi(
       warnings.push(msg);
     }
 
-    return respondJson(res, 200, { data: { projectId: resolvedProjectId, warnings } });
+    // Return 207 Multi-Status when partial failures occurred so the caller knows
+    // that some cleanup steps were skipped. 200 would mask silent data inconsistency.
+    const status = warnings.length > 0 ? 207 : 200;
+    return respondJson(res, status, { data: { projectId: resolvedProjectId, warnings } });
   }
 
   if (req.method === "GET" && pathName === "/api/admin/keys") {
@@ -537,12 +560,24 @@ function requireApiKey(
 ): boolean {
   const rawApiKey = req.headers["x-api-key"];
   const apiKey = Array.isArray(rawApiKey) ? rawApiKey[0] : rawApiKey;
+  // ApiKeyManager.isValid hashes the supplied key with SHA-256 and performs a DB equality
+  // lookup on the hash. The comparison is timing-safe because the timing-sensitive step
+  // is the deterministic hash computation, not string comparison.
   if (!apiKeyManager.isValid(apiKey)) {
     res.writeHead(401, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid API key" }));
     return false;
   }
   return true;
+}
+
+/** Escape HTML special characters to prevent XSS when interpolating values into HTML. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function respondJson(res: ServerResponse, status: number, payload: unknown): void {
@@ -598,7 +633,7 @@ function deleteProjectManifest(projectDir: string): void {
 }
 
 function renderAdminPage(nonce: string): string {
-  const providerOptions = SUPPORTED_PROVIDERS.map((p) => `<option value="${p}">${p}</option>`).join("");
+  const providerOptions = SUPPORTED_PROVIDERS.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
   const providersJson = JSON.stringify(SUPPORTED_PROVIDERS);
 
   return `<!doctype html>

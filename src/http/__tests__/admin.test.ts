@@ -273,7 +273,10 @@ describe("admin.ts - checkAdminRateLimit", () => {
     process.env = OLD_ENV;
   });
 
-  it("allows exactly ADMIN_RATE_LIMIT_MAX (20) requests per window", () => {
+  it("allows exactly ADMIN_RATE_LIMIT_MAX (20) requests and blocks the 21st with 429 + Retry-After", () => {
+    // Combined boundary test: verifies both that 20 requests are allowed AND that the 21st
+    // is blocked. Keeping them together prevents a regression where the boundary is correct
+    // in isolation but breaks under the combined quota pressure.
     const ip = "192.168.1.10";
     for (let i = 0; i < 20; i++) {
       const req = createMockRequest(undefined, ip);
@@ -284,24 +287,11 @@ describe("admin.ts - checkAdminRateLimit", () => {
       ).toBe(true);
       expect(res.statusCode).toBeUndefined();
     }
-  });
-
-  it("blocks the 21st request in the same window with 429 and Retry-After", () => {
-    const ip = "192.168.1.11";
-    // Exhaust the 20-request quota
-    for (let i = 0; i < 20; i++) {
-      checkAdminRateLimit(
-        createMockRequest(undefined, ip) as IncomingMessage,
-        createMockResponse() as unknown as ServerResponse
-      );
-    }
-
     // 21st request must be blocked
-    const req = createMockRequest(undefined, ip);
-    const res = createMockResponse();
-    expect(checkAdminRateLimit(req as IncomingMessage, res as unknown as ServerResponse)).toBe(false);
-    expect(res.statusCode).toBe(429);
-    expect(res.headers["Retry-After"]).toBeDefined();
+    const blocked = createMockResponse();
+    expect(checkAdminRateLimit(createMockRequest(undefined, ip) as IncomingMessage, blocked as unknown as ServerResponse)).toBe(false);
+    expect(blocked.statusCode).toBe(429);
+    expect(blocked.headers["Retry-After"]).toBeDefined();
   });
 
   it("uses X-Forwarded-For when PING_MEM_BEHIND_PROXY is true", () => {
@@ -418,8 +408,11 @@ describe("admin.ts - brute-force lockout", () => {
       expect(res.statusCode).toBe(401);
     }
 
-    // 5th failure triggers lockout (records it); response is still 401 from this call
-    checkBasicAuth(wrongCreds(ip) as IncomingMessage, createMockResponse() as unknown as ServerResponse);
+    // 5th failure triggers lockout (records it); response is still 401 on this call —
+    // lockout is recorded but enforcement only fires from the 6th call onward.
+    const res5 = createMockResponse();
+    checkBasicAuth(wrongCreds(ip) as IncomingMessage, res5 as unknown as ServerResponse);
+    expect(res5.statusCode).toBe(401); // Not yet 429 — lockout recorded, not enforced yet
 
     // 6th attempt — IP is now locked out → 429
     const resLocked = createMockResponse();
@@ -576,6 +569,21 @@ describe("admin.ts - sanitizeAdminError", () => {
     expect(sanitizeAdminError("AKIA5GSG0CFZ3LN1JPM9 leaked")).toBe("[REDACTED] leaked");
   });
 
+  it("redacts keys embedded in JSON error payloads (word boundary fires at quote character)", () => {
+    // Double-quote is \\W so \\b fires at the boundary between the quote and the key prefix
+    const json = '{"error": "sk-abc1234567890 is invalid"}';
+    expect(sanitizeAdminError(json)).toBe('{"error": "[REDACTED] is invalid"}');
+  });
+
+  it("known false-negative: tog_ key immediately adjacent to underscore escapes redaction (documented limitation)", () => {
+    // \\b does not fire between [A-Za-z0-9] and _ (both are \\w). A Together AI legacy key
+    // immediately followed by an underscore (e.g. embedded in a structured log field name)
+    // will not be redacted. Error messages from Together AI callers must not include
+    // underscore-adjacent key material. This test documents the known boundary behavior.
+    const embedded = "error: tog_ABCDEFGHIJKLMNOPQRSTUVWXYZabcde_ctx";
+    expect(sanitizeAdminError(embedded)).toBe(embedded); // known false-negative
+  });
+
   it("does not modify messages without API keys", () => {
     const safe = "LLM config save failed: invalid model name";
     expect(sanitizeAdminError(safe)).toBe(safe);
@@ -685,13 +693,15 @@ describe("admin.ts - _isProjectDirSafe", () => {
     expect(_isProjectDirSafe("/Users/someone/myrepo")).toBe(true);
     expect(_isProjectDirSafe("/home/ubuntu/myrepo")).toBe(true);
     expect(_isProjectDirSafe("/projects/myrepo")).toBe(true);
-    expect(_isProjectDirSafe("/tmp/sandbox")).toBe(true);
+    // Note: /tmp is intentionally NOT in the allowed roots (world-writable on POSIX systems)
   });
 
-  it("rejects paths outside all allowed roots", () => {
+  it("rejects paths outside all allowed roots (including /tmp — world-writable)", () => {
     expect(_isProjectDirSafe("/etc/passwd")).toBe(false);
     expect(_isProjectDirSafe("/var/log/syslog")).toBe(false);
     expect(_isProjectDirSafe("/root/.ssh")).toBe(false);
+    // /tmp is excluded from allowed roots: world-writable, any process can create dirs there
+    expect(_isProjectDirSafe("/tmp/sandbox")).toBe(false);
   });
 
   it("rejects path traversal sequences that escape an allowed root", () => {

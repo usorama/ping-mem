@@ -49,22 +49,28 @@ const projectIdSchema = nonEmptyString.regex(
  *
  * Exactly one of `projectDir` or `projectId` must be provided.
  */
-export const deleteProjectSchema = z.object({
-  // NOTE: the .refine() is NOT redundant despite optionalString using nonEmptyString.min(1).
-  // nonEmptyString applies .min(1) BEFORE .trim(), so "   " (3 spaces) passes min(1) and trims
-  // to "". The .refine() checks the post-trim value to catch whitespace-only strings.
-  projectDir: optionalString.refine(
-    (val) => val === undefined || val.length > 0,
-    "projectDir cannot be empty string"
-  ),
-  projectId: projectIdSchema.optional(),
-}).refine(
-  (data) => data.projectDir !== undefined || data.projectId !== undefined,
-  { message: "Either projectDir or projectId is required" }
-).refine(
-  (data) => !(data.projectDir !== undefined && data.projectId !== undefined),
-  { message: "Provide only one of projectDir or projectId, not both" }
-);
+export const deleteProjectSchema = z
+  .object({
+    // NOTE: the .refine() is NOT redundant despite optionalString using nonEmptyString.min(1).
+    // nonEmptyString applies .min(1) BEFORE .trim(), so "   " (3 spaces) passes min(1) and trims
+    // to "". The .refine() checks the post-trim value to catch whitespace-only strings.
+    projectDir: optionalString.refine(
+      (val) => val === undefined || val.length > 0,
+      "projectDir cannot be empty string"
+    ),
+    projectId: projectIdSchema.optional(),
+  })
+  // Refinement order matters: the "at least one" check must come first so that when both
+  // are undefined it fires with the correct "required" message before the "not-both" check
+  // runs. If the order were swapped, undefined-undefined would reach the wrong error.
+  .refine(
+    (data) => data.projectDir !== undefined || data.projectId !== undefined,
+    { message: "Either projectDir or projectId is required" }
+  )
+  .refine(
+    (data) => !(data.projectDir !== undefined && data.projectId !== undefined),
+    { message: "Provide only one of projectDir or projectId, not both" }
+  );
 
 export type DeleteProjectInput = z.infer<typeof deleteProjectSchema>;
 
@@ -148,7 +154,27 @@ export const setLLMConfigSchema = z.object({
     // Treat empty or whitespace-only string as "unset" — allows the UI to clear the field
     // by submitting an empty input without triggering a URL validation error.
     (val) => (typeof val === "string" && val.trim() === "" ? undefined : val),
-    z.string().url().max(2_000).optional()
+    z
+      .string()
+      .url()
+      .max(2_000)
+      // Restrict to http/https only — arbitrary schemes (file://, ftp://, javascript://)
+      // could be used for SSRF if baseUrl is later used to make outbound HTTP requests.
+      // try-catch: if the URL is unparseable (already caught by .url()), return true so this
+      // refinement does not emit a misleading "must use http or https" error alongside the
+      // "Invalid URL" error from .url(). Only emit scheme errors for genuinely parseable URLs.
+      .refine(
+        (url) => {
+          try {
+            const proto = new URL(url).protocol;
+            return proto === "http:" || proto === "https:";
+          } catch {
+            return true; // Not a valid URL — let z.string().url() report the parse error
+          }
+        },
+        "baseUrl must use http or https scheme"
+      )
+      .optional()
   ),
 });
 
