@@ -176,15 +176,20 @@ export class QdrantClientWrapper {
     });
 
     this.servicePolicy.onStateChange((state) => {
-      if (state === "open") {
-        this.connected = false;
-      } else if (!this.usingFallback) {
-        this.connected = this.client !== null;
-      }
       if (state === "closed") {
+        // Fully recovered: mark as connected only when circuit closes
+        if (!this.usingFallback) {
+          this.connected = this.client !== null;
+        }
         log.info("Circuit recovered", { state });
+      } else if (state === "open") {
+        // Circuit tripped: mark as disconnected
+        this.connected = false;
+        log.warn("Circuit OPEN — Qdrant operations will fail fast", { state });
       } else {
-        log.warn("Circuit state changed", { state });
+        // half-open: a single probe request will be allowed through, but we
+        // don't declare ourselves connected until the probe succeeds (circuit closes)
+        log.info("Circuit half-open — attempting recovery", { state });
       }
     });
   }
@@ -286,8 +291,9 @@ export class QdrantClientWrapper {
     }
 
     try {
-      // Check specific collection rather than listing all (avoids leaking other collection names)
-      await this.client.getCollection(this.config.collectionName);
+      // Use getCollections() — lightweight API that succeeds whenever the server is reachable,
+      // even before the specific collection has been created (avoids false-unhealthy at startup).
+      await this.client.getCollections();
       return true;
     } catch (error) {
       log.warn("healthCheck failed", {

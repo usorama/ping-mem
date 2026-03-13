@@ -320,15 +320,22 @@ describe("Neo4jClient - Connection Tests", () => {
         password: "password",
       });
 
+      await expect(async () => {
+        await badClient.connect();
+      }).toThrow(Neo4jConnectionError);
+
+      // Verify error details by catching explicitly
+      let caught: Neo4jConnectionError | undefined;
       try {
         await badClient.connect();
-        fail("Expected error to be thrown");
       } catch (error) {
-        expect(error).toBeInstanceOf(Neo4jConnectionError);
-        const connError = error as Neo4jConnectionError;
-        expect(connError.message).toContain("Failed to connect to Neo4j");
-        expect(connError.cause).toBeInstanceOf(Error);
+        if (error instanceof Neo4jConnectionError) {
+          caught = error;
+        }
       }
+      expect(caught).toBeDefined();
+      expect(caught?.message).toContain("Failed to connect to Neo4j");
+      expect(caught?.cause).toBeInstanceOf(Error);
     });
   });
 });

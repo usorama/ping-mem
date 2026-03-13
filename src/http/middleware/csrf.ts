@@ -34,12 +34,20 @@ export function csrfProtection() {
     }
 
     if (SAFE_METHODS.has(c.req.method)) {
-      // Set CSRF token cookie on safe methods
-      const token = generateCsrfToken();
+      // Double-submit CSRF pattern: reuse existing token if present to avoid race conditions
+      // with concurrent GET requests invalidating each other's tokens.
+      const cookieHeader = c.req.header("cookie") ?? "";
+      const existing = cookieHeader
+        .split(";")
+        .map((s) => s.trim())
+        .find((s) => s.startsWith(`${CSRF_COOKIE}=`))
+        ?.substring(`${CSRF_COOKIE}=`.length);
+      const token = existing ?? generateCsrfToken();
       c.set("csrfToken", token);
-      // Double-submit CSRF pattern: cookie must be JS-readable (no HttpOnly) so client
-      // can read it and include it in the X-CSRF-Token request header for validation.
-      c.header("Set-Cookie", `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict; Secure`);
+      // Cookie must be JS-readable (no HttpOnly) so client can read it and include it in
+      // the X-CSRF-Token request header for validation.
+      const secureFlag = c.req.url.startsWith("https://") || process.env.NODE_ENV === "production" ? "; Secure" : "";
+      c.header("Set-Cookie", `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict${secureFlag}`);
       return next();
     }
 

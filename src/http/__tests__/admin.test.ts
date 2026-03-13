@@ -55,26 +55,28 @@ describe("admin.ts - checkBasicAuth", () => {
   });
 
   describe("when no auth is configured", () => {
-    it("should return true (allow access) when PING_MEM_ADMIN_USER is not set", () => {
+    it("should return false and send 401 when PING_MEM_ADMIN_USER is not set", () => {
       delete process.env.PING_MEM_ADMIN_USER;
       delete process.env.PING_MEM_ADMIN_PASS;
 
       const req = createMockRequest();
       const res = createMockResponse();
 
-      expect(checkBasicAuth(req as IncomingMessage, res as OutgoingMessage)).toBe(true);
-      expect(res.statusCode).toBeUndefined();
+      // Security: unconfigured credentials must block access, never grant it
+      expect(checkBasicAuth(req as IncomingMessage, res as OutgoingMessage)).toBe(false);
+      expect(res.statusCode).toBe(401);
     });
 
-    it("should return true (allow access) when PING_MEM_ADMIN_PASS is not set", () => {
+    it("should return false and send 401 when PING_MEM_ADMIN_PASS is not set", () => {
       process.env.PING_MEM_ADMIN_USER = "admin";
       delete process.env.PING_MEM_ADMIN_PASS;
 
       const req = createMockRequest();
       const res = createMockResponse();
 
-      expect(checkBasicAuth(req as IncomingMessage, res as OutgoingMessage)).toBe(true);
-      expect(res.statusCode).toBeUndefined();
+      // Security: partial credentials must block access, never grant it
+      expect(checkBasicAuth(req as IncomingMessage, res as OutgoingMessage)).toBe(false);
+      expect(res.statusCode).toBe(401);
     });
   });
 

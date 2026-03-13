@@ -162,6 +162,7 @@ export class HealthMonitor {
       try {
         const snapshot = await probeSystemHealth({
           eventStore: this.deps.eventStore,
+          ...(this.deps.services.neo4jClient ? { neo4jClient: this.deps.services.neo4jClient } : {}),
           ...(this.deps.services.graphManager ? { graphManager: this.deps.services.graphManager } : {}),
           ...(this.deps.services.qdrantClient ? { qdrantClient: this.deps.services.qdrantClient } : {}),
           ...(this.deps.diagnosticsStore ? { diagnosticsStore: this.deps.diagnosticsStore } : {}),
@@ -174,13 +175,14 @@ export class HealthMonitor {
 
         const sqliteMetrics = snapshot.components.sqlite.metrics;
         if (sqliteMetrics) {
+          // integrity_ok is excluded from the fast tick: skipIntegrityCheck=true always returns 1,
+          // so there's nothing meaningful to threshold-check here. It runs in qualityTick only.
           this.checkThresholds({
             source: "sqlite",
             status: this.componentToProbeStatus(snapshot.components.sqlite.status),
             metrics: [
               { name: "wal_size_bytes", value: sqliteMetrics.wal_size_bytes ?? 0, unit: "bytes" },
               { name: "freelist_ratio", value: sqliteMetrics.freelist_ratio ?? 0, unit: "ratio" },
-              { name: "integrity_ok", value: sqliteMetrics.integrity_ok ?? 0, unit: "boolean" },
             ],
           });
         }
@@ -217,7 +219,7 @@ export class HealthMonitor {
         const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
         if (walSize > 50_000_000) {
           // PASSIVE mode never blocks writers (unlike TRUNCATE which waits for all readers)
-          this.deps.eventStore.getDatabase().exec("PRAGMA wal_checkpoint(PASSIVE)");
+          this.deps.eventStore.walCheckpoint("PASSIVE");
           log.info("SQLite WAL checkpoint completed", { walSizeBytes: walSize });
         }
       } catch (error) {
@@ -290,14 +292,20 @@ export class HealthMonitor {
           const pointCount = stats.totalVectors;
 
           if (this.baselineQdrantCount === null) {
-            // Skip drift check on first tick — just establish the baseline
+            // First tick: establish baseline, skip drift check
             this.baselineQdrantCount = pointCount;
+          } else if (this.baselineQdrantCount === 0 && pointCount > 0) {
+            // Bootstrap: first ingest happened since baseline was set at 0 — treat as normal growth
+            this.baselineQdrantCount = pointCount;
+            log.info("Qdrant baseline bootstrapped after first ingest", { pointCount });
           } else {
-            const baseline = this.baselineQdrantCount === 0 ? 1 : this.baselineQdrantCount;
-            const driftPct = Math.abs(pointCount - this.baselineQdrantCount) / baseline * 100;
+            const driftPct = this.baselineQdrantCount === 0
+              ? 0
+              : Math.abs(pointCount - this.baselineQdrantCount) / this.baselineQdrantCount * 100;
 
-            // Update baseline when drift is within acceptable range to track normal growth
-            if (driftPct <= 5) {
+            // Ratchet baseline forward when drift is within the critical threshold.
+            // This allows legitimate large growth to be tracked without permanent alert floods.
+            if (driftPct <= 15) {
               this.baselineQdrantCount = pointCount;
             }
             this.checkThresholds({

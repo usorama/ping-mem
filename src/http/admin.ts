@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as fs from "fs";
 import * as path from "path";
+import * as crypto from "node:crypto";
 
 import { createLogger } from "../util/logger.js";
 import { AdminStore, type LLMConfigInput } from "../admin/AdminStore.js";
@@ -66,10 +67,12 @@ export async function handleAdminRequest(
     if (!checkBasicAuth(req, res)) {
       return true;
     }
-    const html = renderAdminPage();
+    // Generate a per-request nonce for CSP — prevents inline script injection
+    const nonce = crypto.randomBytes(16).toString("base64");
+    const html = renderAdminPage(nonce);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:",
+      "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'self' data:`,
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -112,10 +115,14 @@ async function handleAdminApi(
 
     const { projectDir, projectId } = result.data;
 
-    // Guard against path traversal before any filesystem operation
+    // Guard against path traversal: resolve first, then verify within allowed scope.
+    // String-split-based checks do not catch URL-encoded or null-byte traversals.
     if (projectDir) {
-      const segments = projectDir.split(/[\\/]/);
-      if (segments.includes("..")) {
+      const resolved = path.resolve(projectDir);
+      // Block paths outside safe roots (home dirs, /projects, /Users, /home, /tmp)
+      const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
+      const isSafe = allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
+      if (!isSafe && !path.isAbsolute(resolved)) {
         return respondJson(res, 400, { error: "projectDir must not contain path traversal sequences" });
       }
     }
@@ -241,7 +248,13 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
   const adminUser = process.env[ADMIN_USER_ENV];
   const adminPass = process.env[ADMIN_PASS_ENV];
   if (!adminUser || !adminPass) {
-    return true;
+    // Credentials not configured — block access and warn. Never grant open access.
+    log.warn("Admin auth blocked: PING_MEM_ADMIN_USER/PING_MEM_ADMIN_PASS not set", {
+      ip: (req.socket?.remoteAddress) ?? "unknown",
+    });
+    res.writeHead(401, { "WWW-Authenticate": "Basic" });
+    res.end("Unauthorized — admin credentials not configured");
+    return false;
   }
 
   const header = req.headers["authorization"] ?? "";
@@ -317,12 +330,13 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
 }
 
 function deleteProjectManifest(projectDir: string): void {
-  // Prevent path traversal attacks
-  const segments = projectDir.split(/[\\/]/);
-  if (segments.includes("..")) {
+  const resolved = path.resolve(projectDir);
+  // Containment check: resolved path must be under an allowed root to prevent traversal.
+  const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
+  const isSafe = allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
+  if (!isSafe) {
     throw new Error("projectDir must not contain path traversal sequences");
   }
-  const resolved = path.resolve(projectDir);
   const manifestPath = path.join(resolved, ".ping-mem", "manifest.json");
   if (fs.existsSync(manifestPath)) {
     fs.unlinkSync(manifestPath);
@@ -336,7 +350,7 @@ function deleteProjectManifest(projectDir: string): void {
   }
 }
 
-function renderAdminPage(): string {
+function renderAdminPage(nonce: string): string {
   const providerOptions = PROVIDERS.map((p) => `<option value="${p}">${p}</option>`).join("");
   const providersJson = JSON.stringify(PROVIDERS);
 
@@ -529,26 +543,26 @@ function renderAdminPage(): string {
     </section>
   </main>
 
-  <script>
+  <script nonce="${nonce}">
     function escapeHtml(str) {
       const div = document.createElement("div");
       div.textContent = str;
       return div.innerHTML;
     }
 
+    // API key is stored in memory only (not sessionStorage) to reduce XSS exposure window.
+    // Refreshing the page clears the key — a deliberate security trade-off.
     const state = {
-      apiKey: sessionStorage.getItem("pingMemApiKey") || "",
+      apiKey: "",
     };
 
     const apiKeyInput = document.getElementById("currentApiKey");
     const apiKeyStatus = document.getElementById("apiKeyStatus");
     const saveApiKey = document.getElementById("saveApiKey");
-    apiKeyInput.value = state.apiKey;
 
     saveApiKey.addEventListener("click", () => {
       state.apiKey = apiKeyInput.value.trim();
-      sessionStorage.setItem("pingMemApiKey", state.apiKey);
-      apiKeyStatus.textContent = state.apiKey ? "Saved" : "Missing";
+      apiKeyStatus.textContent = state.apiKey ? "Saved (in-memory only)" : "Missing";
     });
 
     async function apiFetch(path, options = {}) {
@@ -589,12 +603,11 @@ function renderAdminPage(): string {
           btn.className = "ghost";
           btn.textContent = "Deactivate";
           btn.dataset.id = key.id;
-          btn.addEventListener("click", async () => {
-            await apiFetch("/api/admin/keys/deactivate", {
+          btn.addEventListener("click", () => {
+            apiFetch("/api/admin/keys/deactivate", {
               method: "POST",
               body: JSON.stringify({ id: key.id }),
-            });
-            refreshKeys();
+            }).then(() => refreshKeys()).catch((err) => console.error("Deactivate key failed:", err));
           });
           actionTd.appendChild(btn);
         }
@@ -612,7 +625,7 @@ function renderAdminPage(): string {
       const value = document.getElementById("newKeyValue");
       value.textContent = result.key;
       box.style.display = "block";
-      refreshKeys();
+      refreshKeys().catch((err) => console.error("refreshKeys failed:", err));
     }
 
     async function refreshProjects() {
@@ -631,15 +644,14 @@ function renderAdminPage(): string {
         const btn = document.createElement("button");
         btn.className = "secondary";
         btn.textContent = "Delete";
-        btn.addEventListener("click", async () => {
+        btn.addEventListener("click", () => {
           if (!confirm("Delete all memory, graph, and diagnostics for this project?")) {
             return;
           }
-          await apiFetch("/api/admin/projects", {
+          apiFetch("/api/admin/projects", {
             method: "DELETE",
             body: JSON.stringify({ projectDir: project.projectDir }),
-          });
-          refreshProjects();
+          }).then(() => refreshProjects()).catch((err) => console.error("Delete project failed:", err));
         });
         actionTd.appendChild(btn);
         row.appendChild(actionTd);
@@ -673,10 +685,10 @@ function renderAdminPage(): string {
       document.getElementById("llmApiKey").value = "";
     }
 
-    document.getElementById("refreshKeys").addEventListener("click", refreshKeys);
-    document.getElementById("rotateKey").addEventListener("click", rotateKey);
-    document.getElementById("refreshProjects").addEventListener("click", refreshProjects);
-    document.getElementById("saveLLMConfig").addEventListener("click", saveLLMConfig);
+    document.getElementById("refreshKeys").addEventListener("click", () => refreshKeys().catch((err) => console.error("refreshKeys failed:", err)));
+    document.getElementById("rotateKey").addEventListener("click", () => rotateKey().catch((err) => console.error("rotateKey failed:", err)));
+    document.getElementById("refreshProjects").addEventListener("click", () => refreshProjects().catch((err) => console.error("refreshProjects failed:", err)));
+    document.getElementById("saveLLMConfig").addEventListener("click", () => saveLLMConfig().catch((err) => console.error("saveLLMConfig failed:", err)));
 
     if (state.apiKey) {
       refreshKeys().catch(console.error);

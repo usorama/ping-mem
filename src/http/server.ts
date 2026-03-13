@@ -50,7 +50,8 @@ export async function startHTTPServer(): Promise<void> {
   }
 
   const transport = (process.env.PING_MEM_TRANSPORT as HTTPTransportType) ?? "streamable-http";
-  const port = parseInt(process.env.PING_MEM_PORT ?? "3000");
+  const rawPort = parseInt(process.env.PING_MEM_PORT ?? "3000", 10);
+  const port = Number.isNaN(rawPort) ? 3000 : rawPort;
   const host = process.env.PING_MEM_HOST ?? "0.0.0.0";
   const apiKey = process.env.PING_MEM_API_KEY;
   const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
@@ -140,22 +141,14 @@ export async function startHTTPServer(): Promise<void> {
         return serverInstance.handleRequest(req, res);
       })
       .catch((error) => {
-      log.error("Unhandled error", { error: error instanceof Error ? error.message : String(error) });
-      if (!res.headersSent) {
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Internal Server Error" }));
-      }
+        log.error("Unhandled error", { error: error instanceof Error ? error.message : String(error) });
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Internal Server Error" }));
+        } else {
+          res.destroy();
+        }
       });
-  });
-
-  // Start listening
-  httpServer.listen(port, host, () => {
-    log.info(`Server listening on http://${host}:${port}`);
-    log.info(`Transport: ${transport}`);
-    if (apiKey) {
-      log.info("API key authentication enabled");
-    }
-    log.info("Press Ctrl+C to stop");
   });
 
   // Handle graceful shutdown
@@ -221,6 +214,24 @@ export async function startHTTPServer(): Promise<void> {
       stack: reason instanceof Error ? reason.stack : undefined,
     });
     void shutdown("unhandledRejection");
+  });
+
+  // Start listening (signal handlers registered first so SIGINT during listen is handled)
+  httpServer.on("error", (error: NodeJS.ErrnoException) => {
+    log.error("HTTP server error", { code: error.code, message: error.message });
+    if (error.code === "EADDRINUSE") {
+      log.error(`Port ${port} is already in use. Exiting.`);
+      process.exit(1);
+    }
+  });
+
+  httpServer.listen(port, host, () => {
+    log.info(`Server listening on http://${host}:${port}`);
+    log.info(`Transport: ${transport}`);
+    if (apiKey) {
+      log.info("API key authentication enabled");
+    }
+    log.info("Press Ctrl+C to stop");
   });
 }
 

@@ -114,6 +114,8 @@ export class RESTPingMemServer {
   private knowledgeStore: KnowledgeStore;
   private qdrantClient: QdrantClientWrapper | null = null;
   private healthMonitor: HealthMonitor | null = null;
+  private sseConnectionCount = 0;
+  private static readonly MAX_SSE_CONNECTIONS = 100;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -225,15 +227,8 @@ export class RESTPingMemServer {
 
     if (authRequired) {
       const authMiddleware = async (c: Parameters<Parameters<typeof this.app.use>[1]>[0], next: () => Promise<void>) => {
-        // Check X-API-Key header first, then fall back to Authorization: Bearer
-        let apiKey = c.req.header("x-api-key");
-        if (!apiKey) {
-          const authHeader = c.req.header("authorization");
-          if (authHeader?.startsWith("Bearer ")) {
-            apiKey = authHeader.slice(7);
-          }
-        }
-        const isValid = this.validateApiKey(apiKey ?? undefined);
+        const apiKey = this.extractApiKey(c as unknown as Context<AppEnv>);
+        const isValid = this.validateApiKey(apiKey);
         if (!isValid) {
           return c.json(
             {
@@ -274,14 +269,7 @@ export class RESTPingMemServer {
         : (this.config.apiKey && this.config.apiKey.trim().length > 0);
 
       if (authRequired) {
-        let apiKey = c.req.header("x-api-key");
-        if (!apiKey) {
-          const authHeader = c.req.header("authorization");
-          if (authHeader?.startsWith("Bearer ")) {
-            apiKey = authHeader.slice(7);
-          }
-        }
-        if (!this.validateApiKey(apiKey ?? undefined)) {
+        if (!this.validateApiKey(this.extractApiKey(c))) {
           return c.json(
             { error: "Unauthorized", message: "Invalid API key" },
             401
@@ -291,18 +279,15 @@ export class RESTPingMemServer {
 
       // Lightweight liveness check — only pings SQLite (core dependency).
       // Full dependency probing is at /api/v1/observability/status.
-      try {
-        this.eventStore.getDatabase().prepare("SELECT 1").get();
+      const alive = await this.eventStore.ping();
+      if (alive) {
         return c.json({
           status: "ok",
           timestamp: new Date().toISOString(),
         });
-      } catch (error) {
-        log.error("Health check failed — SQLite unreachable", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return c.json({ status: "unhealthy", error: "SQLite unreachable" }, 503);
       }
+      log.error("Health check failed — SQLite unreachable");
+      return c.json({ status: "unhealthy", error: "SQLite unreachable" }, 503);
     });
 
     this.app.get("/api/v1/observability/status", async (c) => {
@@ -1419,17 +1404,21 @@ export class RESTPingMemServer {
       if (agentId) {
         try {
           const validId = createAgentId(agentId);
-          const db = this.eventStore.getDatabase();
-          const row = db.prepare(
-            "SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
-          ).get({ $agent_id: validId, $now: new Date().toISOString() });
-          if (!row) {
+          if (!this.eventStore.isAgentActive(validId)) {
             return c.json<RESTErrorResponse>({ error: "Forbidden", message: "Agent not registered or expired" }, 403);
           }
         } catch {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
         }
       }
+
+      if (this.sseConnectionCount >= RESTPingMemServer.MAX_SSE_CONNECTIONS) {
+        return c.json<RESTErrorResponse>(
+          { error: "Service Unavailable", message: "Too many SSE connections" },
+          503
+        );
+      }
+      this.sseConnectionCount++;
 
       const stream = new ReadableStream({
         start: (controller) => {
@@ -1472,6 +1461,7 @@ export class RESTPingMemServer {
           c.req.raw.signal.addEventListener("abort", () => {
             clearInterval(heartbeat);
             this.pubsub.unsubscribe(subscriptionId);
+            this.sseConnectionCount = Math.max(0, this.sseConnectionCount - 1);
             try {
               controller.close();
             } catch (err) {
@@ -1614,6 +1604,17 @@ export class RESTPingMemServer {
       graphManager: this.graphManager ?? undefined,
       qdrantClient: this.qdrantClient ?? undefined,
     });
+  }
+
+  /**
+   * Extract API key from X-API-Key header or Authorization: Bearer token.
+   */
+  private extractApiKey(c: Context<AppEnv>): string | undefined {
+    const apiKey = c.req.header("x-api-key");
+    if (apiKey) return apiKey;
+    const authHeader = c.req.header("authorization");
+    if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
+    return undefined;
   }
 
   /**

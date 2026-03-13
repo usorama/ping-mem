@@ -756,10 +756,70 @@ export class EventStore {
   }
 
   /**
+   * Get WAL file size in bytes. Returns 0 for in-memory DBs or when WAL file absent.
+   */
+  getWalSizeBytes(): number {
+    if (this.config.dbPath === ":memory:") {
+      return 0;
+    }
+    try {
+      return fs.statSync(`${this.config.dbPath}-wal`).size;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        log.warn("Cannot read WAL file", { path: `${this.config.dbPath}-wal`, code });
+      }
+      return 0;
+    }
+  }
+
+  /**
+   * Get ratio of free pages to total pages (fragmentation indicator).
+   */
+  getFreelistRatio(): number {
+    const pageCountRow = this.db.prepare("PRAGMA page_count").get() as { page_count?: number } | undefined;
+    const freelistRow = this.db.prepare("PRAGMA freelist_count").get() as { freelist_count?: number } | undefined;
+    const pageCount = pageCountRow?.page_count ?? 0;
+    const freelistCount = freelistRow?.freelist_count ?? 0;
+    if (pageCount <= 0) {
+      return 0;
+    }
+    return freelistCount / pageCount;
+  }
+
+  /**
+   * Run PRAGMA quick_check; returns 1 if ok, 0 if corrupted.
+   */
+  getIntegrityOk(): number {
+    const row = this.db.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+    return row?.quick_check === "ok" ? 1 : 0;
+  }
+
+  /**
+   * Execute a WAL checkpoint. Mode: PASSIVE (default) never blocks writers.
+   */
+  walCheckpoint(mode: "PASSIVE" | "TRUNCATE" | "FULL" | "RESTART" = "PASSIVE"): void {
+    if (this.config.dbPath === ":memory:") {
+      return; // no WAL for in-memory
+    }
+    this.db.exec(`PRAGMA wal_checkpoint(${mode})`);
+  }
+
+  /**
    * Close database connection
    */
   async close(): Promise<void> {
     this.db.close();
+  }
+
+  /**
+   * Check if an agent is registered and not expired.
+   */
+  isAgentActive(agentId: string): boolean {
+    const row = this.db.prepare(
+      "SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
+    ).get({ $agent_id: agentId, $now: new Date().toISOString() });
+    return row !== null && row !== undefined;
   }
 
   /**

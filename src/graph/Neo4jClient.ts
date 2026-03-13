@@ -183,18 +183,30 @@ export class Neo4jClient {
       timeoutMs: 15_000,
     });
 
-    const onCircuitChange = (state: "closed" | "open" | "half-open") => {
-      this.connected = state !== "open" && this.driver !== null;
-      if (state === "open") {
-        log.error("Circuit OPEN — Neo4j operations will fail fast", { state });
-      } else if (state === "half-open") {
-        log.info("Circuit half-open — attempting recovery", { state });
+    // Read circuit controls connectivity: only the read circuit affects isConnected().
+    // Write circuit failures (e.g., replication lag) should not block reads.
+    this.servicePolicy.onStateChange((state) => {
+      if (state === "closed") {
+        this.connected = this.driver !== null;
+        log.info("Read circuit recovered", { state });
+      } else if (state === "open") {
+        this.connected = false;
+        log.error("Read circuit OPEN — Neo4j operations will fail fast", { state });
       } else {
-        log.info("Circuit recovered", { state });
+        // half-open: probe request will go through; don't declare connected until circuit closes
+        log.info("Read circuit half-open — attempting recovery", { state });
       }
-    };
-    this.servicePolicy.onStateChange(onCircuitChange);
-    this.writePolicy.onStateChange(onCircuitChange);
+    });
+    // Write circuit: log only, do not affect connected flag (reads may still work)
+    this.writePolicy.onStateChange((state) => {
+      if (state === "open") {
+        log.error("Write circuit OPEN — Neo4j write operations will fail fast", { state });
+      } else if (state === "half-open") {
+        log.info("Write circuit half-open — attempting write recovery", { state });
+      } else {
+        log.info("Write circuit recovered", { state });
+      }
+    });
   }
 
   /**

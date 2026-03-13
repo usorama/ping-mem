@@ -1,6 +1,6 @@
-import * as fs from "node:fs";
 import type { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import type { GraphManager } from "../graph/GraphManager.js";
+import type { Neo4jClient } from "../graph/Neo4jClient.js";
 import type { EventStore } from "../storage/EventStore.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import { createLogger } from "../util/logger.js";
@@ -30,6 +30,7 @@ export interface HealthSnapshot {
 
 export interface HealthProbeDeps {
   eventStore: EventStore;
+  neo4jClient?: Neo4jClient;
   graphManager?: GraphManager;
   qdrantClient?: QdrantClientWrapper;
   diagnosticsStore?: DiagnosticsStore;
@@ -59,41 +60,8 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function getWalSizeBytes(eventStore: EventStore): number {
-  const dbPath = eventStore.getDbPath();
-  if (dbPath === ":memory:") {
-    return 0;
-  }
-
-  try {
-    return fs.statSync(`${dbPath}-wal`).size;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT") {
-      log.warn("Cannot read WAL file", { path: `${dbPath}-wal`, code });
-    }
-    return 0;
-  }
-}
-
-function getFreelistRatio(eventStore: EventStore): number {
-  const db = eventStore.getDatabase();
-  const pageCountRow = db.prepare("PRAGMA page_count").get() as { page_count?: number } | undefined;
-  const freelistRow = db.prepare("PRAGMA freelist_count").get() as { freelist_count?: number } | undefined;
-  const pageCount = pageCountRow?.page_count ?? 0;
-  const freelistCount = freelistRow?.freelist_count ?? 0;
-  if (pageCount <= 0) {
-    return 0;
-  }
-  return freelistCount / pageCount;
-}
-
 export function getIntegrityOk(eventStore: EventStore): number {
-  const db = eventStore.getDatabase();
-  // Use quick_check instead of integrity_check — orders of magnitude faster
-  // (integrity_check reads every page; quick_check only verifies b-tree structure)
-  const row = db.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
-  return row?.quick_check === "ok" ? 1 : 0;
+  return eventStore.getIntegrityOk();
 }
 
 export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSnapshot> {
@@ -102,10 +70,10 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
   let sqlite: HealthComponent;
   try {
     const start = performance.now();
-    deps.eventStore.getDatabase().prepare("SELECT 1").get();
-    const walSize = getWalSizeBytes(deps.eventStore);
-    const freelistRatio = getFreelistRatio(deps.eventStore);
-    const integrityOk = deps.skipIntegrityCheck ? 1 : getIntegrityOk(deps.eventStore);
+    await deps.eventStore.ping();
+    const walSize = deps.eventStore.getWalSizeBytes();
+    const freelistRatio = deps.eventStore.getFreelistRatio();
+    const integrityOk = deps.skipIntegrityCheck ? 1 : deps.eventStore.getIntegrityOk();
     sqlite = {
       status: integrityOk === 1 ? "healthy" : "unhealthy",
       configured: true,
@@ -124,16 +92,16 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
     sqlite = {
       status: "unhealthy",
       configured: true,
-      error: toErrorMessage(error),
+      error: sanitizeHealthError(error),
     };
     status = "unhealthy";
   }
 
   let neo4j: HealthComponent;
-  if (deps.graphManager) {
+  if (deps.neo4jClient) {
     try {
       const start = performance.now();
-      await deps.graphManager.getEntity("__health_check_nonexistent__");
+      await deps.neo4jClient.ping();
       neo4j = {
         status: "healthy",
         configured: true,
@@ -144,10 +112,43 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
       neo4j = {
         status: "unhealthy",
         configured: true,
-        error: toErrorMessage(error),
+        error: sanitizeHealthError(error),
       };
       if (status !== "unhealthy") {
         status = "degraded";
+      }
+    }
+  } else if (deps.graphManager) {
+    // Fallback: graphManager without direct neo4jClient access
+    try {
+      const start = performance.now();
+      // Use a known-safe operation: listing empty set
+      await deps.graphManager.getEntity("__ping__");
+      neo4j = {
+        status: "healthy",
+        configured: true,
+        latencyMs: roundMs(performance.now() - start),
+      };
+    } catch (error) {
+      const msg = toErrorMessage(error);
+      // Entity-not-found is expected; any other error = unhealthy
+      const isNotFound = msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("no records");
+      if (isNotFound) {
+        neo4j = {
+          status: "healthy",
+          configured: true,
+          latencyMs: 0,
+        };
+      } else {
+        log.warn("Neo4j probe (graphManager) failed", { error: msg });
+        neo4j = {
+          status: "unhealthy",
+          configured: true,
+          error: sanitizeHealthError(error),
+        };
+        if (status !== "unhealthy") {
+          status = "degraded";
+        }
       }
     }
   } else {
@@ -175,7 +176,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
       qdrant = {
         status: "unhealthy",
         configured: true,
-        error: toErrorMessage(error),
+        error: sanitizeHealthError(error),
       };
       if (status !== "unhealthy") {
         status = "degraded";
