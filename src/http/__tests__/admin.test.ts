@@ -11,10 +11,12 @@ import {
   checkAdminRateLimit,
   sanitizeAdminError,
   isSameHostOrigin,
+  handleAdminRequest,
   _isProjectDirSafe,
   _resetAdminRateLimitMapsForTest,
   _getAuthFailureMapForTest,
   _getAdminRateLimitMapForTest,
+  type AdminDependencies,
 } from "../admin.js";
 
 // ---------------------------------------------------------------------------
@@ -703,5 +705,144 @@ describe("admin.ts - _isProjectDirSafe", () => {
     expect(_isProjectDirSafe("/home")).toBe(false);
     expect(_isProjectDirSafe("/projects")).toBe(false);
     expect(_isProjectDirSafe("/tmp")).toBe(false);
+  });
+
+  it("uses process.env.HOME as an allowed root for user home directories", () => {
+    const savedHome = process.env["HOME"];
+    try {
+      process.env["HOME"] = "/custom-home";
+      // Subdirectory of the custom HOME must be allowed
+      expect(_isProjectDirSafe("/custom-home/myrepo")).toBe(true);
+      // The HOME root itself must be rejected (must be a subdirectory, not the root)
+      expect(_isProjectDirSafe("/custom-home")).toBe(false);
+      // Path traversal out of the HOME root must be rejected
+      expect(_isProjectDirSafe("/custom-home/../etc/passwd")).toBe(false);
+    } finally {
+      if (savedHome === undefined) {
+        delete process.env["HOME"];
+      } else {
+        process.env["HOME"] = savedHome;
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleAdminRequest — CSRF enforcement integration tests
+// ---------------------------------------------------------------------------
+
+describe("admin.ts - handleAdminRequest CSRF rejection", () => {
+  const OLD_ENV = process.env;
+
+  beforeEach(() => {
+    process.env = { ...OLD_ENV };
+    process.env.PING_MEM_ADMIN_USER = "admin";
+    process.env.PING_MEM_ADMIN_PASS = "test-pass";
+    _resetAdminRateLimitMapsForTest();
+  });
+
+  afterEach(() => {
+    process.env = OLD_ENV;
+  });
+
+  const authHeader = Buffer.from("admin:test-pass").toString("base64");
+
+  // Minimal mock deps — only apiKeyManager.isValid is needed for CSRF path tests.
+  // The adminStore and other deps are only reached after CSRF passes.
+  const mockDeps = {
+    apiKeyManager: { isValid: (_key: string | undefined) => true },
+    adminStore: {},
+    diagnosticsStore: {},
+    eventStore: {},
+  } as unknown as AdminDependencies;
+
+  it("rejects POST with cross-origin Origin header with 403", async () => {
+    const req = {
+      url: "/api/admin/projects",
+      method: "POST",
+      headers: {
+        authorization: `Basic ${authHeader}`,
+        host: "myhost.com",
+        origin: "https://evil.com",
+        "x-api-key": "test-key",
+      },
+      socket: { remoteAddress: "127.0.0.1" },
+    };
+    const res = createMockResponse();
+    const handled = await handleAdminRequest(
+      req as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+      mockDeps
+    );
+    expect(handled).toBe(true);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("rejects POST with cross-origin Referer header (no Origin) with 403", async () => {
+    const req = {
+      url: "/api/admin/projects",
+      method: "POST",
+      headers: {
+        authorization: `Basic ${authHeader}`,
+        host: "myhost.com",
+        referer: "https://evil.com/malicious-page",
+        "x-api-key": "test-key",
+      },
+      socket: { remoteAddress: "127.0.0.1" },
+    };
+    const res = createMockResponse();
+    const handled = await handleAdminRequest(
+      req as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+      mockDeps
+    );
+    expect(handled).toBe(true);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("allows POST with same-origin Origin header (passes CSRF, reaches handler)", async () => {
+    // POST to a non-existent admin path — CSRF passes, handler returns 404 (no store calls).
+    // This confirms CSRF does not block same-origin requests.
+    const req = {
+      url: "/api/admin/nonexistent",
+      method: "POST",
+      headers: {
+        authorization: `Basic ${authHeader}`,
+        host: "myhost.com",
+        origin: "http://myhost.com",
+        "x-api-key": "test-key",
+      },
+      socket: { remoteAddress: "127.0.0.1" },
+    };
+    const res = createMockResponse();
+    await handleAdminRequest(
+      req as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+      mockDeps
+    );
+    // CSRF passed → reached handler → 404 (no matching route), not 403
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("allows POST with no Origin and no Referer (server-to-server / CLI caller)", async () => {
+    // X-API-Key is the primary auth for callers that omit browser headers.
+    // Absence of both Origin and Referer must not trigger CSRF rejection.
+    const req = {
+      url: "/api/admin/nonexistent",
+      method: "POST",
+      headers: {
+        authorization: `Basic ${authHeader}`,
+        host: "myhost.com",
+        "x-api-key": "test-key",
+      },
+      socket: { remoteAddress: "127.0.0.1" },
+    };
+    const res = createMockResponse();
+    await handleAdminRequest(
+      req as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+      mockDeps
+    );
+    expect(res.statusCode).toBe(404); // CSRF passed, reached handler
   });
 });

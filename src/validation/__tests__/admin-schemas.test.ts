@@ -4,7 +4,7 @@
  * @module validation/__tests__/admin-schemas.test
  */
 
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect } from "bun:test";
 import {
   deleteProjectSchema,
   rotateKeySchema,
@@ -182,6 +182,28 @@ describe("admin-schemas", () => {
       const result = deactivateKeySchema.safeParse({});
       expect(result.success).toBe(false);
     });
+
+    it("should reject uppercase UUID (case-sensitive — DB stores lowercase, uppercase silently no-ops)", () => {
+      // The /i flag was removed: accepting uppercase UUIDs would cause deactivateApiKey
+      // to silently no-op because no row would match in a case-sensitive DB lookup.
+      const result = deactivateKeySchema.safeParse({
+        id: "550E8400-E29B-41D4-A716-446655440000",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("should trim and accept whitespace-padded UUID (trimmed value is what hits the DB)", () => {
+      // nonEmptyString trims whitespace before the regex check. The trimmed UUID is a
+      // valid lowercase UUID, so parse succeeds and the trimmed value is passed to the DB.
+      // No silent no-op: the trimmed ID will match the stored row.
+      const result = deactivateKeySchema.safeParse({
+        id: "  550e8400-e29b-41d4-a716-446655440000  ",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.id).toBe("550e8400-e29b-41d4-a716-446655440000");
+      }
+    });
   });
 
   // ========================================================================
@@ -322,6 +344,19 @@ describe("admin-schemas", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.model).toBe("gpt-4");
+      }
+    });
+
+    it("should coerce whitespace-only string for baseUrl to undefined (clears the field)", () => {
+      // Whitespace-only is treated the same as empty string — allows UI to clear the field
+      const result = setLLMConfigSchema.safeParse({
+        provider: "OpenAI",
+        apiKey: "test-key",
+        baseUrl: "   ",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.baseUrl).toBeUndefined();
       }
     });
   });

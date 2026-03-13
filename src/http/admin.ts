@@ -16,6 +16,7 @@ import {
   rotateKeySchema,
   deactivateKeySchema,
   setLLMConfigSchema,
+  SUPPORTED_PROVIDERS,
   type DeleteProjectInput,
   type RotateKeyInput,
   type DeactivateKeyInput,
@@ -47,6 +48,11 @@ const AUTH_FAILURE_STALE_MS = 10 * 60_000; // 10 minutes
  * Return the client IP address.
  * When PING_MEM_BEHIND_PROXY=true (production: behind Nginx/Cloudflare), the
  * direct socket is always the proxy, so we trust the X-Forwarded-For header.
+ *
+ * WARNING: Never set PING_MEM_BEHIND_PROXY=true without a trusted proxy in front
+ * that strips or rewrites incoming X-Forwarded-For headers. If this server is
+ * directly reachable, an attacker can set arbitrary XFF values to spoof their IP
+ * and bypass per-IP rate limiting and brute-force lockout.
  */
 function getRemoteIp(req: IncomingMessage): string {
   if (process.env.PING_MEM_BEHIND_PROXY === "true") {
@@ -248,23 +254,8 @@ const log = createLogger("Admin");
 const ADMIN_USER_ENV = "PING_MEM_ADMIN_USER";
 const ADMIN_PASS_ENV = "PING_MEM_ADMIN_PASS";
 
-const PROVIDERS = [
-  "OpenAI",
-  "Anthropic",
-  "OpenRouter",
-  "Gemini",
-  "Mistral",
-  "Groq",
-  "Cohere",
-  "Together",
-  "Perplexity",
-  "Azure OpenAI",
-  "Bedrock",
-  "DeepSeek",
-  "xAI",
-  "Fireworks",
-  "Custom",
-];
+// SUPPORTED_PROVIDERS is imported from admin-schemas.ts — single source of truth.
+// Do not redeclare a local list here; the two arrays must never drift out of sync.
 
 export async function handleAdminRequest(
   req: IncomingMessage,
@@ -286,11 +277,18 @@ export async function handleAdminRequest(
     const html = renderAdminPage(nonce);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src 'self' data:`,
+      // frame-ancestors 'none' is the modern replacement for X-Frame-Options: DENY.
+      // Both are included for maximum browser compatibility.
+      "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src 'self' data:; frame-ancestors 'none'`,
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       "Referrer-Policy": "strict-origin-when-cross-origin",
-      "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+      // HSTS is only meaningful over HTTPS. Only send it in production (behind a TLS proxy).
+      // Sending HSTS over plain HTTP causes browsers to refuse future plain-HTTP connections,
+      // which would break local development.
+      ...(process.env.PING_MEM_BEHIND_PROXY === "true"
+        ? { "Strict-Transport-Security": "max-age=63072000; includeSubDomains" }
+        : {}),
     });
     res.end(html);
     return true;
@@ -313,10 +311,13 @@ export async function handleAdminRequest(
     // bypass via a domain whose name contains the server hostname as a substring.
     if (req.method !== "GET" && req.method !== "HEAD") {
       const host = req.headers.host;
-      // Note: if `host` is absent (malformed request that omits the Host header) the CSRF
-      // check is silently skipped. Node.js HTTP/2 compat mode populates req.headers.host from
-      // :authority automatically, so well-formed HTTP/2 requests are not affected.
-      // This is safe because X-API-Key is the primary auth layer for all callers.
+      // Note: if `host` is absent (malformed request that omits the Host header), the CSRF
+      // check is silently skipped. This is intentional: X-API-Key is the primary auth layer
+      // for server-to-server/CLI callers that legitimately omit browser headers. We log a
+      // warning for observability so abnormal patterns can be detected in production.
+      if (!host) {
+        log.warn("CSRF check skipped: Host header absent on state-changing request", { method: req.method, path: pathName });
+      }
       const origin = req.headers["origin"];
       const referer = req.headers["referer"];
       if (origin && host && !isSameHostOrigin(origin, host)) {
@@ -574,7 +575,11 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
 }
 
 function deleteProjectManifest(projectDir: string): void {
-  // Containment check: path.resolve normalises ../ sequences before the root check.
+  // Defense-in-depth: re-check containment here even though the caller (handleAdminApi)
+  // already called _isProjectDirSafe(). deleteProjectManifest is a standalone function
+  // that could be invoked from other call sites in the future. A path-traversal escape
+  // here would delete .ping-mem/manifest.json in arbitrary directories.
+  // path.resolve normalises ../ sequences before the startsWith root check.
   if (!_isProjectDirSafe(projectDir)) {
     throw new Error("projectDir must be a subdirectory of an allowed root (not the root itself, and not outside allowed paths)");
   }
@@ -593,8 +598,8 @@ function deleteProjectManifest(projectDir: string): void {
 }
 
 function renderAdminPage(nonce: string): string {
-  const providerOptions = PROVIDERS.map((p) => `<option value="${p}">${p}</option>`).join("");
-  const providersJson = JSON.stringify(PROVIDERS);
+  const providerOptions = SUPPORTED_PROVIDERS.map((p) => `<option value="${p}">${p}</option>`).join("");
+  const providersJson = JSON.stringify(SUPPORTED_PROVIDERS);
 
   return `<!doctype html>
 <html lang="en">

@@ -93,9 +93,12 @@ export type RotateKeyInput = z.infer<typeof rotateKeySchema>;
  * @param id - The key ID to deactivate
  */
 export const deactivateKeySchema = z.object({
+  // Lowercase-only UUID: the /i flag was intentionally removed.
+  // API key IDs are stored in the DB as lowercase; accepting uppercase UUIDs via /i
+  // would cause the deactivateApiKey call to silently no-op (no matching row).
   id: nonEmptyString.regex(
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-    "id must be a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    "id must be a valid UUID in lowercase (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
   ),
 });
 
@@ -106,9 +109,10 @@ export type DeactivateKeyInput = z.infer<typeof deactivateKeySchema>;
 // ============================================================================
 
 /**
- * Supported LLM providers
+ * Supported LLM providers.
+ * Exported so admin.ts can reference the same list without duplication.
  */
-const SUPPORTED_PROVIDERS = [
+export const SUPPORTED_PROVIDERS = [
   "OpenAI",
   "Anthropic",
   "OpenRouter",
@@ -141,7 +145,9 @@ export const setLLMConfigSchema = z.object({
   apiKey: z.string().min(1).max(10_000).trim(),
   model: z.string().min(1).max(500).trim().optional(),
   baseUrl: z.preprocess(
-    (val) => (val === "" ? undefined : val),
+    // Treat empty or whitespace-only string as "unset" — allows the UI to clear the field
+    // by submitting an empty input without triggering a URL validation error.
+    (val) => (typeof val === "string" && val.trim() === "" ? undefined : val),
     z.string().url().max(2_000).optional()
   ),
 });
