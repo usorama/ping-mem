@@ -161,7 +161,7 @@ export class HealthMonitor {
       lastFastTickAt: this.lastFastTickAt,
       lastQualityTickAt: this.lastQualityTickAt,
       activeAlerts: Array.from(this.activeAlerts.values()).sort((a, b) =>
-        a.timestamp < b.timestamp ? 1 : -1
+        b.timestamp.localeCompare(a.timestamp)
       ),
     };
   }
@@ -430,7 +430,7 @@ export class HealthMonitor {
     // (which would be O(N² log N) under a burst scenario where many alerts arrive at once).
     if (this.activeAlerts.size > HealthMonitor.MAX_ALERTS) {
       const sorted = Array.from(this.activeAlerts.entries())
-        .sort(([, a], [, b]) => (a.timestamp < b.timestamp ? -1 : 1));
+        .sort(([, a], [, b]) => a.timestamp.localeCompare(b.timestamp));
       let idx = 0;
       while (this.activeAlerts.size > HealthMonitor.MAX_ALERTS && idx < sorted.length) {
         const entry = sorted[idx++];

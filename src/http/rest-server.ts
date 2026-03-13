@@ -24,10 +24,9 @@ const log = createLogger("REST Server");
 import { SessionManager } from "../session/SessionManager.js";
 import { MemoryManager, type MemoryManagerConfig } from "../memory/MemoryManager.js";
 import { EventStore } from "../storage/EventStore.js";
-import { VectorIndex, createInMemoryVectorIndex } from "../search/VectorIndex.js";
+import { type VectorIndex, createInMemoryVectorIndex } from "../search/VectorIndex.js";
 import { RelevanceEngine } from "../memory/RelevanceEngine.js";
 import type { GraphManager } from "../graph/GraphManager.js";
-import type { HybridSearchEngine } from "../search/HybridSearchEngine.js";
 import {
   DiagnosticsStore,
   parseSarif,
@@ -108,7 +107,6 @@ export class RESTPingMemServer {
   private managerPromises: Map<string, Promise<MemoryManager>> = new Map();
   private currentSessionId: SessionId | null = null;
   private graphManager: GraphManager | null = null;
-  private hybridSearchEngine: HybridSearchEngine | null = null;
   private diagnosticsStore: DiagnosticsStore;
   private summaryGenerator: SummaryGenerator | null = null;
   private relevanceEngine: RelevanceEngine;
@@ -165,9 +163,6 @@ export class RESTPingMemServer {
     // Initialize optional graph and search components
     if (config.graphManager) {
       this.graphManager = config.graphManager;
-    }
-    if (config.hybridSearchEngine) {
-      this.hybridSearchEngine = config.hybridSearchEngine;
     }
     if (config.qdrantClient) {
       this.qdrantClient = config.qdrantClient;

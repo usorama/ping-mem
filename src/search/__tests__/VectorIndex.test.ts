@@ -319,7 +319,7 @@ describe("VectorIndex", () => {
       await customIndex.close();
     });
 
-    it("should use injected database", () => {
+    it("should use injected database", async () => {
       const mockDb = new MockVec0Database();
       const index = new VectorIndex({
         dbPath: ":memory:",
@@ -328,7 +328,7 @@ describe("VectorIndex", () => {
 
       // The database should be used without throwing
       expect(index).toBeInstanceOf(VectorIndex);
-      index.close();
+      await index.close();
     });
   });
 

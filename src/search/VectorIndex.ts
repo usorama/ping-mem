@@ -200,9 +200,6 @@ export class VectorIndex {
       this.db.exec("PRAGMA foreign_keys = ON");
       // Runtime-validate busyTimeout to prevent PRAGMA injection from config values
       const timeout = Math.max(0, Math.min(Number(this.config.busyTimeout) || 5000, 60000));
-      if (!Number.isFinite(timeout)) {
-        throw new VectorIndexError("busyTimeout must be a finite number", "INVALID_CONFIG");
-      }
       this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
 
       // Initialize schema
@@ -603,9 +600,3 @@ export function createInMemoryVectorIndex(config: Partial<VectorIndexConfig> = {
   });
 }
 
-/**
- * Create a vector index with default configuration
- */
-export function createVectorIndex(config: VectorIndexConfig = {}): VectorIndex {
-  return new VectorIndex(config);
-}
