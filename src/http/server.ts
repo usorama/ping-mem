@@ -89,7 +89,7 @@ export async function startHTTPServer(): Promise<void> {
     serverInstance = new RESTPingMemServer({
       ...restConfig,
       dbPath: runtimeConfig.pingMem.dbPath,
-      diagnosticsDbPath,
+      diagnosticsStore,
       graphManager: services.graphManager,
       lineageEngine: services.lineageEngine,
       evolutionEngine: services.evolutionEngine,
@@ -119,6 +119,8 @@ export async function startHTTPServer(): Promise<void> {
       lineageEngine: services.lineageEngine,
       evolutionEngine: services.evolutionEngine,
       ingestionService,
+      qdrantClient: services.qdrantClient,
+      eventStore,
     });
   }
 

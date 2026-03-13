@@ -121,6 +121,13 @@ describe("AdminStore", () => {
       store.createApiKey();
       expect(store.hasAnyActiveKey()).toBe(true);
     });
+
+    test("hasAnyActiveKey returns false when all keys are deactivated", () => {
+      const { info } = store.createApiKey();
+      expect(store.hasAnyActiveKey()).toBe(true);
+      store.deactivateApiKey(info.id);
+      expect(store.hasAnyActiveKey()).toBe(false);
+    });
   });
 
   describe("Project CRUD", () => {

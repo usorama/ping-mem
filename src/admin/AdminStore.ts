@@ -50,6 +50,7 @@ export interface ProjectRecord {
 
 export class AdminStore {
   private db: Database;
+  private closed = false;
   private config: {
     dbPath: string;
     walMode: boolean;
@@ -62,6 +63,7 @@ export class AdminStore {
   private stmtDeactivateAllKeys!: Statement;
   private stmtDeactivateKey!: Statement;
   private stmtCountKeys!: Statement;
+  private stmtCountActiveKeys!: Statement;
   private stmtFindKeyHash!: Statement;
 
   private stmtUpsertProject!: Statement;
@@ -158,6 +160,10 @@ export class AdminStore {
       "SELECT COUNT(*) as count FROM admin_api_keys"
     );
 
+    this.stmtCountActiveKeys = this.db.prepare(
+      "SELECT COUNT(*) as count FROM admin_api_keys WHERE active = 1"
+    );
+
     this.stmtFindKeyHash = this.db.prepare(
       "SELECT id FROM admin_api_keys WHERE key_hash = $key_hash AND active = 1 LIMIT 1"
     );
@@ -223,7 +229,7 @@ export class AdminStore {
   }
 
   hasAnyActiveKey(): boolean {
-    const count = (this.stmtCountKeys.get() as { count: number }).count;
+    const count = (this.stmtCountActiveKeys.get() as { count: number }).count;
     return count > 0;
   }
 
@@ -404,6 +410,8 @@ export class AdminStore {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
   }
 

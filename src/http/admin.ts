@@ -1,6 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as fs from "fs/promises";
-import * as fsSync from "fs";
 import * as path from "path";
 import * as crypto from "node:crypto";
 
@@ -12,6 +11,7 @@ import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import { EventStore } from "../storage/EventStore.js";
 import { ProjectScanner } from "../ingest/ProjectScanner.js";
 import { timingSafeStringEqual } from "../util/auth-utils.js";
+import { isProjectDirSafe as _isProjectDirSafeImpl } from "../util/path-safety.js";
 import {
   deleteProjectSchema,
   rotateKeySchema,
@@ -239,23 +239,7 @@ export function sanitizeAdminError(message: string): string {
  *  /tmp) can create directories there. Including it would allow an authenticated attacker
  *  to trigger EventStore, DiagnosticsStore, and manifest deletions for arbitrary /tmp paths. */
 export function _isProjectDirSafe(projectDir: string): boolean {
-  // Canonicalize with realpathSync to resolve symlinks before the containment check.
-  // path.resolve alone does not follow symlinks, so /home/user/link -> /etc would
-  // pass a lexical prefix test but actually point outside the allowed root.
-  // Fall back to path.resolve for non-existent paths (symlink escapes only apply to existing paths).
-  let resolved: string;
-  try {
-    resolved = fsSync.realpathSync(path.resolve(projectDir));
-  } catch {
-    resolved = path.resolve(projectDir);
-  }
-  // Validate HOME before including: HOME='/' or an unusually short value (e.g. HOME='' or HOME='/')
-  // would expand the allowed set to the entire filesystem, enabling path traversal to any location.
-  // Require HOME to be an absolute path of meaningful length (> 3 chars, e.g. not '/' or '/a').
-  const home = process.env["HOME"];
-  const validHome = home && home.length > 3 && path.isAbsolute(home) ? home : null;
-  const allowedRoots = [...(validHome ? [validHome] : []), "/projects", "/Users", "/home"];
-  return allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
+  return _isProjectDirSafeImpl(projectDir);
 }
 
 /** @internal Test-only: reset module-level rate-limit and lockout maps between test cases */

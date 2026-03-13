@@ -67,6 +67,7 @@ interface DiagnosticFindingRow {
 
 export class DiagnosticsStore {
   private db: Database;
+  private closed = false;
   private config: {
     dbPath: string;
     walMode: boolean;
@@ -105,7 +106,8 @@ export class DiagnosticsStore {
     if (this.config.foreignKeys) {
       this.db.exec("PRAGMA foreign_keys = ON");
     }
-    this.db.exec(`PRAGMA busy_timeout = ${this.config.busyTimeout}`);
+    const timeout = Math.max(0, Math.min(Number(this.config.busyTimeout) || 5000, 60000));
+    this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
 
     this.initializeSchema();
     this.prepareStatements();
@@ -492,6 +494,8 @@ export class DiagnosticsStore {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
   }
 }
