@@ -598,6 +598,25 @@ describe("VectorIndex", () => {
       // Should throw VectorIndexError, not raw database error
       await expect(vectorIndex.storeVector(embedding)).rejects.toThrow(VectorIndexError);
     });
+
+    it("should reject operations after close with INDEX_CLOSED error", async () => {
+      await vectorIndex.close();
+
+      // All public methods should throw VectorIndexError with INDEX_CLOSED code
+      await expect(vectorIndex.getStats()).rejects.toThrow("VectorIndex has been closed");
+      await expect(vectorIndex.getVector("mem-001")).rejects.toThrow("VectorIndex has been closed");
+      await expect(vectorIndex.listVectors("session-001")).rejects.toThrow("VectorIndex has been closed");
+      await expect(vectorIndex.deleteVector("mem-001")).rejects.toThrow("VectorIndex has been closed");
+      await expect(
+        vectorIndex.semanticSearch(new Float32Array(768).fill(0.1))
+      ).rejects.toThrow("VectorIndex has been closed");
+    });
+
+    it("double close should be idempotent (no error)", async () => {
+      await vectorIndex.close();
+      // Second close should not throw
+      await expect(vectorIndex.close()).resolves.toBeUndefined();
+    });
   });
 
   describe("Integration Tests", () => {

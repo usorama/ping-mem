@@ -156,7 +156,7 @@ export class HealthMonitor {
 
   getStatus(): HealthMonitorStatus {
     return {
-      running: this.fastTimer !== null && this.qualityTimer !== null,
+      running: !this.stopping && this.fastTimer !== null && this.qualityTimer !== null,
       lastSnapshot: this.lastSnapshot,
       lastFastTickAt: this.lastFastTickAt,
       lastQualityTickAt: this.lastQualityTickAt,

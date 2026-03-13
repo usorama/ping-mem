@@ -105,6 +105,11 @@ describe("isProjectDirSafe", () => {
     test("rejects whitespace-only input", () => {
       expect(isProjectDirSafe("   ")).toBe(false);
     });
+
+    test("rejects null-byte injection in path", () => {
+      expect(isProjectDirSafe("/Users/someone/repo\x00/etc/passwd")).toBe(false);
+      expect(isProjectDirSafe("/home/user\x00malicious")).toBe(false);
+    });
   });
 
   describe("DENIED_ROOTS coverage", () => {

@@ -39,6 +39,8 @@ const DENIED_ROOTS = new Set([
  */
 export function isProjectDirSafe(inputPath: string): boolean {
   if (!inputPath || inputPath.trim().length === 0) return false;
+  // Reject null bytes — can truncate paths in C-based syscalls, bypassing containment checks
+  if (inputPath.includes("\0")) return false;
 
   let resolved: string;
   try {

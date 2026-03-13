@@ -320,7 +320,14 @@ export class VectorIndex {
   /**
    * Store a vector embedding for a memory
    */
+  private ensureOpen(): void {
+    if (this.closed) {
+      throw new VectorIndexError("VectorIndex has been closed", "INDEX_CLOSED");
+    }
+  }
+
   async storeVector(vectorData: VectorEmbedding): Promise<void> {
+    this.ensureOpen();
     if (!this.insertStmt) {
       throw new VectorIndexError("Database not properly initialized", "DB_NOT_INITIALIZED");
     }
@@ -363,6 +370,7 @@ export class VectorIndex {
       category?: string;
     } = {}
   ): Promise<VectorSearchResult[]> {
+    this.ensureOpen();
     if (!this.searchStmt) {
       throw new VectorIndexError("Database not properly initialized", "DB_NOT_INITIALIZED");
     }
@@ -447,6 +455,7 @@ export class VectorIndex {
    * Get vector metadata by memory ID
    */
   async getVector(memoryId: MemoryId): Promise<Omit<VectorEmbedding, 'embedding'> | null> {
+    this.ensureOpen();
     if (!this.getStmt) {
       throw new VectorIndexError("Database not properly initialized", "DB_NOT_INITIALIZED");
     }
@@ -487,6 +496,7 @@ export class VectorIndex {
    * Delete a vector by memory ID
    */
   async deleteVector(memoryId: MemoryId): Promise<boolean> {
+    this.ensureOpen();
     if (!this.deleteStmt) {
       throw new VectorIndexError("Database not properly initialized", "DB_NOT_INITIALIZED");
     }
@@ -506,6 +516,7 @@ export class VectorIndex {
    * List all vectors in a session
    */
   async listVectors(sessionId: SessionId, limit: number = 100): Promise<Omit<VectorEmbedding, 'embedding'>[]> {
+    this.ensureOpen();
     if (!this.listStmt) {
       throw new VectorIndexError("Database not properly initialized", "DB_NOT_INITIALIZED");
     }
@@ -550,6 +561,7 @@ export class VectorIndex {
     similarityThreshold: number;
     dbPath: string;
   }> {
+    this.ensureOpen();
     try {
       const result = this.db.prepare("SELECT COUNT(*) as count FROM vector_memories").get() as { count: number };
 

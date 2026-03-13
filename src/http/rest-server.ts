@@ -502,9 +502,7 @@ export class RESTPingMemServer {
               excludeKeys: [body.key],
               limit: 5,
             };
-            if (sessionId) {
-              findOpts.excludeSessionId = sessionId;
-            }
+            findOpts.excludeSessionId = sessionId;
 
             // Cross-session search with 200ms timeout
             const recallPromise = new Promise<typeof relatedMemories>((resolve) => {
@@ -794,8 +792,8 @@ export class RESTPingMemServer {
           return c.json({ error: "BadRequest", message: "projectId exceeds maximum length" }, 400);
         }
         const rawFilePath = c.req.query("filePath");
-        if (rawFilePath !== undefined && (rawFilePath.includes("..") || rawFilePath.startsWith("/"))) {
-          return c.json({ error: "BadRequest", message: "filePath must be a relative path without traversal sequences" }, 400);
+        if (rawFilePath !== undefined && (rawFilePath.length > 1000 || rawFilePath.includes("..") || rawFilePath.startsWith("/"))) {
+          return c.json({ error: "BadRequest", message: "filePath must be a relative path without traversal sequences (max 1000 chars)" }, 400);
         }
         const filePath = rawFilePath;
         const rawType = c.req.query("type");
@@ -839,8 +837,8 @@ export class RESTPingMemServer {
           return c.json({ error: "BadRequest", message: "projectId exceeds maximum length" }, 400);
         }
         const rawTimelineFilePath = c.req.query("filePath");
-        if (rawTimelineFilePath !== undefined && (rawTimelineFilePath.includes("..") || rawTimelineFilePath.startsWith("/"))) {
-          return c.json({ error: "BadRequest", message: "filePath must be a relative path without traversal sequences" }, 400);
+        if (rawTimelineFilePath !== undefined && (rawTimelineFilePath.length > 1000 || rawTimelineFilePath.includes("..") || rawTimelineFilePath.startsWith("/"))) {
+          return c.json({ error: "BadRequest", message: "filePath must be a relative path without traversal sequences (max 1000 chars)" }, 400);
         }
         const filePath = rawTimelineFilePath;
         const rawTimelineLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
@@ -1141,7 +1139,11 @@ export class RESTPingMemServer {
         const queryParams: Record<string, unknown> = { query };
 
         if (c.req.query("category")) {
-          queryParams.category = c.req.query("category") as MemoryCategory;
+          const rawCategory = c.req.query("category")!;
+          if (rawCategory.length > 200) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "category exceeds maximum length" }, 400);
+          }
+          queryParams.category = rawCategory as MemoryCategory;
         }
         if (c.req.query("channel")) {
           const rawChannel = c.req.query("channel")!;
@@ -1163,7 +1165,7 @@ export class RESTPingMemServer {
         }
         if (c.req.query("offset")) {
           const rawOff = parseInt(c.req.query("offset")!, 10);
-          queryParams.offset = Number.isNaN(rawOff) ? 0 : Math.max(rawOff, 0);
+          queryParams.offset = Number.isNaN(rawOff) ? 0 : Math.min(Math.max(rawOff, 0), 100_000);
         }
 
         const results = await memoryManager.recall(queryParams);
@@ -1425,7 +1427,7 @@ export class RESTPingMemServer {
           ).get({ $agent_id: validatedAgentId }) as Record<string, unknown> | undefined;
 
           if (!row) {
-            return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${agentId}' not found` }, 404);
+            return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${validatedAgentId}' not found` }, 404);
           }
           return c.json<RESTSuccessResponse<Record<string, unknown>>>({ data: row });
         }
@@ -1585,6 +1587,7 @@ export class RESTPingMemServer {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           "Connection": "keep-alive",
+          "X-Accel-Buffering": "no",
         },
       });
     });
@@ -1680,11 +1683,14 @@ export class RESTPingMemServer {
 
       // Security: prevent path traversal — canonicalize with realpath to resolve symlinks,
       // then compare with trailing separator to prevent escape via symlink targets.
+      // Uses async fs.promises.realpath to avoid blocking the event loop on I/O.
       let canonicalPath: string;
       let canonicalBase: string;
       try {
-        canonicalPath = fs.realpathSync(fullPath);
-        canonicalBase = fs.realpathSync(path.resolve(staticDir));
+        [canonicalPath, canonicalBase] = await Promise.all([
+          fs.promises.realpath(fullPath),
+          fs.promises.realpath(path.resolve(staticDir)),
+        ]);
       } catch {
         return c.text("Not Found", 404);
       }
@@ -2082,17 +2088,19 @@ export class RESTPingMemServer {
 // Utilities
 // ============================================================================
 
+/** Static content-type map — hoisted to module level to avoid re-allocation per request */
+const CONTENT_TYPE_MAP: Record<string, string> = {
+  css: "text/css",
+  js: "application/javascript",
+  html: "text/html",
+  json: "application/json",
+  svg: "image/svg+xml",
+  png: "image/png",
+};
+
 function getContentType(filePath: string): string {
   const ext = filePath.split(".").pop()?.toLowerCase();
-  const types: Record<string, string> = {
-    css: "text/css",
-    js: "application/javascript",
-    html: "text/html",
-    json: "application/json",
-    svg: "image/svg+xml",
-    png: "image/png",
-  };
-  return types[ext ?? ""] ?? "application/octet-stream";
+  return CONTENT_TYPE_MAP[ext ?? ""] ?? "application/octet-stream";
 }
 
 /**
