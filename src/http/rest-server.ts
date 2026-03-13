@@ -1693,6 +1693,15 @@ export class RESTPingMemServer {
   }
 
   /**
+   * Regex matching domain error class names whose messages are safe to expose
+   * to clients. Used by both handleError (4xx message filtering) and getStatusCode
+   * (message-based fallback classification). Uses error.name (survives minification)
+   * rather than error.constructor.name (which is renamed during bundling).
+   */
+  private static readonly DOMAIN_ERROR_RE =
+    /Memory|Agent|Quota|Lock|Evidence|Schema|Scope|Session/;
+
+  /**
    * Handle errors and return consistent error responses
    */
   private handleError(c: Context<AppEnv>, error: unknown): Response {
@@ -1711,8 +1720,10 @@ export class RESTPingMemServer {
     // For 4xx: only return raw message for known domain error classes whose messages
     // are safe to expose. All others get a generic message to prevent leaking internal
     // details (SQL errors, file paths) from misclassified exceptions.
+    // Uses error.name (set explicitly in constructors) which survives minification,
+    // unlike error.constructor.name which is renamed during bundling.
     const isDomainError = error instanceof Error &&
-      /Memory|Agent|Quota|Lock|Evidence|Schema|Scope|Session/.test(error.constructor.name);
+      RESTPingMemServer.DOMAIN_ERROR_RE.test(error.name);
     const safeMessage = isDomainError ? rawMessage : this.getErrorName(statusCode);
 
     log.error("Error", { message: rawMessage });
@@ -1727,24 +1738,24 @@ export class RESTPingMemServer {
    */
   private getStatusCode(error: unknown): number {
     if (error instanceof Error) {
-      // Use error class name or code property for reliable mapping
+      // Use error.name for reliable mapping (survives minification — set explicitly in constructors)
       const name = error.name;
       if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError") return 404;
       if (name === "QuotaExhaustedError" || name === "WriteLockConflictError") return 409;
       if (name === "EvidenceGateRejectionError" || name === "ScopeViolationError") return 403;
       if (name === "MemoryKeyExistsError") return 409;
       if (name === "SchemaValidationError" || name === "InvalidSessionError") return 400;
+      if (name === "InvalidSessionStateError") return 409;
       // Check for known error codes
       const codeErr = error as { code?: string };
       if (codeErr.code === "MEMORY_NOT_FOUND") return 404;
       if (codeErr.code === "QUOTA_EXHAUSTED" || codeErr.code === "WRITE_LOCK_CONFLICT") return 409;
       if (codeErr.code === "MEMORY_EXISTS") return 409;
       if (codeErr.code === "INVALID_SESSION") return 400;
+      if (codeErr.code === "INVALID_SESSION_STATE") return 409;
       if (codeErr.code === "AGENT_EXPIRED") return 410;
-      // Fallback to message-based detection — only for known domain error class names
-      const isDomainError =
-        /Memory|Agent|Quota|Lock|Evidence|Schema|Scope/.test(error.constructor.name);
-      if (isDomainError) {
+      // Fallback to message-based detection — only for known domain error names
+      if (RESTPingMemServer.DOMAIN_ERROR_RE.test(error.name)) {
         if (error.message.includes("not found")) {
           log.warn(`getStatusCode: message-based 404 for '${error.name}': ${error.message.slice(0, 80)}`);
           return 404;

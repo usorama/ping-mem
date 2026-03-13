@@ -266,5 +266,17 @@ describe("AdminStore", () => {
       tempStore.close();
       expect(() => tempStore.close()).not.toThrow();
     });
+
+    test("double close does not corrupt state before close", () => {
+      // Verify the close guard protects against double-free on the DB handle.
+      // bun:sqlite is lenient after close (prepared statements still work),
+      // so we verify the important property: data is accessible before close,
+      // and close itself doesn't throw or corrupt.
+      const tempStore = new AdminStore({ dbPath: ":memory:" });
+      tempStore.createApiKey();
+      expect(tempStore.listApiKeys().length).toBe(1);
+      tempStore.close();
+      expect(() => tempStore.close()).not.toThrow();
+    });
   });
 });

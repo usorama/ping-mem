@@ -196,7 +196,9 @@ export class VectorIndex {
         this.db.exec("PRAGMA wal_autocheckpoint = 1000");
       }
       this.db.exec("PRAGMA foreign_keys = ON");
-      this.db.exec(`PRAGMA busy_timeout = ${this.config.busyTimeout}`);
+      // Runtime-validate busyTimeout to prevent PRAGMA injection from config values
+      const timeout = Math.max(0, Math.min(Number(this.config.busyTimeout) || 5000, 60000));
+      this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
 
       // Initialize schema
       this.initializeSchema();

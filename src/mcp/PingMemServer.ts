@@ -330,6 +330,9 @@ export class PingMemServer {
       await this.vectorIndex.close();
     }
 
+    // Close session manager before event store — session operations depend on event store
+    await this.sessionManager.close();
+
     // Close event store only if we own it (not injected externally — caller closes it)
     if (this.ownsEventStore) {
       await this.eventStore.close();
@@ -339,9 +342,6 @@ export class PingMemServer {
     if (this.ownsDiagnosticsStore && this.diagnosticsStore) {
       this.diagnosticsStore.close();
     }
-
-    // Close session manager
-    await this.sessionManager.close();
   }
 }
 

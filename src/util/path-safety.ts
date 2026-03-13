@@ -10,6 +10,13 @@ import * as fs from "fs";
 import * as path from "path";
 
 /**
+ * System paths that must never be used as allowed roots, even if they
+ * pass the length check. /root is 5 chars but is the root user's home
+ * directory — allowing it would grant access to all of /root/*.
+ */
+const DENIED_ROOTS = new Set(["/root"]);
+
+/**
  * Checks whether a resolved projectDir is within an allowed root.
  * Excludes /tmp (world-writable) and validates HOME length to prevent
  * filesystem-wide traversal. Uses fs.realpathSync to canonicalize symlinks
@@ -29,8 +36,11 @@ export function isProjectDirSafe(inputPath: string): boolean {
   }
   // Validate HOME: require absolute path of meaningful length (>= 5 chars)
   // to exclude system paths like /usr, /var, /opt, /tmp, /etc.
+  // Additionally deny-listed paths (/root) are excluded even if they pass
+  // the length check.
   const home = process.env["HOME"];
-  const validHome = home && home.length >= 5 && path.isAbsolute(home) ? home : null;
+  const validHome =
+    home && home.length >= 5 && path.isAbsolute(home) && !DENIED_ROOTS.has(home) ? home : null;
   const allowedRoots = [...(validHome ? [validHome] : []), "/projects", "/Users", "/home"];
   return allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
 }

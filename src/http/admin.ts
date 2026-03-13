@@ -11,7 +11,7 @@ import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import { EventStore } from "../storage/EventStore.js";
 import { ProjectScanner } from "../ingest/ProjectScanner.js";
 import { timingSafeStringEqual } from "../util/auth-utils.js";
-import { isProjectDirSafe as _isProjectDirSafe } from "../util/path-safety.js";
+import { isProjectDirSafe } from "../util/path-safety.js";
 import {
   deleteProjectSchema,
   rotateKeySchema,
@@ -67,7 +67,9 @@ function getRemoteIp(req: IncomingMessage): string {
       // log injection when the IP is later written to structured logs.
       // A trusted upstream proxy should have already validated this, but defense-in-depth
       // applies here because attacker-controlled XFF may reach this code before proxy validation.
-      if (firstIp) return firstIp.replace(/[^\w\.\:\[\]\-]/g, "?").slice(0, 64);
+      // Allow only IP-valid characters: hex digits (for IPv6), dots (IPv4), colons (IPv6),
+      // brackets (IPv6 literal), hyphens. Explicitly avoids \w which includes underscores.
+      if (firstIp) return firstIp.replace(/[^a-fA-F0-9\.\:\[\]\-]/g, "?").slice(0, 64);
     }
   }
   return req.socket?.remoteAddress ?? "unknown";
@@ -238,8 +240,9 @@ export function sanitizeAdminError(message: string): string {
  *  on all POSIX systems — any process (including untrusted containers sharing the host's
  *  /tmp) can create directories there. Including it would allow an authenticated attacker
  *  to trigger EventStore, DiagnosticsStore, and manifest deletions for arbitrary /tmp paths. */
-// Re-exported for test access. Implementation lives in util/path-safety.ts.
-export { _isProjectDirSafe };
+// Re-exported with underscore prefix for test access (matches _reset* test-only export convention).
+// Implementation lives in util/path-safety.ts.
+export { isProjectDirSafe as _isProjectDirSafe };
 
 /** @internal Test-only: reset module-level rate-limit and lockout maps between test cases */
 export function _resetAdminRateLimitMapsForTest(): void {
@@ -405,7 +408,7 @@ async function handleAdminApi(
     const { projectDir, projectId } = result.data;
 
     // Guard against path traversal: path.resolve normalises ../ sequences before the root check.
-    if (projectDir && !_isProjectDirSafe(projectDir)) {
+    if (projectDir && !isProjectDirSafe(projectDir)) {
       return respondJson(res, 400, { error: "projectDir must be a subdirectory of an allowed root (not the root itself, and not outside allowed paths)" });
     }
 
@@ -683,11 +686,11 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
 
 async function deleteProjectManifest(projectDir: string): Promise<void> {
   // Defense-in-depth: re-check containment here even though the caller (handleAdminApi)
-  // already called _isProjectDirSafe(). deleteProjectManifest is a standalone function
+  // already called isProjectDirSafe(). deleteProjectManifest is a standalone function
   // that could be invoked from other call sites in the future. A path-traversal escape
   // here would delete .ping-mem/manifest.json in arbitrary directories.
   // path.resolve normalises ../ sequences before the startsWith root check.
-  if (!_isProjectDirSafe(projectDir)) {
+  if (!isProjectDirSafe(projectDir)) {
     throw new Error("projectDir must be a subdirectory of an allowed root (not the root itself, and not outside allowed paths)");
   }
   const resolved = path.resolve(projectDir);

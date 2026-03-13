@@ -62,7 +62,7 @@ export class AdminStore {
   private stmtListApiKeys!: Statement;
   private stmtDeactivateAllKeys!: Statement;
   private stmtDeactivateKey!: Statement;
-  private stmtCountKeys!: Statement;
+  private stmtCountAllKeys!: Statement;
   private stmtCountActiveKeys!: Statement;
   private stmtFindKeyHash!: Statement;
 
@@ -156,7 +156,7 @@ export class AdminStore {
       "UPDATE admin_api_keys SET active = 0 WHERE id = $id"
     );
 
-    this.stmtCountKeys = this.db.prepare(
+    this.stmtCountAllKeys = this.db.prepare(
       "SELECT COUNT(*) as count FROM admin_api_keys"
     );
 
@@ -213,8 +213,13 @@ export class AdminStore {
     );
   }
 
+  /**
+   * Seed an initial API key if no keys exist yet (including deactivated ones).
+   * Intentionally counts ALL keys (active + inactive) so that deactivating the
+   * seed key and creating a new one via createApiKey() doesn't re-seed on restart.
+   */
   ensureSeedApiKey(rawKey: string): void {
-    const count = (this.stmtCountKeys.get() as { count: number }).count;
+    const count = (this.stmtCountAllKeys.get() as { count: number }).count;
     if (count > 0) {
       return;
     }

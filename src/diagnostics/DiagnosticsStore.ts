@@ -3,11 +3,14 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as crypto from "crypto";
+import { createLogger } from "../util/logger.js";
 import type {
   DiagnosticRun,
   NormalizedFinding,
   DiagnosticsQueryFilter,
 } from "./types.js";
+
+const log = createLogger("DiagnosticsStore");
 
 export interface DiagnosticsStoreConfig {
   dbPath?: string | undefined;
@@ -477,6 +480,9 @@ export class DiagnosticsStore {
     const result = new Map<string, { total: number; errors: number; warnings: number; notes: number }>();
     if (analysisIds.length === 0) return result;
     // Cap to prevent unbounded IN clause (SQLite default SQLITE_MAX_VARIABLE_NUMBER = 999)
+    if (analysisIds.length > 500) {
+      log.warn(`getFindingsCounts: truncating ${analysisIds.length} IDs to 500 (SQLite variable limit)`);
+    }
     const cappedIds = analysisIds.slice(0, 500);
 
     const placeholders = cappedIds.map(() => "?").join(",");
