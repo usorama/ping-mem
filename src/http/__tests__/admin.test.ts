@@ -400,11 +400,33 @@ describe("admin.ts - brute-force lockout", () => {
     const failureMap = _getAuthFailureMapForTest();
 
     // Manually set an already-expired lockout to simulate clock advancing past AUTH_LOCKOUT_MS
-    failureMap.set(ip, { count: 0, lockedUntil: Date.now() - 1 });
+    failureMap.set(ip, { count: 0, lockedUntil: Date.now() - 1, lastSeen: Date.now() - 1 });
 
     // IP should not be considered locked — correct credentials succeed
     const res = createMockResponse();
     expect(checkBasicAuth(rightCreds(ip) as IncomingMessage, res as unknown as ServerResponse)).toBe(true);
     expect(res.statusCode).toBeUndefined();
+  });
+
+  it("stale partial-failure entries are evicted to prevent unbounded map growth", () => {
+    const failureMap = _getAuthFailureMapForTest();
+    const staleIp = "10.0.0.23";
+
+    // Manually insert a stale partial-failure entry (count > 0, not locked, lastSeen = 11 min ago)
+    // This simulates an IP that made a few failed attempts long ago and has been idle since.
+    failureMap.set(staleIp, {
+      count: 2,
+      lockedUntil: 0,
+      lastSeen: Date.now() - 11 * 60 * 1000, // 11 min ago, beyond the 10-min STALE window
+    });
+
+    // Trigger checkAdminRateLimit for any IP — the eviction loop runs on every call
+    checkAdminRateLimit(
+      createMockRequest(undefined, "10.0.0.24") as IncomingMessage,
+      createMockResponse() as unknown as ServerResponse
+    );
+
+    // Stale partial-failure entry must be evicted
+    expect(failureMap.has(staleIp)).toBe(false);
   });
 });

@@ -17,10 +17,13 @@ const adminRateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const ADMIN_RATE_LIMIT_MAX = 20;
 const ADMIN_RATE_LIMIT_WINDOW_MS = 60_000;
 
-/** Brute-force lockout: lock after 5 failed Basic Auth attempts for 30 min */
-const authFailureMap = new Map<string, { count: number; lockedUntil: number }>();
+/** Brute-force lockout: lock after 5 failed Basic Auth attempts for 30 min.
+ *  lastSeen tracks the timestamp of the most recent failure for stale-entry eviction. */
+const authFailureMap = new Map<string, { count: number; lockedUntil: number; lastSeen: number }>();
 const AUTH_LOCKOUT_THRESHOLD = 5;
 const AUTH_LOCKOUT_MS = 30 * 60_000;
+/** Partial-failure entries (count > 0, not yet locked) expire after this idle window */
+const AUTH_FAILURE_STALE_MS = 10 * 60_000; // 10 minutes
 
 /**
  * Return the client IP address.
@@ -60,9 +63,14 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
   for (const [key, entry] of adminRateLimitMap) {
     if (now > entry.resetAt) adminRateLimitMap.delete(key);
   }
-  // Evict fully-expired lockouts (locked window has passed AND failure count was reset to 0)
+  // Evict expired authFailureMap entries to prevent unbounded growth under distributed probing:
+  // (a) Expired lockouts: lock window passed and count was reset to 0.
+  // (b) Stale partial-failure entries: count > 0 but not yet locked, idle for > STALE window.
+  //     Without this, every unique spoofed-IP auth probe accumulates a permanent map entry.
   for (const [key, record] of authFailureMap) {
-    if (record.lockedUntil > 0 && now > record.lockedUntil && record.count === 0) {
+    const expiredLockout = record.lockedUntil > 0 && now > record.lockedUntil && record.count === 0;
+    const stalePartial = record.lockedUntil === 0 && record.count > 0 && (now - record.lastSeen) > AUTH_FAILURE_STALE_MS;
+    if (expiredLockout || stalePartial) {
       authFailureMap.delete(key);
     }
   }
@@ -94,10 +102,12 @@ function isLockedOut(ip: string, res: ServerResponse): boolean {
 }
 
 function recordAuthFailure(ip: string): void {
-  const record = authFailureMap.get(ip) ?? { count: 0, lockedUntil: 0 };
+  const now = Date.now();
+  const record = authFailureMap.get(ip) ?? { count: 0, lockedUntil: 0, lastSeen: now };
   record.count++;
+  record.lastSeen = now;
   if (record.count >= AUTH_LOCKOUT_THRESHOLD) {
-    record.lockedUntil = Date.now() + AUTH_LOCKOUT_MS;
+    record.lockedUntil = now + AUTH_LOCKOUT_MS;
     record.count = 0;
   }
   authFailureMap.set(ip, record);
@@ -108,9 +118,20 @@ function clearAuthFailures(ip: string): void {
 }
 
 /** Sanitize error messages to prevent LLM provider API key leakage.
- *  Covers all 15 supported providers: OpenAI, Anthropic, OpenRouter, DeepSeek
- *  (sk-...), Gemini (AIza...), Groq (gsk_...), Fireworks (fw_...), xAI (xai-...),
- *  Together (togx_.../tog_...), Perplexity (pplx-...), and AWS Access Key IDs. */
+ *
+ *  Pattern coverage by provider:
+ *  - OpenAI, Anthropic, OpenRouter, DeepSeek: sk-... (sk-ant-..., sk-or-..., etc.)
+ *  - Gemini / Google AI Studio: AIza...
+ *  - Groq: gsk_...
+ *  - Fireworks AI: fw_...
+ *  - xAI / Grok: xai-...
+ *  - Together AI: together_api_... (canonical) and legacy tog_/togx_ formats
+ *  - Perplexity: pplx-...
+ *  - AWS Access Key IDs: AKIA.../ASIA.../AROA.../AIDA...
+ *
+ *  Providers without a detectable key prefix (Mistral, Cohere, Azure OpenAI,
+ *  Bedrock secret keys, Custom) cannot be pattern-matched and are not redacted.
+ *  Error paths for those providers should not include raw key values in messages. */
 function sanitizeAdminError(message: string): string {
   return (
     message
@@ -124,7 +145,8 @@ function sanitizeAdminError(message: string): string {
       .replace(/\bfw_[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // xAI / Grok
       .replace(/\bxai-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
-      // Together AI
+      // Together AI — canonical format (together_api_...) and legacy tok/togx variants
+      .replace(/\btogether_api_[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       .replace(/\btog[a-z]?[_-][A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // Perplexity
       .replace(/\bpplx-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
@@ -139,8 +161,8 @@ export function _resetAdminRateLimitMapsForTest(): void {
   authFailureMap.clear();
 }
 
-/** @internal Test-only: expose the auth failure map for lockout-expiry tests */
-export function _getAuthFailureMapForTest(): Map<string, { count: number; lockedUntil: number }> {
+/** @internal Test-only: expose the auth failure map for lockout-expiry and eviction tests */
+export function _getAuthFailureMapForTest(): Map<string, { count: number; lockedUntil: number; lastSeen: number }> {
   return authFailureMap;
 }
 import { AdminStore, type LLMConfigInput } from "../admin/AdminStore.js";
