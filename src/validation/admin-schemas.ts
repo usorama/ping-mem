@@ -50,6 +50,9 @@ const projectIdSchema = nonEmptyString.regex(
  * Exactly one of `projectDir` or `projectId` must be provided.
  */
 export const deleteProjectSchema = z.object({
+  // NOTE: the .refine() is NOT redundant despite optionalString using nonEmptyString.min(1).
+  // nonEmptyString applies .min(1) BEFORE .trim(), so "   " (3 spaces) passes min(1) and trims
+  // to "". The .refine() checks the post-trim value to catch whitespace-only strings.
   projectDir: optionalString.refine(
     (val) => val === undefined || val.length > 0,
     "projectDir cannot be empty string"

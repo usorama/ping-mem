@@ -64,8 +64,9 @@ function getRemoteIp(req: IncomingMessage): string {
 /** Check CSRF: compare the Origin (or Referer) header against the Host header
  *  using exact URL-hostname equality, not substring matching.
  *  Substring matching (`origin.includes(host)`) can be bypassed by a domain
- *  whose name contains the server hostname as a substring (e.g., evil-myhost.com). */
-/** @internal Exported for unit testing only */
+ *  whose name contains the server hostname as a substring (e.g., evil-myhost.com).
+ *
+ *  @internal Exported for unit testing only */
 export function isSameHostOrigin(header: string, host: string): boolean {
   try {
     return new URL(header).host === host;
@@ -181,17 +182,28 @@ export function sanitizeAdminError(message: string): string {
       // xAI / Grok
       .replace(/\bxai-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // Together AI — canonical format (together_api_...) and legacy tog_/togx_ variants.
-      // The legacy pattern uses [A-Za-z0-9]{32,} (no underscores, long minimum) to avoid
-      // false-positive redaction of common identifiers like tog_feature_flag_name.
+      // The legacy pattern uses underscore-only separator and [A-Za-z0-9]{32,} body (no underscores,
+      // long minimum) to avoid false-positive redaction of identifiers like tog_feature_flag_name
+      // or tog-correlation-id that happen to be long.
       .replace(/\btogether_api_[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
-      .replace(/\btog[a-z]?[_-][A-Za-z0-9]{32,}\b/g, "[REDACTED]")
+      .replace(/\btog[a-z]?_[A-Za-z0-9]{32,}\b/g, "[REDACTED]")
       // Perplexity
       .replace(/\bpplx-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
-      // AWS Access Key IDs (AKIA/ASIA/AROA/AIDA prefix + 16 uppercase alphanumeric chars = 20 total)
+      // AWS IAM credentials (prefix + 16 uppercase alphanumeric chars = 20 total)
+      // AKIA = access key, ASIA = STS temp, AROA = IAM role ID, AIDA = IAM user ID
       // [A-Z0-9] not [A-Z2-7]: AWS uses full alphanumeric, not base32 (which excludes 0,1,8,9)
       .replace(/\b(AKIA|ASIA|AROA|AIDA)[A-Z0-9]{16}\b/g, "[REDACTED]")
   );
 }
+
+// ============================================================================
+// Test-only exports (prefixed _ and @internal)
+// These live in the production module rather than a separate test-utilities file
+// because they expose module-private state. They carry no runtime risk as long
+// as production callers only import the non-_ exports. If this file is ever
+// tree-shaken or bundled, these exports can be excluded via conditional exports
+// in package.json or a separate test-utilities file.
+// ============================================================================
 
 /** @internal Test-only: reset module-level rate-limit and lockout maps between test cases */
 export function _resetAdminRateLimitMapsForTest(): void {
@@ -260,7 +272,7 @@ export async function handleAdminRequest(
     const html = renderAdminPage(nonce);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'self' data:`,
+      "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src 'self' data:`,
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       "Referrer-Policy": "strict-origin-when-cross-origin",
@@ -287,6 +299,9 @@ export async function handleAdminRequest(
     // bypass via a domain whose name contains the server hostname as a substring.
     if (req.method !== "GET" && req.method !== "HEAD") {
       const host = req.headers.host;
+      // Note: if `host` is absent (HTTP/2 or malformed request without a Host header) the CSRF
+      // check is silently skipped. This is safe because X-API-Key is the primary auth layer
+      // and the endpoint is not publicly routable without knowing the key.
       const origin = req.headers["origin"];
       const referer = req.headers["referer"];
       if (origin && host && !isSameHostOrigin(origin, host)) {
@@ -511,7 +526,8 @@ function requireApiKey(
   res: ServerResponse,
   apiKeyManager: ApiKeyManager
 ): boolean {
-  const apiKey = req.headers["x-api-key"] as string | undefined;
+  const rawApiKey = req.headers["x-api-key"];
+  const apiKey = Array.isArray(rawApiKey) ? rawApiKey[0] : rawApiKey;
   if (!apiKeyManager.isValid(apiKey)) {
     res.writeHead(401, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid API key" }));
@@ -580,7 +596,7 @@ function renderAdminPage(nonce: string): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>ping-mem Admin</title>
-  <style>
+  <style nonce="${nonce}">
     :root {
       color-scheme: light;
       --bg: #f4f5f7;

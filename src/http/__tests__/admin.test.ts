@@ -527,6 +527,10 @@ describe("admin.ts - sanitizeAdminError", () => {
     expect(sanitizeAdminError(config)).toBe(config);
     const logField = "metadata tog_software_update_12345 ok";
     expect(sanitizeAdminError(logField)).toBe(logField);
+    // Hyphen-separated tog- identifiers (e.g. correlation IDs) are NOT redacted
+    // because the legacy Together AI pattern now requires underscore separator only
+    const hyphenated = "tog-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef12 trace";
+    expect(sanitizeAdminError(hyphenated)).toBe(hyphenated);
   });
 
   it("redacts Perplexity pplx-... keys", () => {
@@ -540,7 +544,7 @@ describe("admin.ts - sanitizeAdminError", () => {
     expect(sanitizeAdminError("ASIAIOSFODNN7EXAMPLE credential")).toBe("[REDACTED] credential");
     // IAM role principal IDs (AROA prefix)
     expect(sanitizeAdminError("AROAIOSFODNN7EXAMPLE credential")).toBe("[REDACTED] credential");
-    // IAM assumed-role principal IDs (AIDA prefix)
+    // IAM user principal IDs (AIDA prefix)
     expect(sanitizeAdminError("AIDAIOSFODNN7EXAMPLE credential")).toBe("[REDACTED] credential");
     // Keys containing digits 0, 1, 8, 9 (previously excluded by erroneous base32 charset)
     expect(sanitizeAdminError("AKIA5GSG0CFZ3LN1JPM9 leaked")).toBe("[REDACTED] leaked");
@@ -597,6 +601,15 @@ describe("admin.ts - isSameHostOrigin", () => {
     expect(isSameHostOrigin("https://myhost.com:443", "myhost.com")).toBe(true);
     // Non-default ports are preserved and produce a mismatch
     expect(isSameHostOrigin("http://myhost.com:8080", "myhost.com")).toBe(false);
+  });
+
+  it("WHATWG strips default port from URL but not from Host header — explicit:explicit mismatch", () => {
+    // Edge case: if Node.js reports host as "myhost.com:80" (client explicitly included :80)
+    // and Origin is "http://myhost.com:80", the WHATWG parser strips port 80 → "myhost.com",
+    // which does NOT match host string "myhost.com:80". The request is safely over-rejected.
+    // Real browsers follow Fetch spec and strip default ports from their Origin headers,
+    // so this only occurs with non-browser callers that explicitly send default ports.
+    expect(isSameHostOrigin("http://myhost.com:80", "myhost.com:80")).toBe(false);
   });
 });
 
