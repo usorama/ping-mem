@@ -6,7 +6,7 @@ import type { RuntimeServices } from "../../config/runtime.js";
 interface ProbeMetric {
   name: string;
   value: number;
-  unit: "bytes" | "count" | "ratio" | "boolean" | "ms";
+  unit: "bytes" | "count" | "ratio" | "percent" | "boolean" | "ms";
 }
 
 interface ProbeResult {
@@ -142,23 +142,23 @@ describe("HealthMonitor", () => {
     expect(alert?.severity).toBe("critical");
   });
 
-  test("getStatus() reports running=false before start and running=true after start", () => {
+  test("getStatus() reports running=false before start and running=true after start", async () => {
     const monitor = makeMonitor();
     expect(monitor.getStatus().running).toBe(false);
 
     monitor.start();
     expect(monitor.getStatus().running).toBe(true);
 
-    monitor.stop();
+    await monitor.stop();
     expect(monitor.getStatus().running).toBe(false);
   });
 
-  test("start() is idempotent — calling twice does not create duplicate timers", () => {
+  test("start() is idempotent — calling twice does not create duplicate timers", async () => {
     const monitor = makeMonitor();
     monitor.start();
     monitor.start();
     expect(monitor.getStatus().running).toBe(true);
-    monitor.stop();
+    await monitor.stop();
     expect(monitor.getStatus().running).toBe(false);
   });
 
@@ -294,18 +294,18 @@ describe("HealthMonitor", () => {
     expect(monitor.getStatus().lastQualityTickAt).toBeNull();
   });
 
-  test("stop() sets stopping flag and prevents start()", () => {
+  test("stop() sets stopping flag and prevents start()", async () => {
     const monitor = makeMonitor();
     monitor.start();
     expect(monitor.getStatus().running).toBe(true);
 
-    monitor.stop();
+    await monitor.stop();
     expect(monitor.getStatus().running).toBe(false);
 
     // Calling start after stop should work (new lifecycle)
     monitor.start();
     expect(monitor.getStatus().running).toBe(true);
-    monitor.stop();
+    await monitor.stop();
   });
 
   test("stopping guard prevents state update after stop()", async () => {
@@ -623,5 +623,73 @@ describe("HealthMonitor", () => {
 
     // After eviction: one oldest removed (-1), one new alert added (+1) = stays at 210
     expect(internals.activeAlerts.size).toBe(210);
+  });
+
+  test("qualityTickRunning re-entrancy guard skips concurrent invocations", async () => {
+    const monitor = makeMonitor();
+    const internals = getInternals(monitor);
+
+    internals.qualityTickRunning = true;
+    const before = monitor.getStatus().lastQualityTickAt;
+    await internals.qualityTick();
+
+    // Tick was skipped — lastQualityTickAt unchanged
+    expect(monitor.getStatus().lastQualityTickAt).toBe(before);
+    internals.qualityTickRunning = false;
+  });
+
+  test("qualityTick() updates lastQualityTickAt on success", async () => {
+    const fakeEventStore = {
+      ping: async () => true,
+      getWalSizeBytes: () => 0,
+      getFreelistRatio: () => 0,
+      getIntegrityOk: () => 1,
+      walCheckpoint: (_mode: string) => {},
+      isAgentActive: () => false,
+      close: async () => {},
+    };
+    const monitor = createHealthMonitor({
+      services: {},
+      eventStore: fakeEventStore as unknown as import("../../storage/EventStore.js").EventStore,
+    });
+
+    const internals = getInternals(monitor);
+    expect(monitor.getStatus().lastQualityTickAt).toBeNull();
+
+    await internals.qualityTick();
+
+    expect(monitor.getStatus().lastQualityTickAt).not.toBeNull();
+  });
+
+  test("Qdrant bootstrap end-to-end: zero baseline + non-zero getStats sets baseline without drift alert", async () => {
+    const fakeEventStore = {
+      ping: async () => true,
+      getWalSizeBytes: () => 0,
+      getFreelistRatio: () => 0,
+      getIntegrityOk: () => 1,
+      walCheckpoint: (_mode: string) => {},
+      isAgentActive: () => false,
+      close: async () => {},
+    };
+    const fakeQdrantClient = {
+      isConnected: () => true,
+      getCircuitState: () => "closed" as const,
+      getStats: async () => ({ totalVectors: 1000 }),
+    };
+    const monitor = createHealthMonitor({
+      services: { qdrantClient: fakeQdrantClient as unknown as import("../../search/QdrantClient.js").QdrantClientWrapper },
+      eventStore: fakeEventStore as unknown as import("../../storage/EventStore.js").EventStore,
+    });
+    const internals = getInternals(monitor);
+
+    // Simulate bootstrap: baseline was 0 (first time, no prior baseline set — baselineQdrantCount is null initially)
+    // First qualityTick sets baseline from null to 1000 (no drift check)
+    await internals.qualityTick();
+    expect(internals.baselineQdrantCount).toBe(1000);
+    expect(monitor.getStatus().activeAlerts.some((a) => a.key === "qdrant:point_count_drift_pct")).toBe(false);
+
+    // Now simulate second ingest: baseline is 1000, new count is 1000 (no drift)
+    await internals.qualityTick();
+    expect(monitor.getStatus().activeAlerts.some((a) => a.key === "qdrant:point_count_drift_pct")).toBe(false);
   });
 });

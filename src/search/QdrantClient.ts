@@ -350,7 +350,7 @@ export class QdrantClientWrapper {
    * @param vectorData - Vector embedding with metadata
    */
   async storeVector(vectorData: VectorEmbedding): Promise<void> {
-    if (!this.connected) {
+    if (!this.connected && this.servicePolicy.state !== "half-open") {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -414,7 +414,7 @@ export class QdrantClientWrapper {
       category?: string;
     } = {}
   ): Promise<VectorSearchResult[]> {
-    if (!this.connected) {
+    if (!this.connected && this.servicePolicy.state !== "half-open") {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -519,7 +519,7 @@ export class QdrantClientWrapper {
    * @returns true if deleted, false if not found
    */
   async deleteVector(memoryId: MemoryId): Promise<boolean> {
-    if (!this.connected) {
+    if (!this.connected && this.servicePolicy.state !== "half-open") {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -569,7 +569,7 @@ export class QdrantClientWrapper {
     collectionName: string;
     usingFallback: boolean;
   }> {
-    if (!this.connected) {
+    if (!this.connected && this.servicePolicy.state !== "half-open") {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );

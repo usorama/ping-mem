@@ -114,6 +114,7 @@ export class RESTPingMemServer {
   private knowledgeStore: KnowledgeStore;
   private qdrantClient: QdrantClientWrapper | null = null;
   private healthMonitor: HealthMonitor | null = null;
+  private readonly ownsEventStore: boolean;
   private sseConnectionCount = 0;
   private static readonly MAX_SSE_CONNECTIONS = 100;
 
@@ -126,8 +127,9 @@ export class RESTPingMemServer {
     };
 
     // Initialize core components — use shared EventStore if provided (avoids dual SQLite connections)
-    this.eventStore = (this.config as { eventStore?: EventStore }).eventStore
-      ?? new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
+    const injectedEventStore = (this.config as { eventStore?: EventStore }).eventStore;
+    this.ownsEventStore = injectedEventStore === undefined;
+    this.eventStore = injectedEventStore ?? new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
     this.sessionManager = new SessionManager({ eventStore: this.eventStore });
     this.relevanceEngine = new RelevanceEngine(this.eventStore.getDatabase());
     this.pubsub = new MemoryPubSub();
@@ -1867,8 +1869,10 @@ export class RESTPingMemServer {
     if (this.pubsub) {
       this.pubsub.destroy();
     }
-    // Close event store (SQLite)
-    await this.eventStore.close();
+    // Close event store only if we own it (not injected externally — caller closes it)
+    if (this.ownsEventStore) {
+      await this.eventStore.close();
+    }
     // Close diagnostics store (SQLite)
     this.diagnosticsStore.close();
     // adminStore is externally owned (injected via config from server.ts) — caller closes it

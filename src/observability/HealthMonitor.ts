@@ -146,6 +146,12 @@ export class HealthMonitor {
     while ((this.tickRunning || this.qualityTickRunning) && Date.now() < deadline) {
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
+    if (this.tickRunning || this.qualityTickRunning) {
+      log.warn("stop() deadline exceeded: in-flight ticks did not complete", {
+        tickRunning: this.tickRunning,
+        qualityTickRunning: this.qualityTickRunning,
+      });
+    }
   }
 
   getStatus(): HealthMonitorStatus {
