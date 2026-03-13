@@ -286,7 +286,8 @@ export class QdrantClientWrapper {
    * @returns true if server is healthy
    */
   async healthCheck(): Promise<boolean> {
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       return false;
     }
     // Fail fast when circuit is fully open; allow probe through when half-open
@@ -299,7 +300,7 @@ export class QdrantClientWrapper {
       // Route through servicePolicy.execute() so success/failure updates circuit state.
       // getCollections() is lightweight and succeeds whenever the server is reachable,
       // even before the specific collection has been created (avoids false-unhealthy at startup).
-      await this.servicePolicy.execute(() => this.client!.getCollections());
+      await this.servicePolicy.execute(() => client.getCollections());
       return true;
     } catch (error) {
       log.warn("healthCheck failed", {
@@ -313,7 +314,8 @@ export class QdrantClientWrapper {
    * Create collection if it doesn't exist
    */
   async createCollectionIfNotExists(): Promise<void> {
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -322,13 +324,13 @@ export class QdrantClientWrapper {
     try {
       // Route through servicePolicy.execute() so the circuit breaker counts this probe
       await this.servicePolicy.execute(async () => {
-        const collections = await this.client!.getCollections();
+        const collections = await client.getCollections();
         const exists = collections.collections.some(
           (c) => c.name === this.config.collectionName
         );
 
         if (!exists) {
-          await this.client!.createCollection(this.config.collectionName, {
+          await client.createCollection(this.config.collectionName, {
             vectors: {
               size: this.config.vectorDimensions,
               distance: this.config.distanceMetric,
@@ -371,7 +373,8 @@ export class QdrantClientWrapper {
       return this.fallbackIndex.storeVector(vectorData);
     }
 
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -379,7 +382,7 @@ export class QdrantClientWrapper {
 
     try {
       await this.servicePolicy.execute(() =>
-        this.client!.upsert(this.config.collectionName, {
+        client.upsert(this.config.collectionName, {
           wait: true,
           points: [
             {
@@ -435,7 +438,8 @@ export class QdrantClientWrapper {
       return this.fallbackIndex.semanticSearch(queryEmbedding, options);
     }
 
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -480,7 +484,7 @@ export class QdrantClientWrapper {
       }
 
       const results = await this.servicePolicy.execute(() =>
-        this.client!.search(this.config.collectionName, searchParams)
+        client.search(this.config.collectionName, searchParams)
       );
 
       return results.map((result) => {
@@ -540,7 +544,8 @@ export class QdrantClientWrapper {
       return this.fallbackIndex.deleteVector(memoryId);
     }
 
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -548,7 +553,7 @@ export class QdrantClientWrapper {
 
     try {
       await this.servicePolicy.execute(() =>
-        this.client!.delete(this.config.collectionName, {
+        client.delete(this.config.collectionName, {
           wait: true,
           points: [memoryId],
         })
@@ -596,7 +601,8 @@ export class QdrantClientWrapper {
       };
     }
 
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -604,7 +610,7 @@ export class QdrantClientWrapper {
 
     try {
       const collectionInfo = await this.servicePolicy.execute(() =>
-        this.client!.getCollection(this.config.collectionName)
+        client.getCollection(this.config.collectionName)
       );
 
       return {

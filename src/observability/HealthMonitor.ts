@@ -184,6 +184,7 @@ export class HealthMonitor {
         this.lastFastTickAt = new Date().toISOString();
         this.consecutiveTickFailures = 0;
         this.activeAlerts.delete("monitor:tick_failure");
+        this.lastAlerts.delete("monitor:tick_failure");
 
         const sqliteMetrics = snapshot.components.sqlite.metrics;
         if (sqliteMetrics) {

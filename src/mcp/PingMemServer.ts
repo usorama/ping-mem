@@ -146,8 +146,8 @@ export class PingMemServer {
       vectorDimensions: config.vectorDimensions ?? 768,
     };
 
-    // Initialize core components
-    this.eventStore = new EventStore({ dbPath: resolved.dbPath });
+    // Initialize core components — use shared EventStore if provided (avoids dual SQLite connections)
+    this.eventStore = config.eventStore ?? new EventStore({ dbPath: resolved.dbPath });
     this.sessionManager = new SessionManager({
       eventStore: this.eventStore,
     });

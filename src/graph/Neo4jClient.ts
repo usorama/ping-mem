@@ -486,8 +486,8 @@ export class Neo4jClient {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       log.warn("Neo4j ping failed", { error: msg });
-      // Any ping failure means the connection is not usable — update state
-      this.connected = false;
+      // Let the circuit breaker manage connected state via its onStateChange handler.
+      // Setting this.connected = false here would desync from the breaker's state.
       return false;
     }
   }

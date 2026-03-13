@@ -252,7 +252,7 @@ describe("EventStore", () => {
       expect(ratio).toBeLessThanOrEqual(1);
     });
 
-    test("getFreelistRatio returns 0 when page_count is 0", () => {
+    test("getFreelistRatio returns a non-negative value for an empty store", () => {
       // In-memory DB with no data may have a very small freelist ratio; it should never throw
       const ratio = store.getFreelistRatio();
       expect(ratio).toBeGreaterThanOrEqual(0);

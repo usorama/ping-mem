@@ -25,6 +25,9 @@ import { createLogger } from "../util/logger.js";
 
 const log = createLogger("EventStore");
 
+/** Module-level constant for WAL checkpoint mode validation (allocated once). */
+const VALID_WAL_MODES = new Set(["PASSIVE", "TRUNCATE", "FULL", "RESTART"] as const);
+
 // ============================================================================
 // Event Store Configuration
 // ============================================================================
@@ -173,7 +176,8 @@ export class EventStore {
     if (this.config.foreignKeys) {
       this.db.exec("PRAGMA foreign_keys = ON");
     }
-    this.db.exec(`PRAGMA busy_timeout = ${this.config.busyTimeout}`);
+    const timeout = Math.max(0, Math.min(Number(this.config.busyTimeout) || 5000, 60000));
+    this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
 
     // Initialize schema
     this.initializeSchema();
@@ -802,8 +806,7 @@ export class EventStore {
    */
   walCheckpoint(mode: "PASSIVE" | "TRUNCATE" | "FULL" | "RESTART" = "PASSIVE"): void {
     // Runtime allowlist guards against injection if called outside TypeScript type system
-    const VALID_MODES = new Set(["PASSIVE", "TRUNCATE", "FULL", "RESTART"]);
-    if (!VALID_MODES.has(mode)) {
+    if (!VALID_WAL_MODES.has(mode)) {
       throw new Error(`Invalid WAL checkpoint mode: ${mode}`);
     }
     if (this.config.dbPath === ":memory:") {

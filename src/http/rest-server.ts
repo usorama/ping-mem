@@ -87,6 +87,18 @@ import type { QdrantClientWrapper } from "../search/QdrantClient.js";
  * Provides HTTP endpoints for memory operations without requiring
  * full MCP protocol implementation.
  */
+/**
+ * Checks whether a resolved projectDir is within an allowed root.
+ * Mirrors _isProjectDirSafe from admin.ts: excludes /tmp (world-writable)
+ * and validates HOME length to prevent filesystem-wide traversal.
+ */
+function isProjectDirSafe(resolved: string): boolean {
+  const home = process.env["HOME"];
+  const validHome = home && home.length > 3 && path.isAbsolute(home) ? home : null;
+  const allowedRoots = [...(validHome ? [validHome] : []), "/projects", "/Users", "/home"];
+  return allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
+}
+
 export type AppEnv = {
   Variables: {
     cspNonce: string;
@@ -205,7 +217,7 @@ export class RESTPingMemServer {
         cors({
           origin: configuredOrigins,
           allowMethods: corsConfig?.methods ?? ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-          allowHeaders: corsConfig?.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"],
+          allowHeaders: corsConfig?.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID", "Authorization"],
           credentials: true,
         })
       );
@@ -226,9 +238,11 @@ export class RESTPingMemServer {
       c.header("Referrer-Policy", "strict-origin-when-cross-origin");
       c.header(
         "Content-Security-Policy",
-        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline'`,
+        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; img-src 'self' data:; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
       );
-      c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+      if (process.env["PING_MEM_BEHIND_PROXY"] === "true") {
+        c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+      }
     });
 
     // API Key authentication (if configured)
@@ -697,9 +711,7 @@ export class RESTPingMemServer {
           );
         }
         const projectDir = path.resolve(parseResult.data.projectDir);
-        const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
-        const isDirSafe = allowedRoots.some((root) => root && projectDir.startsWith(root + path.sep));
-        if (!isDirSafe) {
+        if (!isProjectDirSafe(projectDir)) {
           return c.json({ error: "BadRequest", message: "projectDir must be within an allowed root" }, 400);
         }
         const forceReingest = parseResult.data.forceReingest;
@@ -763,9 +775,7 @@ export class RESTPingMemServer {
           );
         }
         const projectDir = path.resolve(parseResult.data.projectDir);
-        const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
-        const isDirSafe = allowedRoots.some((root) => root && projectDir.startsWith(root + path.sep));
-        if (!isDirSafe) {
+        if (!isProjectDirSafe(projectDir)) {
           return c.json({ error: "BadRequest", message: "projectDir must be within an allowed root" }, 400);
         }
         const result = await this.config.ingestionService.verifyProject(projectDir);
@@ -1021,7 +1031,7 @@ export class RESTPingMemServer {
           return c.json(
             {
               error: "Not Found",
-              message: `Memory with key "${key}" not found`,
+              message: "Memory with requested key not found",
             },
             404
           );
@@ -1032,7 +1042,7 @@ export class RESTPingMemServer {
           return c.json(
             {
               error: "Not Found",
-              message: `Memory with key "${key}" not found`,
+              message: "Memory with requested key not found",
             },
             404
           );
@@ -1423,7 +1433,7 @@ export class RESTPingMemServer {
         const { lockResult, quotaResult } = deleteResult;
 
         if (quotaResult.changes === 0) {
-          return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${rawId}' not found` }, 404);
+          return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${agentId}' not found` }, 404);
         }
 
         return c.json<RESTSuccessResponse<Record<string, unknown>>>({
@@ -1819,7 +1829,7 @@ export class RESTPingMemServer {
    */
   async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Convert Node.js HTTP request to Web Standard Request
-    const url = new URL(req.url ?? "", `http://${req.headers.host ?? "localhost"}`);
+    const url = new URL(req.url ?? "", "http://localhost");
 
     // Build request headers
     const headers = new Headers();

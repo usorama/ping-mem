@@ -92,7 +92,8 @@ export class AdminStore {
     if (this.config.foreignKeys) {
       this.db.exec("PRAGMA foreign_keys = ON");
     }
-    this.db.exec(`PRAGMA busy_timeout = ${this.config.busyTimeout}`);
+    const timeout = Math.max(0, Math.min(Number(this.config.busyTimeout) || 5000, 60000));
+    this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
 
     this.initializeSchema();
     this.prepareStatements();

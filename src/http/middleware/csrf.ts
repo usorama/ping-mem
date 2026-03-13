@@ -28,7 +28,11 @@ export function generateCsrfToken(): string {
  */
 export function csrfProtection() {
   return createMiddleware(async (c: Context, next: Next) => {
-    // Skip CSRF for API key authenticated requests (non-browser clients)
+    // Skip CSRF for API-key-authenticated requests (non-browser clients).
+    // Safety rationale: this middleware is scoped to /ui/* routes only. Cross-origin
+    // requests with custom headers (X-API-Key, Authorization) are blocked by CORS
+    // preflight, so a browser-based attacker cannot inject a junk header to bypass CSRF.
+    // Same-origin XSS would bypass CSRF anyway (attacker can read the token).
     if (c.req.header("x-api-key") || c.req.header("authorization")?.startsWith("Bearer ")) {
       return next();
     }
