@@ -11,6 +11,7 @@ import {
   checkAdminRateLimit,
   sanitizeAdminError,
   isSameHostOrigin,
+  _isProjectDirSafe,
   _resetAdminRateLimitMapsForTest,
   _getAuthFailureMapForTest,
   _getAdminRateLimitMapForTest,
@@ -335,6 +336,29 @@ describe("admin.ts - checkAdminRateLimit", () => {
     expect(res2.statusCode).toBeUndefined();
   });
 
+  it("X-Forwarded-For: extracts first IP from comma-separated list", () => {
+    process.env.PING_MEM_BEHIND_PROXY = "true";
+    const clientIp = "10.0.0.52";
+    // Comma-separated XFF header: first entry is the original client IP
+    const xffList = `${clientIp}, 172.16.0.1, 10.10.0.1`;
+
+    // Exhaust quota for the first IP in the list
+    for (let i = 0; i < 20; i++) {
+      checkAdminRateLimit(
+        createMockRequest(undefined, "172.16.0.1", { "x-forwarded-for": xffList }) as IncomingMessage,
+        createMockResponse() as unknown as ServerResponse
+      );
+    }
+    const res = createMockResponse();
+    expect(
+      checkAdminRateLimit(
+        createMockRequest(undefined, "172.16.0.1", { "x-forwarded-for": xffList }) as IncomingMessage,
+        res as unknown as ServerResponse
+      )
+    ).toBe(false);
+    expect(res.statusCode).toBe(429);
+  });
+
   it("allows requests again after the rate-limit window expires", () => {
     const ip = "192.168.1.12";
     const rateLimitMap = _getAdminRateLimitMapForTest();
@@ -521,7 +545,7 @@ describe("admin.ts - sanitizeAdminError", () => {
     expect(sanitizeAdminError("togx_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef12 error")).toBe("[REDACTED] error");
   });
 
-  it("does NOT redact short tog_ identifiers (false-positive prevention)", () => {
+  it("does NOT redact tog_ feature-flag names or tog- hyphen-separated identifiers (false-positive prevention)", () => {
     // Common identifier patterns with tog_ prefix must not be redacted
     const config = "config: tog_feature_flag_enabled";
     expect(sanitizeAdminError(config)).toBe(config);
@@ -646,5 +670,38 @@ describe("admin.ts - lockout 429 includes Retry-After", () => {
     const retryAfter = Number(res.headers["Retry-After"]);
     expect(retryAfter).toBeGreaterThan(0);
     expect(retryAfter).toBeLessThanOrEqual(30 * 60);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// _isProjectDirSafe — path traversal containment
+// ---------------------------------------------------------------------------
+
+describe("admin.ts - _isProjectDirSafe", () => {
+  it("allows valid subdirectories of allowed roots", () => {
+    expect(_isProjectDirSafe("/Users/someone/myrepo")).toBe(true);
+    expect(_isProjectDirSafe("/home/ubuntu/myrepo")).toBe(true);
+    expect(_isProjectDirSafe("/projects/myrepo")).toBe(true);
+    expect(_isProjectDirSafe("/tmp/sandbox")).toBe(true);
+  });
+
+  it("rejects paths outside all allowed roots", () => {
+    expect(_isProjectDirSafe("/etc/passwd")).toBe(false);
+    expect(_isProjectDirSafe("/var/log/syslog")).toBe(false);
+    expect(_isProjectDirSafe("/root/.ssh")).toBe(false);
+  });
+
+  it("rejects path traversal sequences that escape an allowed root", () => {
+    // path.resolve normalises ../ before the root check
+    expect(_isProjectDirSafe("/Users/someone/../../../etc/passwd")).toBe(false);
+    expect(_isProjectDirSafe("/projects/../etc/passwd")).toBe(false);
+  });
+
+  it("rejects the allowed root directories themselves (must be a subdirectory)", () => {
+    expect(_isProjectDirSafe("/Users")).toBe(false);
+    expect(_isProjectDirSafe("/home")).toBe(false);
+    expect(_isProjectDirSafe("/projects")).toBe(false);
+    expect(_isProjectDirSafe("/tmp")).toBe(false);
   });
 });

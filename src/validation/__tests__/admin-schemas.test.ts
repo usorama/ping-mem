@@ -151,11 +151,13 @@ describe("admin-schemas", () => {
       }
     });
 
-    it("should accept valid hex string", () => {
+    it("should reject non-UUID hex strings (now UUID-only format)", () => {
+      // Previously accepted bare hex strings; now requires full UUID format to reject
+      // degenerate inputs like "---" that the old /^[a-f0-9-]+$/ pattern admitted
       const result = deactivateKeySchema.safeParse({
         id: "abc123-def456",
       });
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
     });
 
     it("should reject empty string", () => {
@@ -172,7 +174,7 @@ describe("admin-schemas", () => {
       const result = deactivateKeySchema.safeParse({ id: "abc$123" });
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.issues[0].message).toContain("valid UUID or hex string");
+        expect(result.error.issues[0].message).toContain("valid UUID");
       }
     });
 
@@ -287,7 +289,8 @@ describe("admin-schemas", () => {
       expect(result.success).toBe(false);
     });
 
-    it("should accept empty string for baseUrl", () => {
+    it("should coerce empty string for baseUrl to undefined (clears the field)", () => {
+      // Empty string is treated as 'unset' via z.preprocess — results in undefined, not ""
       const result = setLLMConfigSchema.safeParse({
         provider: "OpenAI",
         apiKey: "test-key",
@@ -295,7 +298,7 @@ describe("admin-schemas", () => {
       });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.baseUrl).toBe("");
+        expect(result.data.baseUrl).toBeUndefined();
       }
     });
 

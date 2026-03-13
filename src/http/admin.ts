@@ -162,7 +162,8 @@ function clearAuthFailures(ip: string): void {
  *  - xAI / Grok: xai-...
  *  - Together AI: together_api_... (canonical) and legacy tog_/togx_ formats (32+ alphanum chars)
  *  - Perplexity: pplx-...
- *  - AWS Access Key IDs: AKIA.../ASIA.../AROA.../AIDA...
+ *  - AWS: AKIA/ASIA (access key IDs, secret) and AROA/AIDA (role/user principal IDs,
+ *    non-secret but included to avoid accidental disclosure in stack traces)
  *
  *  Providers without a detectable key prefix (Mistral, Cohere, Azure OpenAI,
  *  Bedrock secret keys, Custom) cannot be pattern-matched and are not redacted.
@@ -185,12 +186,16 @@ export function sanitizeAdminError(message: string): string {
       // The legacy pattern uses underscore-only separator and [A-Za-z0-9]{32,} body (no underscores,
       // long minimum) to avoid false-positive redaction of identifiers like tog_feature_flag_name
       // or tog-correlation-id that happen to be long.
+      // Known false-negative: a key immediately followed by an underscore (e.g. tog_KEY_ctx)
+      // escapes redaction because \b does not fire between [A-Za-z0-9] and _ (both \w).
+      // Error messages from Together AI callers must not include underscore-adjacent key material.
       .replace(/\btogether_api_[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       .replace(/\btog[a-z]?_[A-Za-z0-9]{32,}\b/g, "[REDACTED]")
       // Perplexity
       .replace(/\bpplx-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // AWS IAM credentials (prefix + 16 uppercase alphanumeric chars = 20 total)
-      // AKIA = access key, ASIA = STS temp, AROA = IAM role ID, AIDA = IAM user ID
+      // AKIA/ASIA = access key IDs (secret); AROA/AIDA = role/user principal IDs (non-secret,
+      // included conservatively since they appear in stack traces and error messages)
       // [A-Z0-9] not [A-Z2-7]: AWS uses full alphanumeric, not base32 (which excludes 0,1,8,9)
       .replace(/\b(AKIA|ASIA|AROA|AIDA)[A-Z0-9]{16}\b/g, "[REDACTED]")
   );
@@ -204,6 +209,15 @@ export function sanitizeAdminError(message: string): string {
 // tree-shaken or bundled, these exports can be excluded via conditional exports
 // in package.json or a separate test-utilities file.
 // ============================================================================
+
+/** @internal Exported for unit testing only.
+ *  Checks whether projectDir is a subdirectory of an allowed root.
+ *  Uses path.resolve to normalise before checking, catching ../ and similar sequences. */
+export function _isProjectDirSafe(projectDir: string): boolean {
+  const resolved = path.resolve(projectDir);
+  const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
+  return allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
+}
 
 /** @internal Test-only: reset module-level rate-limit and lockout maps between test cases */
 export function _resetAdminRateLimitMapsForTest(): void {
@@ -299,9 +313,10 @@ export async function handleAdminRequest(
     // bypass via a domain whose name contains the server hostname as a substring.
     if (req.method !== "GET" && req.method !== "HEAD") {
       const host = req.headers.host;
-      // Note: if `host` is absent (HTTP/2 or malformed request without a Host header) the CSRF
-      // check is silently skipped. This is safe because X-API-Key is the primary auth layer
-      // and the endpoint is not publicly routable without knowing the key.
+      // Note: if `host` is absent (malformed request that omits the Host header) the CSRF
+      // check is silently skipped. Node.js HTTP/2 compat mode populates req.headers.host from
+      // :authority automatically, so well-formed HTTP/2 requests are not affected.
+      // This is safe because X-API-Key is the primary auth layer for all callers.
       const origin = req.headers["origin"];
       const referer = req.headers["referer"];
       if (origin && host && !isSameHostOrigin(origin, host)) {
@@ -343,16 +358,9 @@ async function handleAdminApi(
 
     const { projectDir, projectId } = result.data;
 
-    // Guard against path traversal: resolve first, then verify within allowed scope.
-    // String-split-based checks do not catch URL-encoded or null-byte traversals.
-    if (projectDir) {
-      const resolved = path.resolve(projectDir);
-      // Block paths outside safe roots (home dirs, /projects, /Users, /home, /tmp)
-      const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
-      const isSafe = allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
-      if (!isSafe) {
-        return respondJson(res, 400, { error: "projectDir must be a subdirectory of an allowed root (not the root itself, and not outside allowed paths)" });
-      }
+    // Guard against path traversal: path.resolve normalises ../ sequences before the root check.
+    if (projectDir && !_isProjectDirSafe(projectDir)) {
+      return respondJson(res, 400, { error: "projectDir must be a subdirectory of an allowed root (not the root itself, and not outside allowed paths)" });
     }
 
     let resolvedProjectId: string | null;
@@ -566,13 +574,11 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
 }
 
 function deleteProjectManifest(projectDir: string): void {
-  const resolved = path.resolve(projectDir);
-  // Containment check: resolved path must be under an allowed root to prevent traversal.
-  const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
-  const isSafe = allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
-  if (!isSafe) {
+  // Containment check: path.resolve normalises ../ sequences before the root check.
+  if (!_isProjectDirSafe(projectDir)) {
     throw new Error("projectDir must be a subdirectory of an allowed root (not the root itself, and not outside allowed paths)");
   }
+  const resolved = path.resolve(projectDir);
   const manifestPath = path.join(resolved, ".ping-mem", "manifest.json");
   if (fs.existsSync(manifestPath)) {
     fs.unlinkSync(manifestPath);

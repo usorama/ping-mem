@@ -94,8 +94,8 @@ export type RotateKeyInput = z.infer<typeof rotateKeySchema>;
  */
 export const deactivateKeySchema = z.object({
   id: nonEmptyString.regex(
-    /^[a-f0-9-]+$/,
-    "id must be a valid UUID or hex string"
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    "id must be a valid UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
   ),
 });
 
@@ -140,7 +140,10 @@ export const setLLMConfigSchema = z.object({
   }),
   apiKey: z.string().min(1).max(10_000).trim(),
   model: z.string().min(1).max(500).trim().optional(),
-  baseUrl: z.string().url().max(2_000).optional().or(z.literal("")),
+  baseUrl: z.preprocess(
+    (val) => (val === "" ? undefined : val),
+    z.string().url().max(2_000).optional()
+  ),
 });
 
 export type SetLLMConfigInput = z.infer<typeof setLLMConfigSchema>;
