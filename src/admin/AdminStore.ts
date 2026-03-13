@@ -94,6 +94,7 @@ export class AdminStore {
     if (this.config.foreignKeys) {
       this.db.exec("PRAGMA foreign_keys = ON");
     }
+    // Safe: timeout is always a clamped integer from Math.max/min — no injection risk
     const timeout = Math.max(0, Math.min(Number(this.config.busyTimeout) || 5000, 60000));
     this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
 

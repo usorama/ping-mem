@@ -38,6 +38,8 @@ const DENIED_ROOTS = new Set([
  * access time. The check here is a first-pass gatekeeper.
  */
 export function isProjectDirSafe(inputPath: string): boolean {
+  if (!inputPath || inputPath.trim().length === 0) return false;
+
   let resolved: string;
   try {
     resolved = fs.realpathSync(path.resolve(inputPath));
@@ -52,5 +54,9 @@ export function isProjectDirSafe(inputPath: string): boolean {
   const validHome =
     home && home.length >= 5 && path.isAbsolute(home) && !DENIED_ROOTS.has(home) ? home : null;
   const allowedRoots = [...(validHome ? [validHome] : []), "/projects", "/Users", "/home"];
-  return allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
+  // Normalize root to ensure trailing separator (handles HOME="/custom-home/" edge case)
+  return allowedRoots.some((root) => {
+    const normalizedRoot = root.endsWith(path.sep) ? root : root + path.sep;
+    return resolved.startsWith(normalizedRoot);
+  });
 }

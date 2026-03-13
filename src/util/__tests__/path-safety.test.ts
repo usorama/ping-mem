@@ -97,6 +97,16 @@ describe("isProjectDirSafe", () => {
     });
   });
 
+  describe("edge cases", () => {
+    test("rejects empty string", () => {
+      expect(isProjectDirSafe("")).toBe(false);
+    });
+
+    test("rejects whitespace-only input", () => {
+      expect(isProjectDirSafe("   ")).toBe(false);
+    });
+  });
+
   describe("DENIED_ROOTS coverage", () => {
     test("rejects all DENIED_ROOTS entries as HOME", () => {
       const deniedRoots = [

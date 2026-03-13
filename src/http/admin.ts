@@ -307,7 +307,7 @@ export async function handleAdminRequest(
       // connect-src 'self': restricts fetch() calls to same origin (all /api/admin/* calls).
       // form-action 'none': no HTML forms are used; blocks form-submission hijacking from XSS.
       // base-uri 'none': prevents a <base> tag injection from redirecting relative URLs.
-      "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src 'self' data:; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
+      "Content-Security-Policy": `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; img-src 'self' data:; connect-src 'self'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       "Referrer-Policy": "strict-origin-when-cross-origin",

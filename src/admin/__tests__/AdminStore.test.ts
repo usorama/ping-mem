@@ -278,5 +278,17 @@ describe("AdminStore", () => {
       tempStore.close();
       expect(() => tempStore.close()).not.toThrow();
     });
+
+    test("operations after close: bun:sqlite returns empty results (not throws)", () => {
+      // Documents bun:sqlite behavior: prepared statements on a closed :memory: DB
+      // return empty results rather than throwing. This is an implementation detail —
+      // callers should not rely on post-close operations working.
+      const tempStore = new AdminStore({ dbPath: ":memory:" });
+      tempStore.createApiKey();
+      tempStore.close();
+      // bun:sqlite silently returns empty for in-memory DBs after close
+      const keys = tempStore.listApiKeys();
+      expect(Array.isArray(keys)).toBe(true);
+    });
   });
 });

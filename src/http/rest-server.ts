@@ -229,7 +229,7 @@ export class RESTPingMemServer {
       c.header("Referrer-Policy", "strict-origin-when-cross-origin");
       c.header(
         "Content-Security-Policy",
-        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; img-src 'self' data:; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
+        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; img-src 'self' data:; connect-src 'self'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
       );
       if (process.env["PING_MEM_BEHIND_PROXY"] === "true") {
         c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
@@ -452,7 +452,7 @@ export class RESTPingMemServer {
           );
         }
         const body = parseResult.data;
-        const sessionId = this.currentSessionId ?? c.req.header("x-session-id");
+        const sessionId = this.getSessionIdFromRequest(c);
 
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
@@ -1001,7 +1001,7 @@ export class RESTPingMemServer {
     this.app.get("/api/v1/context/:key", async (c) => {
       try {
         const key = c.req.param("key");
-        const sessionId = this.currentSessionId ?? c.req.header("x-session-id");
+        const sessionId = this.getSessionIdFromRequest(c);
 
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
@@ -1050,7 +1050,7 @@ export class RESTPingMemServer {
     this.app.delete("/api/v1/context/:key", async (c) => {
       try {
         const key = c.req.param("key");
-        const sessionId = this.currentSessionId ?? c.req.header("x-session-id");
+        const sessionId = this.getSessionIdFromRequest(c);
 
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
@@ -1097,7 +1097,7 @@ export class RESTPingMemServer {
           );
         }
 
-        const sessionId = this.currentSessionId ?? c.req.header("x-session-id");
+        const sessionId = this.getSessionIdFromRequest(c);
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
             {
@@ -1167,7 +1167,7 @@ export class RESTPingMemServer {
           );
         }
         const body = parseResult.data;
-        const sessionId = this.currentSessionId ?? c.req.header("x-session-id");
+        const sessionId = this.getSessionIdFromRequest(c);
 
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
@@ -1181,7 +1181,7 @@ export class RESTPingMemServer {
 
         // Create checkpoint using event store
         // Get memory count for the session
-        const session = await this.sessionManager.getSession(sessionId);
+        const session = this.sessionManager.getSession(sessionId);
         if (!session) {
           throw new Error("Session not found");
         }
@@ -1207,17 +1207,20 @@ export class RESTPingMemServer {
     this.app.get("/api/v1/status", async (c) => {
       try {
         const currentSession = this.currentSessionId
-          ? await this.sessionManager.getSession(this.currentSessionId)
+          ? this.sessionManager.getSession(this.currentSessionId)
           : null;
 
         const stats = {
           eventStore: {
             totalEvents: 0, // EventStore doesn't expose getEventCount publicly
           },
-          sessions: {
-            total: this.sessionManager.listSessions().length,
-            active: this.sessionManager.listSessions({ status: "active" }).length,
-          },
+          sessions: (() => {
+            const allSessions = this.sessionManager.listSessions();
+            return {
+              total: allSessions.length,
+              active: allSessions.filter((s) => s.status === "active").length,
+            };
+          })(),
           currentSession: currentSession
             ? {
                 id: currentSession.id,
@@ -1621,7 +1624,7 @@ export class RESTPingMemServer {
 
     // Serve static files from src/static/
     this.app.get("/static/*", async (c) => {
-      const filePath = c.req.path.replace("/static/", "");
+      const filePath = c.req.path.slice("/static/".length);
       const staticDir = process.env.PING_MEM_STATIC_DIR
         ?? path.resolve(process.cwd(), "src/static");
       const fullPath = path.resolve(staticDir, filePath);
@@ -1703,6 +1706,9 @@ export class RESTPingMemServer {
    * infrastructure failures (VECTOR_INDEX_NOT_CONFIGURED, AGENT_EXPIRED)
    * that map via error.code or default to 500.
    */
+  /** UUID format regex for validating X-Session-ID header values */
+  private static readonly UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   private static readonly DOMAIN_ERROR_NAMES = new Set([
     "MemoryKeyNotFoundError",
     "MemoryKeyExistsError",
@@ -1727,14 +1733,15 @@ export class RESTPingMemServer {
 
     // Truncate and sanitize log messages to prevent log injection from user-controlled
     // input embedded in error messages (e.g., session IDs, memory keys, file paths).
-    const sanitizedMessage = rawMessage.replace(/[\r\n]/g, "?").slice(0, 200);
+    // Strip all C0 control characters (null bytes, ANSI escapes, CR/LF, tabs, etc.)
+    const sanitizedMessage = rawMessage.replace(/[\x00-\x1f]/g, "?").slice(0, 200);
 
     if (statusCode >= 500) {
       const requestId = crypto.randomUUID().slice(0, 8);
       log.error("Request error", {
         requestId,
         method: c.req.method,
-        path: c.req.path.replace(/[\r\n\t]/g, "?").slice(0, 200),
+        path: c.req.path.replace(/[\x00-\x1f]/g, "?").slice(0, 200),
         error: sanitizedMessage,
       });
       return c.json(
@@ -1809,6 +1816,18 @@ export class RESTPingMemServer {
       503: "Service Unavailable",
     };
     return names[statusCode] ?? "Error";
+  }
+
+  /**
+   * Extract session ID from current state or X-Session-ID header.
+   * Validates header value matches UUID format to prevent map pollution.
+   */
+  private getSessionIdFromRequest(c: Context<AppEnv>): SessionId | null {
+    if (this.currentSessionId) return this.currentSessionId;
+    const header = c.req.header("x-session-id");
+    if (!header) return null;
+    if (!RESTPingMemServer.UUID_RE.test(header)) return null;
+    return header as SessionId;
   }
 
   /**
@@ -1949,6 +1968,20 @@ export class RESTPingMemServer {
     if (this.pubsub) {
       this.pubsub.destroy();
     }
+    // Stop HealthMonitor to halt tick timers
+    if (this.healthMonitor) {
+      await this.healthMonitor.stop();
+    }
+    // Close SessionManager to clear checkpoint timers (must precede EventStore close)
+    await this.sessionManager.close();
+    // Clear cached memory managers (do NOT call manager.close() — they share this.vectorIndex
+    // and MemoryManager.close() would close it N times; we close it explicitly below)
+    this.memoryManagers.clear();
+    this.managerPromises.clear();
+    // Close shared VectorIndex once (holds an open SQLite connection)
+    if (this.vectorIndex) {
+      await this.vectorIndex.close();
+    }
     // Close event store only if we own it (not injected externally — caller closes it)
     if (this.ownsEventStore) {
       await this.eventStore.close();
@@ -1958,9 +1991,6 @@ export class RESTPingMemServer {
       this.diagnosticsStore.close();
     }
     // adminStore is externally owned (injected via config from server.ts) — caller closes it
-    // Clear cached memory managers
-    this.memoryManagers.clear();
-    this.managerPromises.clear();
     log.info("Stopped");
   }
 

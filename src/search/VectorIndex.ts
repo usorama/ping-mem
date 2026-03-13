@@ -157,6 +157,7 @@ export class VectorNotFoundError extends VectorIndexError {
  */
 export class VectorIndex {
   private db: VectorDatabase;
+  private closed = false;
   private config: Required<CoreConfig>;
   private insertStmt!: VectorStatement;
   private searchStmt!: VectorStatement;
@@ -570,6 +571,8 @@ export class VectorIndex {
    * Close the database connection
    */
   async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
     try {
       this.db.close();
     } catch (error) {
