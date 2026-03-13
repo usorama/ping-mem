@@ -22,8 +22,6 @@ interface ThresholdRule {
   metric: string;
   warnAbove?: number;
   critAbove?: number;
-  /** Reserved for future minimum-threshold rules (e.g., replica counts) */
-  warnBelow?: number;
   critBelow?: number;
 }
 
@@ -373,8 +371,6 @@ export class HealthMonitor {
         this.alert("warning", key, result.source, `${metric.name}=${metric.value} exceeds ${rule.warnAbove}`);
       } else if (rule.critBelow !== undefined && metric.value < rule.critBelow) {
         this.alert("critical", key, result.source, `${metric.name}=${metric.value} below ${rule.critBelow}`);
-      } else if (rule.warnBelow !== undefined && metric.value < rule.warnBelow) {
-        this.alert("warning", key, result.source, `${metric.name}=${metric.value} below ${rule.warnBelow}`);
       } else {
         this.activeAlerts.delete(key);
         // Clear dedup timestamp so the alert can re-fire if the condition recurs
