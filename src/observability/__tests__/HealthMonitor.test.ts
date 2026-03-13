@@ -517,6 +517,82 @@ describe("HealthMonitor", () => {
     expect(monitor.getStatus().activeAlerts.some((a) => a.key === "sqlite:integrity_check_failed")).toBe(false);
   });
 
+  test("neo4j:quality_probe_failed is cleared on successful quality probe", async () => {
+    const fakeEventStore = {
+      ping: async () => true,
+      getWalSizeBytes: () => 0,
+      getFreelistRatio: () => 0,
+      getIntegrityOk: () => 1,
+      walCheckpoint: (_mode: string) => {},
+      isAgentActive: () => false,
+      close: async () => {},
+    };
+    const fakeNeo4jClient = {
+      isConnected: () => true,
+      getCircuitState: () => "closed" as const,
+      executeQuery: async <T>() => [] as T[],
+    };
+    const monitor = createHealthMonitor({
+      services: { neo4jClient: fakeNeo4jClient as unknown as import("../../graph/Neo4jClient.js").Neo4jClient },
+      eventStore: fakeEventStore as unknown as import("../../storage/EventStore.js").EventStore,
+    });
+    const internals = getInternals(monitor);
+
+    // Pre-seed the failure alert
+    internals.alert("warning", "neo4j:quality_probe_failed", "neo4j", "Quality probe failed: service unavailable");
+    expect(monitor.getStatus().activeAlerts.some((a) => a.key === "neo4j:quality_probe_failed")).toBe(true);
+
+    // Successful quality tick should clear the alert
+    await internals.qualityTick();
+    expect(monitor.getStatus().activeAlerts.some((a) => a.key === "neo4j:quality_probe_failed")).toBe(false);
+  });
+
+  test("qdrant:quality_probe_failed is cleared on successful quality probe", async () => {
+    const fakeEventStore = {
+      ping: async () => true,
+      getWalSizeBytes: () => 0,
+      getFreelistRatio: () => 0,
+      getIntegrityOk: () => 1,
+      walCheckpoint: (_mode: string) => {},
+      isAgentActive: () => false,
+      close: async () => {},
+    };
+    const fakeQdrantClient = {
+      isConnected: () => true,
+      getCircuitState: () => "closed" as const,
+      getStats: async () => ({ totalVectors: 100 }),
+    };
+    const monitor = createHealthMonitor({
+      services: { qdrantClient: fakeQdrantClient as unknown as import("../../search/QdrantClient.js").QdrantClientWrapper },
+      eventStore: fakeEventStore as unknown as import("../../storage/EventStore.js").EventStore,
+    });
+    const internals = getInternals(monitor);
+
+    // Pre-seed the failure alert
+    internals.alert("warning", "qdrant:quality_probe_failed", "qdrant", "Quality probe failed: service unavailable");
+    expect(monitor.getStatus().activeAlerts.some((a) => a.key === "qdrant:quality_probe_failed")).toBe(true);
+
+    // Successful quality tick should clear the alert
+    await internals.qualityTick();
+    expect(monitor.getStatus().activeAlerts.some((a) => a.key === "qdrant:quality_probe_failed")).toBe(false);
+  });
+
+  test("severity de-escalation (critical → warning) bypasses dedup window", () => {
+    const monitor = makeMonitor();
+    const internals = getInternals(monitor);
+
+    // Fire a critical alert
+    internals.alert("critical", "test:metric", "sqlite", "critical threshold exceeded");
+    const firstAlert = monitor.getStatus().activeAlerts.find((a) => a.key === "test:metric");
+    expect(firstAlert?.severity).toBe("critical");
+
+    // Immediately fire a warning for the same key — should bypass dedup and update severity
+    internals.alert("warning", "test:metric", "sqlite", "back to warning level");
+    const secondAlert = monitor.getStatus().activeAlerts.find((a) => a.key === "test:metric");
+    expect(secondAlert?.severity).toBe("warning");
+    expect(secondAlert?.message).toBe("back to warning level");
+  });
+
   test("alert map is capped at MAX_ALERTS (200)", () => {
     const monitor = makeMonitor();
     const internals = getInternals(monitor);

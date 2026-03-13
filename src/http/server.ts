@@ -96,6 +96,7 @@ export async function startHTTPServer(): Promise<void> {
       ingestionService,
       qdrantClient: services.qdrantClient,
       healthMonitor,
+      eventStore,
     });
   } else {
     // SSE / Streamable HTTP mode
@@ -164,7 +165,7 @@ export async function startHTTPServer(): Promise<void> {
 
     log.info("Shutting down...");
     log.info("Shutdown signal received", { signal });
-    healthMonitor.stop();
+    await healthMonitor.stop();
 
     const shutdownErrors: string[] = [];
 

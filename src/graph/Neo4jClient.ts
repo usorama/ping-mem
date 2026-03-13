@@ -470,7 +470,8 @@ export class Neo4jClient {
    * @returns true if connected and responsive
    */
   async ping(): Promise<boolean> {
-    if (!this.isConnected()) {
+    // Allow probe through when circuit is half-open to enable self-recovery
+    if (!this.isConnected() && this.servicePolicy.state !== "half-open") {
       return false;
     }
 
@@ -480,12 +481,8 @@ export class Neo4jClient {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       log.warn("Neo4j ping failed", { error: msg });
-      // If the error indicates the driver is unreachable, reflect that in connected state
-      const isUnreachable = msg.includes("ECONNREFUSED") || msg.includes("ServiceUnavailable") ||
-        msg.includes("SessionExpired") || msg.includes("connection") || msg.includes("timeout");
-      if (isUnreachable) {
-        this.connected = false;
-      }
+      // Any ping failure means the connection is not usable — update state
+      this.connected = false;
       return false;
     }
   }

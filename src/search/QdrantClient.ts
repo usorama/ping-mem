@@ -289,6 +289,10 @@ export class QdrantClientWrapper {
     if (!this.client) {
       return false;
     }
+    // Fail fast when circuit is open (bypass raw client to respect circuit breaker)
+    if (this.servicePolicy.state === "open") {
+      return false;
+    }
 
     try {
       // Use getCollections() — lightweight API that succeeds whenever the server is reachable,

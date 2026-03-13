@@ -125,8 +125,9 @@ export class RESTPingMemServer {
       ...config,
     };
 
-    // Initialize core components
-    this.eventStore = new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
+    // Initialize core components — use shared EventStore if provided (avoids dual SQLite connections)
+    this.eventStore = (this.config as { eventStore?: EventStore }).eventStore
+      ?? new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
     this.sessionManager = new SessionManager({ eventStore: this.eventStore });
     this.relevanceEngine = new RelevanceEngine(this.eventStore.getDatabase());
     this.pubsub = new MemoryPubSub();
@@ -315,10 +316,11 @@ export class RESTPingMemServer {
         const sanitizedMonitor = monitorStatus ? {
           ...monitorStatus,
           lastSnapshot: monitorStatus.lastSnapshot ? sanitizedSnapshot : null,
+          // Alert messages are sanitized at source via sanitizeHealthError() in HealthMonitor.
+          // Redact any remaining IP addresses that may appear in metric-value messages.
           activeAlerts: monitorStatus.activeAlerts.map((alert) => ({
             ...alert,
-            message: alert.message.replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, "[redacted]")
-              .replace(/\/[^\s"']+/g, "[path]"),
+            message: alert.message.replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, "[redacted]"),
           })),
         } : null;
 

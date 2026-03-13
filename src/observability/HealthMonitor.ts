@@ -1,5 +1,5 @@
 import type { RuntimeServices } from "../config/runtime.js";
-import { probeSystemHealth, type HealthSnapshot } from "./health-probes.js";
+import { probeSystemHealth, sanitizeHealthError, type HealthSnapshot } from "./health-probes.js";
 import type { EventStore } from "../storage/EventStore.js";
 import { createLogger } from "../util/logger.js";
 
@@ -131,7 +131,7 @@ export class HealthMonitor {
     log.info("Started");
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopping = true;
     if (this.fastTimer) {
       clearInterval(this.fastTimer);
@@ -140,6 +140,11 @@ export class HealthMonitor {
     if (this.qualityTimer) {
       clearInterval(this.qualityTimer);
       this.qualityTimer = null;
+    }
+    // Quiesce: wait for any in-flight ticks to complete (max 5s)
+    const deadline = Date.now() + 5_000;
+    while ((this.tickRunning || this.qualityTickRunning) && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
   }
 
@@ -262,17 +267,18 @@ export class HealthMonitor {
       } catch (error) {
         log.warn("SQLite integrity check failed", { error: error instanceof Error ? error.message : String(error) });
         this.alert("critical", "sqlite:integrity_check_failed", "sqlite",
-          `SQLite integrity check failed: ${error instanceof Error ? error.message : "unknown"}`);
+          `SQLite integrity check failed: ${sanitizeHealthError(error)}`);
       }
 
       if (this.stopping) return;
 
-      if (this.deps.services.neo4jClient && this.deps.services.neo4jClient.isConnected()) {
+      const neo4jClient = this.deps.services.neo4jClient;
+      if (neo4jClient && (neo4jClient.isConnected() || neo4jClient.getCircuitState() === "half-open")) {
         try {
-          const nullRows = await this.deps.services.neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.nullProperties);
+          const nullRows = await neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.nullProperties);
           const nullNodeCount = nullRows.reduce((sum, row) => sum + Number(row.cnt), 0);
 
-          const orphanRows = await this.deps.services.neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.orphanNodes);
+          const orphanRows = await neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.orphanNodes);
           const orphanNodeCount = Number(orphanRows[0]?.cnt ?? 0);
 
           this.checkThresholds({
@@ -283,19 +289,23 @@ export class HealthMonitor {
               { name: "orphan_node_count", value: orphanNodeCount, unit: "count" },
             ],
           });
+          // Clear any prior quality probe failure alert on success
+          this.activeAlerts.delete("neo4j:quality_probe_failed");
+          this.lastAlerts.delete("neo4j:quality_probe_failed");
           probeSucceeded = true;
         } catch (error) {
           log.warn("Neo4j quality tick failed", { error: error instanceof Error ? error.message : String(error) });
           this.alert("warning", "neo4j:quality_probe_failed", "neo4j",
-            `Quality probe failed: ${error instanceof Error ? error.message : "unknown"}`);
+            `Quality probe failed: ${sanitizeHealthError(error)}`);
         }
       }
 
       if (this.stopping) return;
 
-      if (this.deps.services.qdrantClient && this.deps.services.qdrantClient.isConnected()) {
+      const qdrantClient = this.deps.services.qdrantClient;
+      if (qdrantClient && (qdrantClient.isConnected() || qdrantClient.getCircuitState() === "half-open")) {
         try {
-          const stats = await this.deps.services.qdrantClient.getStats();
+          const stats = await qdrantClient.getStats();
           const pointCount = stats.totalVectors;
 
           if (this.baselineQdrantCount === null) {
@@ -321,11 +331,14 @@ export class HealthMonitor {
               metrics: [{ name: "point_count_drift_pct", value: driftPct, unit: "percent" }],
             });
           }
+          // Clear any prior quality probe failure alert on success
+          this.activeAlerts.delete("qdrant:quality_probe_failed");
+          this.lastAlerts.delete("qdrant:quality_probe_failed");
           probeSucceeded = true;
         } catch (error) {
           log.warn("Qdrant quality tick failed", { error: error instanceof Error ? error.message : String(error) });
           this.alert("warning", "qdrant:quality_probe_failed", "qdrant",
-            `Quality probe failed: ${error instanceof Error ? error.message : "unknown"}`);
+            `Quality probe failed: ${sanitizeHealthError(error)}`);
         }
       }
 
@@ -377,13 +390,16 @@ export class HealthMonitor {
     const now = Date.now();
     const previous = this.lastAlerts.get(key) ?? 0;
 
-    // Allow severity escalation (warn→critical) to bypass dedup window
+    // Allow severity escalation (warn→critical) and de-escalation (critical→warn) to bypass dedup window
     const existingAlert = this.activeAlerts.get(key);
     const isSeverityEscalation = existingAlert !== undefined
       && existingAlert.severity === "warning"
       && severity === "critical";
+    const isSeverityDeescalation = existingAlert !== undefined
+      && existingAlert.severity === "critical"
+      && severity === "warning";
 
-    if (!isSeverityEscalation && now - previous < this.dedupWindowMs) {
+    if (!isSeverityEscalation && !isSeverityDeescalation && now - previous < this.dedupWindowMs) {
       return;
     }
 

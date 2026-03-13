@@ -102,6 +102,8 @@ export interface PingMemServerConfig {
   causalDiscoveryAgent?: CausalDiscoveryAgent | undefined;
   /** Optional QdrantClientWrapper for health checks */
   qdrantClient?: QdrantClientWrapper | undefined;
+  /** Optional pre-created EventStore to share with the health monitor (avoids dual SQLite connections) */
+  eventStore?: import("../storage/EventStore.js").EventStore | undefined;
 }
 
 // ============================================================================
