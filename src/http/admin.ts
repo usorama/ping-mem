@@ -4,6 +4,72 @@ import * as path from "path";
 import * as crypto from "node:crypto";
 
 import { createLogger } from "../util/logger.js";
+
+// ============================================================================
+// Admin rate limiting + brute-force protection (not routed through Hono)
+// ============================================================================
+
+/** Sliding-window rate limiter for admin API: 20 requests per minute per IP */
+const adminRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const ADMIN_RATE_LIMIT_MAX = 20;
+const ADMIN_RATE_LIMIT_WINDOW_MS = 60_000;
+
+/** Brute-force lockout: lock after 5 failed Basic Auth attempts for 30 min */
+const authFailureMap = new Map<string, { count: number; lockedUntil: number }>();
+const AUTH_LOCKOUT_THRESHOLD = 5;
+const AUTH_LOCKOUT_MS = 30 * 60_000;
+
+function getRemoteIp(req: IncomingMessage): string {
+  return req.socket?.remoteAddress ?? "unknown";
+}
+
+function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
+  const ip = getRemoteIp(req);
+  const now = Date.now();
+  const entry = adminRateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    adminRateLimitMap.set(ip, { count: 1, resetAt: now + ADMIN_RATE_LIMIT_WINDOW_MS });
+    return true;
+  }
+  entry.count++;
+  if (entry.count > ADMIN_RATE_LIMIT_MAX) {
+    const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
+    res.writeHead(429, { "Retry-After": String(retryAfter), "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Too Many Requests", message: "Admin rate limit exceeded" }));
+    return false;
+  }
+  return true;
+}
+
+function isLockedOut(ip: string, res: ServerResponse): boolean {
+  const record = authFailureMap.get(ip);
+  if (record && Date.now() < record.lockedUntil) {
+    res.writeHead(429, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Too Many Requests", message: "Account locked due to repeated failures. Try again later." }));
+    return true;
+  }
+  return false;
+}
+
+function recordAuthFailure(ip: string): void {
+  const record = authFailureMap.get(ip) ?? { count: 0, lockedUntil: 0 };
+  record.count++;
+  if (record.count >= AUTH_LOCKOUT_THRESHOLD) {
+    record.lockedUntil = Date.now() + AUTH_LOCKOUT_MS;
+    record.count = 0;
+  }
+  authFailureMap.set(ip, record);
+}
+
+function clearAuthFailures(ip: string): void {
+  authFailureMap.delete(ip);
+}
+
+/** Sanitize error messages to prevent LLM API key leakage */
+function sanitizeAdminError(message: string): string {
+  // Strip common API key patterns (OpenAI sk-..., Anthropic sk-ant-..., etc.)
+  return message.replace(/\b(sk-[A-Za-z0-9_-]{10,}|sk-ant-[A-Za-z0-9_-]{10,})\b/g, "[REDACTED]");
+}
 import { AdminStore, type LLMConfigInput } from "../admin/AdminStore.js";
 import { ApiKeyManager } from "../admin/ApiKeyManager.js";
 import { IngestionService } from "../ingest/IngestionService.js";
@@ -64,6 +130,9 @@ export async function handleAdminRequest(
   const pathName = url.pathname;
 
   if (pathName === "/admin" || pathName === "/admin/") {
+    if (!checkAdminRateLimit(req, res)) {
+      return true;
+    }
     if (!checkBasicAuth(req, res)) {
       return true;
     }
@@ -83,11 +152,32 @@ export async function handleAdminRequest(
   }
 
   if (pathName.startsWith("/api/admin")) {
+    if (!checkAdminRateLimit(req, res)) {
+      return true;
+    }
     if (!checkBasicAuth(req, res)) {
       return true;
     }
     if (!requireApiKey(req, res, deps.apiKeyManager)) {
       return true;
+    }
+    // CSRF: for state-changing methods, verify Origin/Referer matches Host when present.
+    // X-API-Key is a non-simple header — browsers send CORS preflight for it, which the
+    // raw Node.js handler doesn't handle permissively. This is an additional defense layer.
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      const host = req.headers.host;
+      const origin = req.headers["origin"];
+      const referer = req.headers["referer"];
+      if (origin && host && !origin.includes(host)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Forbidden", message: "Cross-origin request rejected" }));
+        return true;
+      }
+      if (!origin && referer && host && !referer.includes(host)) {
+        res.writeHead(403, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Forbidden", message: "Cross-origin request rejected" }));
+        return true;
+      }
     }
     await handleAdminApi(req, res, deps, pathName);
     return true;
@@ -234,9 +324,10 @@ async function handleAdminApi(
       const setResult = deps.adminStore.setLLMConfig(result.data);
       return respondJson(res, 200, { data: setResult });
     } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "Unable to save LLM config";
       return respondJson(res, 500, {
         error: "LLMConfigError",
-        message: error instanceof Error ? error.message : "Unable to save LLM config",
+        message: sanitizeAdminError(rawMessage),
       });
     }
   }
@@ -245,15 +336,19 @@ async function handleAdminApi(
 }
 
 export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boolean {
+  const ip = getRemoteIp(req);
   const adminUser = process.env[ADMIN_USER_ENV];
   const adminPass = process.env[ADMIN_PASS_ENV];
   if (!adminUser || !adminPass) {
     // Credentials not configured — block access and warn. Never grant open access.
-    log.warn("Admin auth blocked: PING_MEM_ADMIN_USER/PING_MEM_ADMIN_PASS not set", {
-      ip: (req.socket?.remoteAddress) ?? "unknown",
-    });
+    log.warn("Admin auth blocked: PING_MEM_ADMIN_USER/PING_MEM_ADMIN_PASS not set", { ip });
     res.writeHead(401, { "WWW-Authenticate": "Basic" });
     res.end("Unauthorized — admin credentials not configured");
+    return false;
+  }
+
+  // Brute-force protection: lock out IP after repeated failures
+  if (isLockedOut(ip, res)) {
     return false;
   }
 
@@ -277,12 +372,14 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
   const passValid = timingSafeStringEqual(pass ?? "", adminPass);
 
   if (!userValid || !passValid) {
-    log.warn("Admin auth failed — invalid credentials", { ip: (req.socket?.remoteAddress) ?? "unknown" });
+    recordAuthFailure(ip);
+    log.warn("Admin auth failed — invalid credentials", { ip });
     res.writeHead(401, { "WWW-Authenticate": "Basic" });
     res.end("Unauthorized");
     return false;
   }
 
+  clearAuthFailures(ip);
   return true;
 }
 

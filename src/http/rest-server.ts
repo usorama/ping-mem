@@ -115,6 +115,7 @@ export class RESTPingMemServer {
   private qdrantClient: QdrantClientWrapper | null = null;
   private healthMonitor: HealthMonitor | null = null;
   private readonly ownsEventStore: boolean;
+  private readonly ownsDiagnosticsStore: boolean;
   private sseConnectionCount = 0;
   private static readonly MAX_SSE_CONNECTIONS = 100;
 
@@ -134,6 +135,7 @@ export class RESTPingMemServer {
     this.relevanceEngine = new RelevanceEngine(this.eventStore.getDatabase());
     this.pubsub = new MemoryPubSub();
     this.knowledgeStore = new KnowledgeStore(this.eventStore.getDatabase());
+    this.ownsDiagnosticsStore = !this.config.diagnosticsStore;
     this.diagnosticsStore =
       this.config.diagnosticsStore ??
       new DiagnosticsStore({
@@ -186,20 +188,28 @@ export class RESTPingMemServer {
    * Set up Hono middleware
    */
   private setupMiddleware(): void {
-    // CORS - default to rejecting cross-origin requests unless configured
+    // CORS - default to denying cross-origin requests unless explicitly configured.
+    // When no origins are configured, the cors middleware is not installed so the
+    // browser's same-origin policy applies naturally (no ACAO header = denied).
     const envOrigin = process.env.PING_MEM_CORS_ORIGIN;
     const defaultOrigin = envOrigin ? envOrigin.split(",").map(s => s.trim()) : [];
-    const corsConfig = this.config.cors ?? { origin: defaultOrigin };
-    const hasSpecificOrigins = defaultOrigin.length > 0;
-    this.app.use(
-      "*",
-      cors({
-        origin: corsConfig.origin ?? defaultOrigin,
-        allowMethods: corsConfig.methods ?? ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allowHeaders: corsConfig.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"],
-        credentials: hasSpecificOrigins,
-      })
-    );
+    const corsConfig = this.config.cors;
+    const configuredOrigins = corsConfig?.origin ?? defaultOrigin;
+    const hasSpecificOrigins =
+      (Array.isArray(configuredOrigins) && configuredOrigins.length > 0) ||
+      (typeof configuredOrigins === "string" && configuredOrigins.length > 0) ||
+      typeof configuredOrigins === "function";
+    if (hasSpecificOrigins) {
+      this.app.use(
+        "*",
+        cors({
+          origin: configuredOrigins,
+          allowMethods: corsConfig?.methods ?? ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+          allowHeaders: corsConfig?.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID"],
+          credentials: true,
+        })
+      );
+    }
 
     // Logger
     this.app.use("*", logger());
@@ -778,8 +788,20 @@ export class RESTPingMemServer {
           return c.json({ error: "BadRequest", message: "query is required" }, 400);
         }
         const projectId = c.req.query("projectId");
-        const filePath = c.req.query("filePath");
-        const type = c.req.query("type") as "code" | "comment" | "docstring" | undefined;
+        if (projectId !== undefined && projectId.length > 128) {
+          return c.json({ error: "BadRequest", message: "projectId exceeds maximum length" }, 400);
+        }
+        const rawFilePath = c.req.query("filePath");
+        if (rawFilePath !== undefined && (rawFilePath.includes("..") || rawFilePath.startsWith("/"))) {
+          return c.json({ error: "BadRequest", message: "filePath must be a relative path without traversal sequences" }, 400);
+        }
+        const filePath = rawFilePath;
+        const rawType = c.req.query("type");
+        const VALID_CODE_TYPES = new Set(["code", "comment", "docstring"]);
+        if (rawType !== undefined && !VALID_CODE_TYPES.has(rawType)) {
+          return c.json({ error: "BadRequest", message: "Invalid type: must be one of: code, comment, docstring" }, 400);
+        }
+        const type = rawType as "code" | "comment" | "docstring" | undefined;
         const rawSearchLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
         const limit = rawSearchLimit !== undefined ? (Number.isNaN(rawSearchLimit) ? 10 : Math.min(Math.max(rawSearchLimit, 1), 1000)) : undefined;
         const searchOptions: {
@@ -812,7 +834,14 @@ export class RESTPingMemServer {
         if (!projectId) {
           return c.json({ error: "BadRequest", message: "projectId is required" }, 400);
         }
-        const filePath = c.req.query("filePath") ?? undefined;
+        if (projectId.length > 128) {
+          return c.json({ error: "BadRequest", message: "projectId exceeds maximum length" }, 400);
+        }
+        const rawTimelineFilePath = c.req.query("filePath");
+        if (rawTimelineFilePath !== undefined && (rawTimelineFilePath.includes("..") || rawTimelineFilePath.startsWith("/"))) {
+          return c.json({ error: "BadRequest", message: "filePath must be a relative path without traversal sequences" }, 400);
+        }
+        const filePath = rawTimelineFilePath;
         const rawTimelineLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
         const limit = rawTimelineLimit !== undefined ? (Number.isNaN(rawTimelineLimit) ? 50 : Math.min(Math.max(rawTimelineLimit, 1), 1000)) : undefined;
         const timelineOptions: { projectId: string; filePath?: string; limit?: number } = {
@@ -1790,7 +1819,7 @@ export class RESTPingMemServer {
    */
   async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Convert Node.js HTTP request to Web Standard Request
-    const url = new URL(req.url ?? "", `http://${req.headers.host}`);
+    const url = new URL(req.url ?? "", `http://${req.headers.host ?? "localhost"}`);
 
     // Build request headers
     const headers = new Headers();
@@ -1873,8 +1902,10 @@ export class RESTPingMemServer {
     if (this.ownsEventStore) {
       await this.eventStore.close();
     }
-    // Close diagnostics store (SQLite)
-    this.diagnosticsStore.close();
+    // Close diagnostics store only if we own it (not injected externally — caller closes it)
+    if (this.ownsDiagnosticsStore) {
+      this.diagnosticsStore.close();
+    }
     // adminStore is externally owned (injected via config from server.ts) — caller closes it
     // Clear cached memory managers
     this.memoryManagers.clear();

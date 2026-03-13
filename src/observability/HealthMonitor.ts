@@ -419,14 +419,13 @@ export class HealthMonitor {
     };
     this.activeAlerts.set(key, alert);
 
-    // Evict oldest alerts if map exceeds cap
-    if (this.activeAlerts.size > HealthMonitor.MAX_ALERTS) {
+    // Evict oldest alerts until map is within cap (loop handles burst scenarios)
+    while (this.activeAlerts.size > HealthMonitor.MAX_ALERTS) {
       const oldest = Array.from(this.activeAlerts.entries())
         .sort(([, a], [, b]) => (a.timestamp < b.timestamp ? -1 : 1))[0];
-      if (oldest) {
-        this.activeAlerts.delete(oldest[0]);
-        this.lastAlerts.delete(oldest[0]);
-      }
+      if (!oldest) break;
+      this.activeAlerts.delete(oldest[0]);
+      this.lastAlerts.delete(oldest[0]);
     }
 
     if (severity === "critical") {

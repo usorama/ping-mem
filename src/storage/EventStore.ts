@@ -131,6 +131,7 @@ export interface Checkpoint {
  */
 export class EventStore {
   private db: Database;
+  private closed = false;
   private config: {
     dbPath: string;
     walMode: boolean;
@@ -814,6 +815,10 @@ export class EventStore {
    * Close database connection
    */
   async close(): Promise<void> {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
     this.db.close();
   }
 

@@ -1,5 +1,5 @@
 /**
- * Neo4j Client Wrapper for Graphiti Integration
+ * Neo4j Client Wrapper for ping-mem Temporal Graph
  *
  * Provides a type-safe, connection-pooled Neo4j client for ping-mem's
  * graph-based memory storage and retrieval operations.

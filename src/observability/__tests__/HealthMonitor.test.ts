@@ -621,8 +621,8 @@ describe("HealthMonitor", () => {
       metrics: [{ name: "integrity_ok", value: 0, unit: "boolean" }],
     });
 
-    // After eviction: one oldest removed (-1), one new alert added (+1) = stays at 210
-    expect(internals.activeAlerts.size).toBe(210);
+    // After eviction: while loop evicts all extras down to MAX_ALERTS (200) cap
+    expect(internals.activeAlerts.size).toBe(200);
   });
 
   test("qualityTickRunning re-entrancy guard skips concurrent invocations", async () => {

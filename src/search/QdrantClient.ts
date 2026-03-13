@@ -289,15 +289,17 @@ export class QdrantClientWrapper {
     if (!this.client) {
       return false;
     }
-    // Fail fast when circuit is open (bypass raw client to respect circuit breaker)
+    // Fail fast when circuit is fully open; allow probe through when half-open
+    // so the circuit breaker can self-recover via a successful health check.
     if (this.servicePolicy.state === "open") {
       return false;
     }
 
     try {
-      // Use getCollections() — lightweight API that succeeds whenever the server is reachable,
+      // Route through servicePolicy.execute() so success/failure updates circuit state.
+      // getCollections() is lightweight and succeeds whenever the server is reachable,
       // even before the specific collection has been created (avoids false-unhealthy at startup).
-      await this.client.getCollections();
+      await this.servicePolicy.execute(() => this.client!.getCollections());
       return true;
     } catch (error) {
       log.warn("healthCheck failed", {
@@ -318,20 +320,22 @@ export class QdrantClientWrapper {
     }
 
     try {
-      // Check if collection exists
-      const collections = await this.client.getCollections();
-      const exists = collections.collections.some(
-        (c) => c.name === this.config.collectionName
-      );
+      // Route through servicePolicy.execute() so the circuit breaker counts this probe
+      await this.servicePolicy.execute(async () => {
+        const collections = await this.client!.getCollections();
+        const exists = collections.collections.some(
+          (c) => c.name === this.config.collectionName
+        );
 
-      if (!exists) {
-        await this.client.createCollection(this.config.collectionName, {
-          vectors: {
-            size: this.config.vectorDimensions,
-            distance: this.config.distanceMetric,
-          },
-        });
-      }
+        if (!exists) {
+          await this.client!.createCollection(this.config.collectionName, {
+            vectors: {
+              size: this.config.vectorDimensions,
+              distance: this.config.distanceMetric,
+            },
+          });
+        }
+      });
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
