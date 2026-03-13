@@ -1,8 +1,13 @@
 {
   "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
   "rootPath": "/projects/ping-mem",
-  "treeHash": "9510eabd09859a04c1b70aba34ab2ae5871ad3667c27dbe944191ab2125f489c",
+  "treeHash": "c26ecd82c30160189777e686b998230c8f33e05bccb8b031fb69594ef7306357",
   "files": [
+    {
+      "path": ".ai/implementation-reviews/wave-review-enhancements.md",
+      "sha256": "6c4524ccb8ed71332fb7cab24021c4447e960144f5689664cf91332199bd26a8",
+      "bytes": 5829
+    },
     {
       "path": ".cursor/mcp.json",
       "sha256": "32de12e02513a2668215a7d5abfce93ca30e816aea8437ce9109c2bd86d00701",
@@ -40,8 +45,8 @@
     },
     {
       "path": ".ping-mem/manifest.json",
-      "sha256": "554425dd3db42b69c8d3abc885480f5d7833bd803f89c72169c4714a5bf2d094",
-      "bytes": 56678
+      "sha256": "0b9f72171fa8f2659ce6207d60d5c9eafaaadabfff9c477f66944d927e1b7e07",
+      "bytes": 57212
     },
     {
       "path": ".serena/.gitignore",
@@ -227,6 +232,11 @@
       "path": "docs/brainstorms/2026-02-18-ping-mem-web-ui-brainstorm.md",
       "sha256": "804b6a8685a84cedbbde5f14f6a2b286aa5e546c5ca5b901236728d5f42125e8",
       "bytes": 7864
+    },
+    {
+      "path": "docs/continuation-packages/continuation_20260313_pr_zero_cycle23.md",
+      "sha256": "3e95e681321996438c339fb9f8dc0605e2e7e243a7ba7a61145a4b65b7083a5f",
+      "bytes": 9095
     },
     {
       "path": "docs/plans/2026-02-01-feat-multi-project-discovery-and-session-support-plan.md",
@@ -480,8 +490,8 @@
     },
     {
       "path": "src/admin/AdminStore.ts",
-      "sha256": "f5928b7db2dc0340090e00c914996514503784e6073bf852c46e16fde0ec259c",
-      "bytes": 12246
+      "sha256": "90c5c70170a253d4a0da4b97cf9e91e233eb921dc5be361af62d1a66dad8395a",
+      "bytes": 13326
     },
     {
       "path": "src/admin/ApiKeyManager.ts",
@@ -490,8 +500,8 @@
     },
     {
       "path": "src/admin/__tests__/AdminStore.test.ts",
-      "sha256": "2825d75c9c72c2997290bce10554a6e12c13153cdb5ac2226cdbb3a8b324bffe",
-      "bytes": 8133
+      "sha256": "8a8a26f9e616fb8f5c7f4dfe42109e872d2cb6f526c4a4b160fcfdbcda17654d",
+      "bytes": 9845
     },
     {
       "path": "src/admin/__tests__/crypto.test.ts",
@@ -560,8 +570,8 @@
     },
     {
       "path": "src/diagnostics/DiagnosticsStore.ts",
-      "sha256": "325b02c51ed553600234ad32eddf66940e0734921a2dd75758473e139ab0c84e",
-      "bytes": 15588
+      "sha256": "fc8edf1deb90f597da136f03f91f4f99cc05124ae7c3e7309a2b39fe2065a681",
+      "bytes": 16955
     },
     {
       "path": "src/diagnostics/SummaryCache.ts",
@@ -705,8 +715,8 @@
     },
     {
       "path": "src/graph/Neo4jClient.ts",
-      "sha256": "e28110ef7add89e886859cd2db2b360c3e87baaea01f8b52d121c30d1c87f834",
-      "bytes": 18110
+      "sha256": "86064d84e9ce0f3216e9d6f9d54e413b045998930bd0df4cec81d0d2419fd5a3",
+      "bytes": 18602
     },
     {
       "path": "src/graph/RelationshipInferencer.ts",
@@ -795,8 +805,8 @@
     },
     {
       "path": "src/http/__tests__/admin.test.ts",
-      "sha256": "02caa22c41b5bf4333eaa0e64b881464ef82a986e1e4e54a92cd42c9b960c437",
-      "bytes": 9555
+      "sha256": "037be43467adcaab65be732a95e83214299e44118f7d94f8ad8b399f37187492",
+      "bytes": 43151
     },
     {
       "path": "src/http/__tests__/agent-rest.test.ts",
@@ -815,8 +825,8 @@
     },
     {
       "path": "src/http/admin.ts",
-      "sha256": "ff8118b58eafa4f60db475fc928f03d863903ec1adfff051461d2b39c10b140c",
-      "bytes": 24383
+      "sha256": "0d9f4de2defcb9a85a07b9510b1c2342da4924291e51889642d107c93cc9d71f",
+      "bytes": 48475
     },
     {
       "path": "src/http/index.ts",
@@ -835,8 +845,8 @@
     },
     {
       "path": "src/http/middleware/csrf.ts",
-      "sha256": "47286d995cdd40ca3bd7973c87cdd85fe3786210784ac4e571d25c5e148838d2",
-      "bytes": 3009
+      "sha256": "dbbf755bb9dc3b1d8cae520b1dc1c7168c9577a1ecd251af65b38aabd52a2faf",
+      "bytes": 3348
     },
     {
       "path": "src/http/middleware/rate-limit.ts",
@@ -845,23 +855,23 @@
     },
     {
       "path": "src/http/rest-server.ts",
-      "sha256": "d82d70ae0bfbacfef1c9446c8a35704b4228ebbf75519350329f5fd281ed3e7c",
-      "bytes": 68771
+      "sha256": "c3cb9ec3c40d88e3ebeaf2d5a15247a3d566d0a48409aa74435aa35a5dd92bf9",
+      "bytes": 79315
     },
     {
       "path": "src/http/server.ts",
-      "sha256": "dade2c09739c7abca85c4d23ace47c3261977effa55ea2e083efdfbffb7227ba",
-      "bytes": 8927
+      "sha256": "919e39700bc7bb36e7947fd8997b47062ffc5eb0a6087e5843f13e961daf138e",
+      "bytes": 9225
     },
     {
       "path": "src/http/sse-server.ts",
-      "sha256": "6cf7e1279d76d140a066e44835878866506ee1efab9ceb6ad6001b57cb0b2112",
-      "bytes": 8745
+      "sha256": "ac6a543a34dca972cad5f85b8e127c12e68a1ebf52df673c5ec0cd1e14a1cc58",
+      "bytes": 8823
     },
     {
       "path": "src/http/types.ts",
-      "sha256": "2fcba324a904d10f23ecd3dd28fc20641db7fe82ee48a23f328e48f00b04f471",
-      "bytes": 6540
+      "sha256": "1207ba2f392b36584714732c5afdac97baf21d7c2591911efb0144f6f90249c0",
+      "bytes": 6715
     },
     {
       "path": "src/http/ui/__tests__/chat-api.test.ts",
@@ -905,8 +915,8 @@
     },
     {
       "path": "src/http/ui/dashboard.ts",
-      "sha256": "d4c0ae4065d8ea8172bc8fa51a461e65ff03b7c4bf6231febedbee516e51e651",
-      "bytes": 5675
+      "sha256": "19c3e2522a8bb87cc7b6c2348be0ee910268a14c5e9455de36e5648f94f45e99",
+      "bytes": 5663
     },
     {
       "path": "src/http/ui/diagnostics.ts",
@@ -1115,8 +1125,8 @@
     },
     {
       "path": "src/mcp/PingMemServer.ts",
-      "sha256": "78c35d4f82897d60db2fcd4cb52795e3df4b4adf9591bd5c516c222b15ac7b8e",
-      "bytes": 14836
+      "sha256": "09c21505e378079763d65613471a91d557555bc41c7e36aaf24a9c643a03c61c",
+      "bytes": 15404
     },
     {
       "path": "src/mcp/__tests__/PingMemServer.causalTools.test.ts",
@@ -1230,8 +1240,8 @@
     },
     {
       "path": "src/memory/MemoryManager.ts",
-      "sha256": "693fb014d985369738644efefbc26f085c637934db6c4b51352bc740a2c17c55",
-      "bytes": 48383
+      "sha256": "f38bc746a3345c82a30cc9be48d86dd1034cf704fe609b88c55605d53c5a5583",
+      "bytes": 48687
     },
     {
       "path": "src/memory/RelevanceEngine.ts",
@@ -1315,13 +1325,13 @@
     },
     {
       "path": "src/observability/HealthMonitor.ts",
-      "sha256": "cda73ccbd22103128c551f493bf56229a8c42e5b428b94132e3b480af1f33455",
-      "bytes": 17210
+      "sha256": "87ebe9160fdfda4b4c768ba4e142657a973e64f9f924b664637c73229ade6775",
+      "bytes": 17031
     },
     {
       "path": "src/observability/__tests__/HealthMonitor.test.ts",
-      "sha256": "36bd806ce6285d96c82998b0e8220d2430170672132328780e4425abbd2112b0",
-      "bytes": 26202
+      "sha256": "a4a1a360f891b139979a83540da765193924c5c78bf56f7f9a3ab87a3b416c0d",
+      "bytes": 25606
     },
     {
       "path": "src/observability/__tests__/health-probes.test.ts",
@@ -1395,8 +1405,8 @@
     },
     {
       "path": "src/search/QdrantClient.ts",
-      "sha256": "276f02b5a07c25e2ab07be2f2c3d32525694a80ec84c6fa966f92fe74305e73c",
-      "bytes": 21069
+      "sha256": "052835eb3df9d2cee71f69ca55bcfc68ea566eb52b71ed043f3cbfdc2a7d387a",
+      "bytes": 22003
     },
     {
       "path": "src/search/Reranker.ts",
@@ -1410,8 +1420,8 @@
     },
     {
       "path": "src/search/VectorIndex.ts",
-      "sha256": "203f18cc1bcbf4d7488b4da71a7964a3a81a34b37333f25ca5ef09cc96b0611d",
-      "bytes": 17000
+      "sha256": "f1edc9a8e1c00766e470b04fc1514f2e131b53892ad21402edbbae07f6ad6133",
+      "bytes": 17233
     },
     {
       "path": "src/search/__tests__/BM25Store.test.ts",
@@ -1480,13 +1490,13 @@
     },
     {
       "path": "src/search/__tests__/VectorIndex.test.ts",
-      "sha256": "d2bf96b40a9fd666885dabc9609b685c212f11e591ec6f2d6fc69be127bd5e76",
-      "bytes": 21056
+      "sha256": "85320d93f4be087db898849ef1ec8b7ec84d28c7cb86d1ac1b1602831cd48729",
+      "bytes": 21891
     },
     {
       "path": "src/session/SessionManager.ts",
-      "sha256": "418fed2316ff1d172aac1e8116fdaf99d8394490f96e00ab905c447254b019a9",
-      "bytes": 16232
+      "sha256": "77d462b3e1e7d4d0b4061c67514f1ccd3bd7425d0cfc70083a399be157b8fa2e",
+      "bytes": 16514
     },
     {
       "path": "src/session/__tests__/SessionManager.test.ts",
@@ -1515,8 +1525,8 @@
     },
     {
       "path": "src/storage/EventStore.ts",
-      "sha256": "b2768f0c872f30a9cb213d50ef6d4750a0777d7d89ea31bd7ee267ce85b4a797",
-      "bytes": 25013
+      "sha256": "95f8dcb9034aee363835ea725ce9d50198f7a1bff258d50747b4b4d02382fdb2",
+      "bytes": 25796
     },
     {
       "path": "src/storage/WriteLockManager.ts",
@@ -1530,8 +1540,8 @@
     },
     {
       "path": "src/storage/__tests__/EventStore.test.ts",
-      "sha256": "c6d719359ff464b2b317e362da9fb1a52fdcbf4fb6f2cc02e8ac8b423b0cfcbb",
-      "bytes": 12055
+      "sha256": "68599ac599d1db1f14603637a5a24fc670b106c1168a55ecff04fb5b669eb3a2",
+      "bytes": 12072
     },
     {
       "path": "src/storage/__tests__/WriteLockManager.test.ts",
@@ -1579,6 +1589,11 @@
       "bytes": 10831
     },
     {
+      "path": "src/util/__tests__/path-safety.test.ts",
+      "sha256": "8aecbc0ad4238bcdcf266926a443c296964825bb860dc4c81073870e066728de",
+      "bytes": 5225
+    },
+    {
       "path": "src/util/auth-utils.ts",
       "sha256": "fb318ee53d8ffd1b725ae75f37f27c9c22f5cff56115974c0b73308ff018f628",
       "bytes": 4816
@@ -1587,6 +1602,11 @@
       "path": "src/util/logger.ts",
       "sha256": "0c8d66a61d6e8ee65ca2311cd12e6295c8dc97ddd2f5b273f0aa8a329eda7efc",
       "bytes": 3222
+    },
+    {
+      "path": "src/util/path-safety.ts",
+      "sha256": "f53b20aa718d2c3bce27b692e264436ef31347e2d88e5be168a74ad6eb0f0ad7",
+      "bytes": 2888
     },
     {
       "path": "src/validation/ValidationEngine.ts",
@@ -1600,8 +1620,8 @@
     },
     {
       "path": "src/validation/__tests__/admin-schemas.test.ts",
-      "sha256": "2420651851892c5b7e59003f1f5d5ae5fc87bc31b5236176358e1120ce7048ff",
-      "bytes": 10146
+      "sha256": "03b09d58ea92bb97035f6fff0f05dfd15dac229163a11ce5a42d968611f89eff",
+      "bytes": 12314
     },
     {
       "path": "src/validation/__tests__/diagnostics-schemas.test.ts",
@@ -1615,8 +1635,8 @@
     },
     {
       "path": "src/validation/admin-schemas.ts",
-      "sha256": "a4e7b42f51f48a230d1213d3b26d6d8a3a56af40c5061e42d26843aabe3509d6",
-      "bytes": 5302
+      "sha256": "60075180a01ba0d79294df4ed19854068443046cee10ea5f0b8b6c9f07f595f2",
+      "bytes": 7697
     },
     {
       "path": "src/validation/api-schemas.ts",
@@ -1669,6 +1689,6 @@
       "bytes": 849
     }
   ],
-  "generatedAt": "2026-03-13T08:24:52.337Z",
+  "generatedAt": "2026-03-13T17:17:38.834Z",
   "schemaVersion": 1
 }
