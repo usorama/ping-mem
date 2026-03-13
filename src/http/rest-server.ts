@@ -17,6 +17,7 @@ import { logger } from "hono/logger";
 import * as path from "path";
 import * as fs from "fs";
 import { createLogger } from "../util/logger.js";
+import { isProjectDirSafe } from "../util/path-safety.js";
 
 const log = createLogger("REST Server");
 
@@ -88,8 +89,6 @@ import type { QdrantClientWrapper } from "../search/QdrantClient.js";
  * Provides HTTP endpoints for memory operations without requiring
  * full MCP protocol implementation.
  */
-// Path safety — shared implementation avoids logic duplication with admin.ts
-import { isProjectDirSafe } from "../util/path-safety.js";
 
 export type AppEnv = {
   Variables: {
@@ -1698,21 +1697,27 @@ export class RESTPingMemServer {
    */
   private handleError(c: Context<AppEnv>, error: unknown): Response {
     const statusCode = this.getStatusCode(error);
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const isClientError = statusCode >= 400 && statusCode < 500;
+    const rawMessage = error instanceof Error ? error.message : "Unknown error";
 
-    if (!isClientError) {
+    if (statusCode >= 500) {
       const requestId = crypto.randomUUID().slice(0, 8);
-      log.error(`Error [${requestId}] ${c.req.method} ${c.req.path}`, { error: error instanceof Error ? error.message : String(error) });
+      log.error(`Error [${requestId}] ${c.req.method} ${c.req.path}`, { error: rawMessage });
       return c.json(
         { error: this.getErrorName(statusCode), message: `An internal error occurred (ref: ${requestId})` },
         statusCode as ContentfulStatusCode
       );
     }
 
-    log.error("Error", { message });
+    // For 4xx: only return raw message for known domain error classes whose messages
+    // are safe to expose. All others get a generic message to prevent leaking internal
+    // details (SQL errors, file paths) from misclassified exceptions.
+    const isDomainError = error instanceof Error &&
+      /Memory|Agent|Quota|Lock|Evidence|Schema|Scope|Session/.test(error.constructor.name);
+    const safeMessage = isDomainError ? rawMessage : this.getErrorName(statusCode);
+
+    log.error("Error", { message: rawMessage });
     return c.json(
-      { error: this.getErrorName(statusCode), message },
+      { error: this.getErrorName(statusCode), message: safeMessage },
       statusCode as ContentfulStatusCode
     );
   }

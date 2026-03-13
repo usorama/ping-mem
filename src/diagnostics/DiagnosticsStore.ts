@@ -166,6 +166,25 @@ export class DiagnosticsStore {
         ON diagnostic_findings(rule_id);
       CREATE INDEX IF NOT EXISTS idx_findings_symbol
         ON diagnostic_findings(symbol_id);
+
+      -- Created here so deleteProject can reference it even when LLM summaries are disabled.
+      -- SummaryCache creates the same table with IF NOT EXISTS, so no conflict.
+      CREATE TABLE IF NOT EXISTS diagnostic_summaries (
+        summary_id TEXT PRIMARY KEY,
+        analysis_id TEXT NOT NULL,
+        summary_text TEXT NOT NULL,
+        llm_model TEXT NOT NULL,
+        llm_provider TEXT NOT NULL,
+        generated_at TEXT NOT NULL,
+        prompt_tokens INTEGER NOT NULL,
+        completion_tokens INTEGER NOT NULL,
+        cost_usd REAL,
+        source_finding_ids TEXT NOT NULL,
+        UNIQUE(analysis_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_summaries_analysis
+        ON diagnostic_summaries(analysis_id);
     `);
   }
 
@@ -429,6 +448,7 @@ export class DiagnosticsStore {
     limit?: number;
   }): DiagnosticRun[] {
     const limit = options?.limit ?? 50;
+    // Dynamic SQL — all values are bound via $-params. Never interpolate user input directly.
     let sql = "SELECT * FROM diagnostic_runs WHERE 1=1";
     const params: Record<string, string | number> = { $limit: limit };
 
@@ -456,8 +476,10 @@ export class DiagnosticsStore {
   ): Map<string, { total: number; errors: number; warnings: number; notes: number }> {
     const result = new Map<string, { total: number; errors: number; warnings: number; notes: number }>();
     if (analysisIds.length === 0) return result;
+    // Cap to prevent unbounded IN clause (SQLite default SQLITE_MAX_VARIABLE_NUMBER = 999)
+    const cappedIds = analysisIds.slice(0, 500);
 
-    const placeholders = analysisIds.map(() => "?").join(",");
+    const placeholders = cappedIds.map(() => "?").join(",");
     const rows = this.db
       .prepare(
         `SELECT analysis_id,
@@ -469,7 +491,7 @@ export class DiagnosticsStore {
         WHERE analysis_id IN (${placeholders})
         GROUP BY analysis_id`
       )
-      .all(...analysisIds) as Array<{
+      .all(...cappedIds) as Array<{
       analysis_id: string;
       total: number;
       errors: number;

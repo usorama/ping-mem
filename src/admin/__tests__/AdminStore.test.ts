@@ -260,5 +260,11 @@ describe("AdminStore", () => {
       tempStore.createApiKey();
       expect(() => tempStore.close()).not.toThrow();
     });
+
+    test("should be idempotent (double close does not throw)", () => {
+      const tempStore = new AdminStore({ dbPath: ":memory:" });
+      tempStore.close();
+      expect(() => tempStore.close()).not.toThrow();
+    });
   });
 });

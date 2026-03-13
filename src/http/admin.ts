@@ -11,7 +11,7 @@ import { DiagnosticsStore } from "../diagnostics/DiagnosticsStore.js";
 import { EventStore } from "../storage/EventStore.js";
 import { ProjectScanner } from "../ingest/ProjectScanner.js";
 import { timingSafeStringEqual } from "../util/auth-utils.js";
-import { isProjectDirSafe as _isProjectDirSafeImpl } from "../util/path-safety.js";
+import { isProjectDirSafe as _isProjectDirSafe } from "../util/path-safety.js";
 import {
   deleteProjectSchema,
   rotateKeySchema,
@@ -67,7 +67,7 @@ function getRemoteIp(req: IncomingMessage): string {
       // log injection when the IP is later written to structured logs.
       // A trusted upstream proxy should have already validated this, but defense-in-depth
       // applies here because attacker-controlled XFF may reach this code before proxy validation.
-      if (firstIp) return firstIp.replace(/[^\w\.\:\,\[\]\-]/g, "?").slice(0, 64);
+      if (firstIp) return firstIp.replace(/[^\w\.\:\[\]\-]/g, "?").slice(0, 64);
     }
   }
   return req.socket?.remoteAddress ?? "unknown";
@@ -238,9 +238,8 @@ export function sanitizeAdminError(message: string): string {
  *  on all POSIX systems — any process (including untrusted containers sharing the host's
  *  /tmp) can create directories there. Including it would allow an authenticated attacker
  *  to trigger EventStore, DiagnosticsStore, and manifest deletions for arbitrary /tmp paths. */
-export function _isProjectDirSafe(projectDir: string): boolean {
-  return _isProjectDirSafeImpl(projectDir);
-}
+// Re-exported for test access. Implementation lives in util/path-safety.ts.
+export { _isProjectDirSafe };
 
 /** @internal Test-only: reset module-level rate-limit and lockout maps between test cases */
 export function _resetAdminRateLimitMapsForTest(): void {

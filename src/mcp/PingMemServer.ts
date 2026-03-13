@@ -138,6 +138,8 @@ export class PingMemServer {
   private diagnosticsStore: DiagnosticsStore | null = null;
   private modules: ToolModule[] = [];
   private state: SessionState;
+  private readonly ownsEventStore: boolean;
+  private readonly ownsDiagnosticsStore: boolean;
 
   constructor(config: PingMemServerConfig = {}) {
     const resolved = {
@@ -147,6 +149,7 @@ export class PingMemServer {
     };
 
     // Initialize core components — use shared EventStore if provided (avoids dual SQLite connections)
+    this.ownsEventStore = config.eventStore === undefined;
     this.eventStore = config.eventStore ?? new EventStore({ dbPath: resolved.dbPath });
     this.sessionManager = new SessionManager({
       eventStore: this.eventStore,
@@ -172,6 +175,7 @@ export class PingMemServer {
     const llmEntityExtractor = config.llmEntityExtractor ?? null;
 
     // Initialize diagnostics
+    this.ownsDiagnosticsStore = config.diagnosticsStore === undefined;
     this.diagnosticsStore =
       config.diagnosticsStore ??
       new DiagnosticsStore(
@@ -326,10 +330,13 @@ export class PingMemServer {
       await this.vectorIndex.close();
     }
 
-    // Close event store
-    await this.eventStore.close();
+    // Close event store only if we own it (not injected externally — caller closes it)
+    if (this.ownsEventStore) {
+      await this.eventStore.close();
+    }
 
-    if (this.diagnosticsStore) {
+    // Close diagnostics store only if we own it
+    if (this.ownsDiagnosticsStore && this.diagnosticsStore) {
       this.diagnosticsStore.close();
     }
 
