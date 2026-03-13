@@ -15,7 +15,6 @@ interface ProbeMetric {
 
 interface ProbeResult {
   source: ProbeSource;
-  status: "healthy" | "degraded" | "unhealthy";
   metrics: ProbeMetric[];
 }
 
@@ -23,6 +22,7 @@ interface ThresholdRule {
   metric: string;
   warnAbove?: number;
   critAbove?: number;
+  /** Reserved for future minimum-threshold rules (e.g., replica counts) */
   warnBelow?: number;
   critBelow?: number;
 }
@@ -192,7 +192,6 @@ export class HealthMonitor {
           // so there's nothing meaningful to threshold-check here. It runs in qualityTick only.
           this.checkThresholds({
             source: "sqlite",
-            status: this.componentToProbeStatus(snapshot.components.sqlite.status),
             metrics: [
               { name: "wal_size_bytes", value: sqliteMetrics.wal_size_bytes ?? 0, unit: "bytes" },
               { name: "freelist_ratio", value: sqliteMetrics.freelist_ratio ?? 0, unit: "ratio" },
@@ -264,7 +263,6 @@ export class HealthMonitor {
         const integrityOk = this.deps.eventStore.getIntegrityOk();
         this.checkThresholds({
           source: "sqlite",
-          status: integrityOk === 1 ? "healthy" : "unhealthy",
           metrics: [{ name: "integrity_ok", value: integrityOk, unit: "boolean" }],
         });
         // Clear any prior integrity failure alert on successful check
@@ -294,7 +292,6 @@ export class HealthMonitor {
 
           this.checkThresholds({
             source: "neo4j",
-            status: "healthy",
             metrics: [
               { name: "null_node_count", value: nullNodeCount, unit: "count" },
               { name: "orphan_node_count", value: orphanNodeCount, unit: "count" },
@@ -338,7 +335,6 @@ export class HealthMonitor {
             }
             this.checkThresholds({
               source: "qdrant",
-              status: "healthy",
               metrics: [{ name: "point_count_drift_pct", value: driftPct, unit: "percent" }],
             });
           }
@@ -359,17 +355,6 @@ export class HealthMonitor {
     } finally {
       this.qualityTickRunning = false;
     }
-  }
-
-  private componentToProbeStatus(status: HealthSnapshot["components"]["sqlite"]["status"]): "healthy" | "degraded" | "unhealthy" {
-    if (status === "healthy") {
-      return "healthy";
-    }
-    if (status === "degraded") {
-      return "degraded";
-    }
-    // "unhealthy" and "not_configured" both map to unhealthy for probe purposes
-    return "unhealthy";
   }
 
   private checkThresholds(result: ProbeResult): void {

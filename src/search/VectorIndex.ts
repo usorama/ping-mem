@@ -227,16 +227,8 @@ export class VectorIndex {
       )
     `);
 
-    // Create indexes for better query performance
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_vector_memories_session
-      ON vector_memories(session_id)
-    `);
-
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_vector_memories_category
-      ON vector_memories(category)
-    `);
+    // Note: vec0 virtual tables manage their own internal indexing.
+    // Standard CREATE INDEX is not supported on virtual tables.
   }
 
   /**
@@ -272,7 +264,6 @@ export class VectorIndex {
         session_id,
         content,
         category,
-        indexed_at,
         metadata
       FROM vector_memories
       WHERE memory_id = ?

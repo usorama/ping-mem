@@ -203,15 +203,6 @@ class MockVec0Database implements VectorDatabase {
     this.dbState.closed = true;
   }
 
-  // Test helper to check if database is closed
-  isClosed(): boolean {
-    return this.dbState.closed;
-  }
-
-  // Test helper to get storage size
-  getStorageSize(): number {
-    return this.storage.size;
-  }
 }
 
 // ============================================================================
