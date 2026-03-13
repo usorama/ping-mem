@@ -357,11 +357,16 @@ export class Neo4jClient {
   }
 
   /**
-   * Execute a write query and return result summary
+   * Execute a write query (CREATE / MERGE / SET / DELETE) and return the result.
    *
    * @param cypher - Cypher query string
    * @param params - Query parameters
-   * @returns First record from result or query summary info
+   * @returns If the query produces records, returns the first record as `T`.
+   *   If the query produces no records (e.g., a pure DELETE), returns a summary
+   *   object with `{ nodesCreated, nodesDeleted, relationshipsCreated,
+   *   relationshipsDeleted, propertiesSet }` cast as `unknown as T`.
+   *   Callers that need to distinguish between the two cases should check the
+   *   shape of the returned value or use `executeQuery` for read operations.
    * @throws {Neo4jQueryError} If query execution fails
    *
    * @example

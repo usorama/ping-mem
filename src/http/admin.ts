@@ -9,8 +9,11 @@ import { createLogger } from "../util/logger.js";
 // Admin rate limiting + brute-force protection (not routed through Hono)
 // ============================================================================
 
-/** Sliding-window rate limiter for admin API: 20 requests per minute per IP */
+/** Sliding-window rate limiter for admin API: 20 requests per minute per IP.
+ *  Count starts at 1 on the first request in a new window; the check fires when
+ *  count >= MAX (i.e., the (MAX+1)th request is blocked, exactly MAX are served). */
 const adminRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+/** Maximum requests served per window before the next one is blocked. */
 const ADMIN_RATE_LIMIT_MAX = 20;
 const ADMIN_RATE_LIMIT_WINDOW_MS = 60_000;
 
@@ -19,25 +22,64 @@ const authFailureMap = new Map<string, { count: number; lockedUntil: number }>()
 const AUTH_LOCKOUT_THRESHOLD = 5;
 const AUTH_LOCKOUT_MS = 30 * 60_000;
 
+/**
+ * Return the client IP address.
+ * When PING_MEM_BEHIND_PROXY=true (production: behind Nginx/Cloudflare), the
+ * direct socket is always the proxy, so we trust the X-Forwarded-For header.
+ */
 function getRemoteIp(req: IncomingMessage): string {
+  if (process.env.PING_MEM_BEHIND_PROXY === "true") {
+    const forwarded = req.headers["x-forwarded-for"];
+    if (forwarded) {
+      // X-Forwarded-For can be a comma-separated list; first entry is the original client
+      const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+      const firstIp = raw?.split(",")[0]?.trim();
+      if (firstIp) return firstIp;
+    }
+  }
   return req.socket?.remoteAddress ?? "unknown";
 }
 
-function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
+/** Check CSRF: compare the Origin (or Referer) header against the Host header
+ *  using exact URL-hostname equality, not substring matching.
+ *  Substring matching (`origin.includes(host)`) can be bypassed by a domain
+ *  whose name contains the server hostname as a substring (e.g., evil-myhost.com). */
+function isSameHostOrigin(header: string, host: string): boolean {
+  try {
+    return new URL(header).host === host;
+  } catch {
+    return false;
+  }
+}
+
+export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
   const ip = getRemoteIp(req);
   const now = Date.now();
+
+  // Evict expired entries to prevent unbounded map growth under IP churn / spoofing attacks.
+  for (const [key, entry] of adminRateLimitMap) {
+    if (now > entry.resetAt) adminRateLimitMap.delete(key);
+  }
+  // Evict fully-expired lockouts (locked window has passed AND failure count was reset to 0)
+  for (const [key, record] of authFailureMap) {
+    if (record.lockedUntil > 0 && now > record.lockedUntil && record.count === 0) {
+      authFailureMap.delete(key);
+    }
+  }
+
   const entry = adminRateLimitMap.get(ip);
   if (!entry || now > entry.resetAt) {
     adminRateLimitMap.set(ip, { count: 1, resetAt: now + ADMIN_RATE_LIMIT_WINDOW_MS });
     return true;
   }
-  entry.count++;
-  if (entry.count > ADMIN_RATE_LIMIT_MAX) {
+  // Check before incrementing so >= MAX blocks exactly when the quota is full
+  if (entry.count >= ADMIN_RATE_LIMIT_MAX) {
     const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
     res.writeHead(429, { "Retry-After": String(retryAfter), "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Too Many Requests", message: "Admin rate limit exceeded" }));
     return false;
   }
+  entry.count++;
   return true;
 }
 
@@ -65,10 +107,41 @@ function clearAuthFailures(ip: string): void {
   authFailureMap.delete(ip);
 }
 
-/** Sanitize error messages to prevent LLM API key leakage */
+/** Sanitize error messages to prevent LLM provider API key leakage.
+ *  Covers all 15 supported providers: OpenAI, Anthropic, OpenRouter, DeepSeek
+ *  (sk-...), Gemini (AIza...), Groq (gsk_...), Fireworks (fw_...), xAI (xai-...),
+ *  Together (togx_.../tog_...), Perplexity (pplx-...), and AWS Access Key IDs. */
 function sanitizeAdminError(message: string): string {
-  // Strip common API key patterns (OpenAI sk-..., Anthropic sk-ant-..., etc.)
-  return message.replace(/\b(sk-[A-Za-z0-9_-]{10,}|sk-ant-[A-Za-z0-9_-]{10,})\b/g, "[REDACTED]");
+  return (
+    message
+      // OpenAI, Anthropic (sk-ant-...), OpenRouter (sk-or-...), DeepSeek, etc.
+      .replace(/\bsk-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
+      // Gemini / Google AI Studio
+      .replace(/\bAIza[A-Za-z0-9_-]{35,}\b/g, "[REDACTED]")
+      // Groq
+      .replace(/\bgsk_[A-Za-z0-9]{10,}\b/g, "[REDACTED]")
+      // Fireworks AI
+      .replace(/\bfw_[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
+      // xAI / Grok
+      .replace(/\bxai-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
+      // Together AI
+      .replace(/\btog[a-z]?[_-][A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
+      // Perplexity
+      .replace(/\bpplx-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
+      // AWS Access Key IDs (AKIA/ASIA/AROA/AIDA prefix)
+      .replace(/\b(AKIA|ASIA|AROA|AIDA)[A-Z2-7]{16}\b/g, "[REDACTED]")
+  );
+}
+
+/** @internal Test-only: reset module-level rate-limit and lockout maps between test cases */
+export function _resetAdminRateLimitMapsForTest(): void {
+  adminRateLimitMap.clear();
+  authFailureMap.clear();
+}
+
+/** @internal Test-only: expose the auth failure map for lockout-expiry tests */
+export function _getAuthFailureMapForTest(): Map<string, { count: number; lockedUntil: number }> {
+  return authFailureMap;
 }
 import { AdminStore, type LLMConfigInput } from "../admin/AdminStore.js";
 import { ApiKeyManager } from "../admin/ApiKeyManager.js";
@@ -164,16 +237,18 @@ export async function handleAdminRequest(
     // CSRF: for state-changing methods, verify Origin/Referer matches Host when present.
     // X-API-Key is a non-simple header — browsers send CORS preflight for it, which the
     // raw Node.js handler doesn't handle permissively. This is an additional defense layer.
+    // isSameHostOrigin() uses new URL().host for exact hostname+port comparison to prevent
+    // bypass via a domain whose name contains the server hostname as a substring.
     if (req.method !== "GET" && req.method !== "HEAD") {
       const host = req.headers.host;
       const origin = req.headers["origin"];
       const referer = req.headers["referer"];
-      if (origin && host && !origin.includes(host)) {
+      if (origin && host && !isSameHostOrigin(origin, host)) {
         res.writeHead(403, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Forbidden", message: "Cross-origin request rejected" }));
         return true;
       }
-      if (!origin && referer && host && !referer.includes(host)) {
+      if (!origin && referer && host && !isSameHostOrigin(referer, host)) {
         res.writeHead(403, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Forbidden", message: "Cross-origin request rejected" }));
         return true;

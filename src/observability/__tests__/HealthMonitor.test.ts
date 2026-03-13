@@ -418,27 +418,10 @@ describe("HealthMonitor", () => {
     expect(alert?.severity).toBe("critical");
   });
 
-  test("Qdrant baseline bootstrap: zero baseline + non-zero pointCount sets baseline without drift alert", async () => {
-    const monitor = makeMonitor();
-    const internals = getInternals(monitor);
-
-    // Simulate first ingest: baseline was 0, now 1000 points
-    internals.baselineQdrantCount = 0;
-    internals.checkThresholds({
-      source: "qdrant",
-      status: "healthy",
-      metrics: [{ name: "point_count_drift_pct", value: 0, unit: "percent" }],
-    });
-
-    // Manually trigger the bootstrap path the way qualityTick would
-    internals.baselineQdrantCount = 0;
-    // Setting baseline directly simulates what qualityTick does on bootstrap
-    internals.baselineQdrantCount = 1000;
-
-    // No drift alert should fire (bootstrap, not drift)
-    expect(monitor.getStatus().activeAlerts.some((a) => a.key === "qdrant:point_count_drift_pct")).toBe(false);
-    expect(internals.baselineQdrantCount).toBe(1000);
-  });
+  // NOTE: Qdrant baseline bootstrap is fully exercised by the end-to-end qualityTick()
+  // test below ("Qdrant bootstrap end-to-end"). A previous test here directly mutated
+  // internals.baselineQdrantCount without calling qualityTick(), which tested no actual
+  // code path. It has been removed in favour of the proper end-to-end test.
 
   test("Qdrant drift ratchet: baseline advances when drift <= 15%", () => {
     const monitor = makeMonitor();

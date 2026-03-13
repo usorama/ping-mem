@@ -419,13 +419,19 @@ export class HealthMonitor {
     };
     this.activeAlerts.set(key, alert);
 
-    // Evict oldest alerts until map is within cap (loop handles burst scenarios)
-    while (this.activeAlerts.size > HealthMonitor.MAX_ALERTS) {
-      const oldest = Array.from(this.activeAlerts.entries())
-        .sort(([, a], [, b]) => (a.timestamp < b.timestamp ? -1 : 1))[0];
-      if (!oldest) break;
-      this.activeAlerts.delete(oldest[0]);
-      this.lastAlerts.delete(oldest[0]);
+    // Evict oldest alerts until map is within cap.
+    // Sort once outside the loop (O(N log N)) rather than re-sorting on each iteration
+    // (which would be O(N² log N) under a burst scenario where many alerts arrive at once).
+    if (this.activeAlerts.size > HealthMonitor.MAX_ALERTS) {
+      const sorted = Array.from(this.activeAlerts.entries())
+        .sort(([, a], [, b]) => (a.timestamp < b.timestamp ? -1 : 1));
+      let idx = 0;
+      while (this.activeAlerts.size > HealthMonitor.MAX_ALERTS && idx < sorted.length) {
+        const entry = sorted[idx++];
+        if (!entry) break;
+        this.activeAlerts.delete(entry[0]);
+        this.lastAlerts.delete(entry[0]);
+      }
     }
 
     if (severity === "critical") {

@@ -354,6 +354,12 @@ export class QdrantClientWrapper {
    * @param vectorData - Vector embedding with metadata
    */
   async storeVector(vectorData: VectorEmbedding): Promise<void> {
+    // State invariant: usingFallback is set to true inside connect() when the
+    // initial Qdrant connection fails. While usingFallback is true the data path
+    // routes to the in-memory fallback, so the half-open guard below is only
+    // reached when usingFallback is false (i.e., Qdrant connected successfully).
+    // The circuit-breaker self-heals exclusively through healthCheck() and
+    // createCollectionIfNotExists() which always route through servicePolicy.execute().
     if (!this.connected && this.servicePolicy.state !== "half-open") {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."

@@ -131,7 +131,8 @@ export interface Checkpoint {
  */
 export class EventStore {
   private db: Database;
-  private closed = false;
+  /** Stored promise so concurrent close() callers all await the same operation */
+  private closePromise: Promise<void> | undefined;
   private config: {
     dbPath: string;
     walMode: boolean;
@@ -812,14 +813,20 @@ export class EventStore {
   }
 
   /**
-   * Close database connection
+   * Close database connection.
+   *
+   * Idempotent and safe to call concurrently: all callers receive the same
+   * Promise so db.close() executes exactly once even if two async callers race.
    */
   async close(): Promise<void> {
-    if (this.closed) {
-      return;
+    if (!this.closePromise) {
+      // Assignment is synchronous — any concurrent caller that reaches here before
+      // the microtask runs will find closePromise already set and return the same promise.
+      this.closePromise = Promise.resolve().then(() => {
+        this.db.close();
+      });
     }
-    this.closed = true;
-    this.db.close();
+    return this.closePromise;
   }
 
   /**
