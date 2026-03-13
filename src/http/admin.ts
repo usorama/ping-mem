@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import * as fs from "fs/promises";
+import * as fsSync from "fs";
 import * as path from "path";
 import * as crypto from "node:crypto";
 
@@ -238,7 +239,16 @@ export function sanitizeAdminError(message: string): string {
  *  /tmp) can create directories there. Including it would allow an authenticated attacker
  *  to trigger EventStore, DiagnosticsStore, and manifest deletions for arbitrary /tmp paths. */
 export function _isProjectDirSafe(projectDir: string): boolean {
-  const resolved = path.resolve(projectDir);
+  // Canonicalize with realpathSync to resolve symlinks before the containment check.
+  // path.resolve alone does not follow symlinks, so /home/user/link -> /etc would
+  // pass a lexical prefix test but actually point outside the allowed root.
+  // Fall back to path.resolve for non-existent paths (symlink escapes only apply to existing paths).
+  let resolved: string;
+  try {
+    resolved = fsSync.realpathSync(path.resolve(projectDir));
+  } catch {
+    resolved = path.resolve(projectDir);
+  }
   // Validate HOME before including: HOME='/' or an unusually short value (e.g. HOME='' or HOME='/')
   // would expand the allowed set to the entire filesystem, enabling path traversal to any location.
   // Require HOME to be an absolute path of meaningful length (> 3 chars, e.g. not '/' or '/a').
@@ -1011,6 +1021,11 @@ function renderAdminPage(nonce: string): string {
         console.error("rotateKey: missing DOM elements newKeyBox/newKeyValue");
         return;
       }
+      // Sync the in-memory API key so subsequent apiFetch calls (including refreshKeys)
+      // use the new key instead of the now-deactivated old one.
+      state.apiKey = result.key;
+      const apiKeyInput = document.getElementById("currentApiKey") as HTMLInputElement | null;
+      if (apiKeyInput) apiKeyInput.value = result.key;
       value.textContent = result.key;
       box.style.display = "block";
       refreshKeys().catch((err) => console.error("refreshKeys failed:", err));

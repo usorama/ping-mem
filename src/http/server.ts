@@ -169,11 +169,14 @@ export async function startHTTPServer(): Promise<void> {
 
     const shutdownErrors: string[] = [];
 
-    try { await new Promise<void>((resolve, reject) => { httpServer.close((err) => (err ? reject(err) : resolve())); }); }
-    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`httpServer: ${msg}`); }
-
+    // Stop the app server first to drain SSE streams and in-flight requests.
+    // httpServer.close() blocks until all connections end, so stopping SSE streams
+    // before closing the HTTP listener prevents indefinite shutdown hangs.
     try { await serverInstance.stop(); }
     catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`serverInstance: ${msg}`); }
+
+    try { await new Promise<void>((resolve, reject) => { httpServer.close((err) => (err ? reject(err) : resolve())); }); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`httpServer: ${msg}`); }
 
     try { if (services.neo4jClient) await services.neo4jClient.disconnect(); }
     catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`neo4j: ${msg}`); }

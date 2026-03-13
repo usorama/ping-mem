@@ -15,6 +15,7 @@ import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import * as path from "path";
+import * as fs from "fs";
 import { createLogger } from "../util/logger.js";
 
 const log = createLogger("REST Server");
@@ -91,8 +92,18 @@ import type { QdrantClientWrapper } from "../search/QdrantClient.js";
  * Checks whether a resolved projectDir is within an allowed root.
  * Mirrors _isProjectDirSafe from admin.ts: excludes /tmp (world-writable)
  * and validates HOME length to prevent filesystem-wide traversal.
+ * Uses fs.realpathSync to canonicalize symlinks before the containment check,
+ * preventing symlink escapes (e.g. /home/user/link -> /etc).
  */
-function isProjectDirSafe(resolved: string): boolean {
+function isProjectDirSafe(inputPath: string): boolean {
+  // Canonicalize with realpathSync to resolve symlinks before the containment check.
+  // Fall back to path.resolve for non-existent paths (symlink escapes only apply to existing paths).
+  let resolved: string;
+  try {
+    resolved = fs.realpathSync(path.resolve(inputPath));
+  } catch {
+    resolved = path.resolve(inputPath);
+  }
   const home = process.env["HOME"];
   const validHome = home && home.length > 3 && path.isAbsolute(home) ? home : null;
   const allowedRoots = [...(validHome ? [validHome] : []), "/projects", "/Users", "/home"];
@@ -1635,9 +1646,17 @@ export class RESTPingMemServer {
         ?? path.resolve(process.cwd(), "src/static");
       const fullPath = path.resolve(staticDir, filePath);
 
-      // Security: prevent path traversal — canonicalize and compare with trailing separator
-      const staticDirNorm = path.resolve(staticDir) + path.sep;
-      if (!fullPath.startsWith(staticDirNorm) && fullPath !== path.resolve(staticDir)) {
+      // Security: prevent path traversal — canonicalize with realpath to resolve symlinks,
+      // then compare with trailing separator to prevent escape via symlink targets.
+      let canonicalPath: string;
+      let canonicalBase: string;
+      try {
+        canonicalPath = fs.realpathSync(fullPath);
+        canonicalBase = fs.realpathSync(path.resolve(staticDir));
+      } catch {
+        return c.text("Not Found", 404);
+      }
+      if (!canonicalPath.startsWith(canonicalBase + path.sep) && canonicalPath !== canonicalBase) {
         log.warn("Path traversal attempt blocked", { filePath });
         return c.text("Forbidden", 403);
       }
