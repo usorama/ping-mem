@@ -142,12 +142,6 @@ export class VectorDimensionMismatchError extends VectorIndexError {
   }
 }
 
-export class VectorNotFoundError extends VectorIndexError {
-  constructor(memoryId: MemoryId) {
-    super(`Vector not found for memory ID: ${memoryId}`, "VECTOR_NOT_FOUND");
-  }
-}
-
 // ============================================================================
 // Vector Index Implementation
 // ============================================================================
@@ -169,6 +163,13 @@ export class VectorIndex {
     // Extract database and loader from config (not part of stored config)
     const { database, sqliteVecLoader, ...restConfig } = config;
     this.config = { ...DEFAULT_CONFIG, ...restConfig };
+
+    // Runtime-validate vectorDimensions to prevent SQL injection from config values
+    const dims = Math.floor(Number(this.config.vectorDimensions));
+    if (!Number.isFinite(dims) || dims < 1 || dims > 65536) {
+      throw new VectorIndexError("vectorDimensions must be a positive integer (1-65536)", "INVALID_CONFIG");
+    }
+    this.config.vectorDimensions = dims;
 
     // Use injected database or create a new one
     if (database) {
@@ -226,17 +227,6 @@ export class VectorIndex {
       )
     `);
 
-    // Create companion table for relevance tracking
-    // Note: vec0 virtual tables don't support ALTER TABLE
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS memory_relevance (
-        memory_id TEXT PRIMARY KEY,
-        last_accessed TEXT,
-        access_count INTEGER DEFAULT 0,
-        relevance_score REAL DEFAULT 1.0
-      )
-    `);
-
     // Create indexes for better query performance
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_vector_memories_session
@@ -246,16 +236,6 @@ export class VectorIndex {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_vector_memories_category
       ON vector_memories(category)
-    `);
-
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_memory_relevance_score
-      ON memory_relevance(relevance_score)
-    `);
-
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_memory_relevance_accessed
-      ON memory_relevance(last_accessed)
     `);
   }
 
@@ -317,15 +297,17 @@ export class VectorIndex {
     `);
   }
 
-  /**
-   * Store a vector embedding for a memory
-   */
+  /** Throws VectorIndexError if the index has been closed */
   private ensureOpen(): void {
     if (this.closed) {
       throw new VectorIndexError("VectorIndex has been closed", "INDEX_CLOSED");
     }
   }
 
+  /**
+   * Store a vector embedding for a memory.
+   * Async signature is intentional for API compatibility with future async backends.
+   */
   async storeVector(vectorData: VectorEmbedding): Promise<void> {
     this.ensureOpen();
     if (!this.insertStmt) {
@@ -383,8 +365,8 @@ export class VectorIndex {
       );
     }
 
-    const limit = options.limit || 10;
-    const threshold = options.threshold || this.config.similarityThreshold;
+    const limit = options.limit ?? 10;
+    const threshold = options.threshold ?? this.config.similarityThreshold;
 
     try {
       let stmt = this.searchStmt;
@@ -434,15 +416,20 @@ export class VectorIndex {
         metadata: string | null;
       }>;
 
-      return rows.map((row) => ({
-        memoryId: row.memory_id,
-        sessionId: row.session_id,
-        content: row.content,
-        similarity: row.similarity,
-        distance: row.distance,
-        indexedAt: new Date(row.indexed_at),
-        metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
-      }));
+      return rows.map((row) => {
+        const result: VectorSearchResult = {
+          memoryId: row.memory_id,
+          sessionId: row.session_id,
+          content: row.content,
+          similarity: row.similarity,
+          distance: row.distance,
+          indexedAt: new Date(row.indexed_at),
+        };
+        if (row.metadata) {
+          result.metadata = JSON.parse(row.metadata) as Record<string, unknown>;
+        }
+        return result;
+      });
     } catch (error) {
       throw new VectorIndexError(
         `Semantic search failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -521,8 +508,9 @@ export class VectorIndex {
       throw new VectorIndexError("Database not properly initialized", "DB_NOT_INITIALIZED");
     }
 
+    const safeLimit = Math.min(Math.max(limit, 0), 10_000);
     try {
-      const rows = this.listStmt.all(sessionId, limit) as Array<{
+      const rows = this.listStmt.all(sessionId, safeLimit) as Array<{
         memory_id: string;
         session_id: string;
         content: string;
@@ -553,7 +541,9 @@ export class VectorIndex {
   }
 
   /**
-   * Get vector index statistics
+   * Get vector index statistics.
+   * Note: dbPath is included for diagnostics/admin use only and should not be
+   * exposed to untrusted clients via public API endpoints.
    */
   async getStats(): Promise<{
     totalVectors: number;

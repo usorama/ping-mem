@@ -55,6 +55,8 @@ export function isProjectDirSafe(inputPath: string): boolean {
   const home = process.env["HOME"];
   const validHome =
     home && home.length >= 5 && path.isAbsolute(home) && !DENIED_ROOTS.has(home) ? home : null;
+  // /Users (macOS), /home (Linux), /projects (Docker volume mount) cover standard dev environments.
+  // Broader roots like /opt or /data are intentionally excluded to minimize attack surface.
   const allowedRoots = [...(validHome ? [validHome] : []), "/projects", "/Users", "/home"];
   // Normalize root to ensure trailing separator (handles HOME="/custom-home/" edge case)
   return allowedRoots.some((root) => {

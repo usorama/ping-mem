@@ -364,6 +364,7 @@ export class HealthMonitor {
     if (status === "degraded") {
       return "degraded";
     }
+    // "unhealthy" and "not_configured" both map to unhealthy for probe purposes
     return "unhealthy";
   }
 

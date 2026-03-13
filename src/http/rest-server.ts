@@ -44,7 +44,6 @@ import {
   type SessionId,
   type MemoryCategory,
   type MemoryPriority,
-  type MemoryPrivacy,
 } from "../types/index.js";
 
 import type {
@@ -57,6 +56,9 @@ import type {
 } from "./types.js";
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
 import { MemoryPubSub } from "../pubsub/index.js";
+
+/** Maximum number of cached MemoryManager instances before LRU eviction */
+const MAX_MEMORY_MANAGERS = 200;
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
@@ -413,7 +415,11 @@ export class RESTPingMemServer {
           );
         }
 
-        await this.sessionManager.endSession(this.currentSessionId);
+        const endingSessionId = this.currentSessionId;
+        await this.sessionManager.endSession(endingSessionId);
+        // Evict cached MemoryManager for ended session to prevent unbounded map growth
+        this.memoryManagers.delete(endingSessionId);
+        this.managerPromises.delete(endingSessionId);
         this.currentSessionId = null;
 
         return c.json<RESTSuccessResponse<{ message: string }>>({
@@ -1135,8 +1141,9 @@ export class RESTPingMemServer {
 
         const memoryManager = await this.getMemoryManager(sessionId);
 
-        // Build query params
-        const queryParams: Record<string, unknown> = { query };
+        // Build query params — map query text to keyPattern for wildcard matching
+        // (MemoryQuery has no `query` field; `keyPattern` does the text-based search)
+        const queryParams: Record<string, unknown> = { keyPattern: `*${query}*` };
 
         if (c.req.query("category")) {
           const rawCategory = c.req.query("category")!;
@@ -1432,7 +1439,7 @@ export class RESTPingMemServer {
           return c.json<RESTSuccessResponse<Record<string, unknown>>>({ data: row });
         }
 
-        const rows = db.prepare("SELECT * FROM agent_quotas ORDER BY updated_at DESC").all();
+        const rows = db.prepare("SELECT * FROM agent_quotas ORDER BY updated_at DESC LIMIT 200").all();
         return c.json<RESTSuccessResponse<{ agents: unknown[] }>>({ data: { agents: rows } });
       } catch (error) {
         return this.handleError(c, error);
@@ -1677,6 +1684,10 @@ export class RESTPingMemServer {
     // Serve static files from src/static/
     this.app.get("/static/*", async (c) => {
       const filePath = c.req.path.slice("/static/".length);
+      // Reject null bytes early — can truncate paths in C-based syscalls
+      if (filePath.includes("\0")) {
+        return c.text("Bad Request", 400);
+      }
       const staticDir = process.env.PING_MEM_STATIC_DIR
         ?? path.resolve(process.cwd(), "src/static");
       const fullPath = path.resolve(staticDir, filePath);
@@ -1694,8 +1705,10 @@ export class RESTPingMemServer {
       } catch {
         return c.text("Not Found", 404);
       }
+      // Sanitize filePath for all log calls in this handler to prevent log injection
+      const safeFilePath = filePath.replace(/[\x00-\x1f]/g, "?").slice(0, 200);
       if (!canonicalPath.startsWith(canonicalBase + path.sep) && canonicalPath !== canonicalBase) {
-        log.warn("Path traversal attempt blocked", { filePath });
+        log.warn("Path traversal attempt blocked", { filePath: safeFilePath });
         return c.text("Forbidden", 403);
       }
 
@@ -1709,7 +1722,7 @@ export class RESTPingMemServer {
           headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=3600" },
         });
       } catch (err) {
-        log.error("Error serving static file", { filePath, error: err instanceof Error ? err.message : String(err) });
+        log.error("Error serving static file", { filePath: safeFilePath, error: err instanceof Error ? err.message : String(err) });
         return c.text("Internal Server Error", 500);
       }
     });
@@ -1935,6 +1948,13 @@ export class RESTPingMemServer {
 
     const manager = new MemoryManager(config);
     await manager.hydrate();
+
+    // Evict oldest entries if map exceeds cap to prevent unbounded memory growth
+    if (this.memoryManagers.size >= MAX_MEMORY_MANAGERS) {
+      const oldest = this.memoryManagers.keys().next().value;
+      if (oldest) this.memoryManagers.delete(oldest);
+    }
+
     this.memoryManagers.set(sessionId, manager);
     this.managerPromises.delete(sessionId);
     return manager;
@@ -1950,7 +1970,14 @@ export class RESTPingMemServer {
    */
   async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Convert Node.js HTTP request to Web Standard Request
-    const url = new URL(req.url ?? "", "http://localhost");
+    let url: URL;
+    try {
+      url = new URL(req.url ?? "", "http://localhost");
+    } catch {
+      res.statusCode = 400;
+      res.end("Bad Request");
+      return;
+    }
 
     // Build request headers
     const headers = new Headers();
@@ -2096,6 +2123,14 @@ const CONTENT_TYPE_MAP: Record<string, string> = {
   json: "application/json",
   svg: "image/svg+xml",
   png: "image/png",
+  ico: "image/x-icon",
+  gif: "image/gif",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  woff: "font/woff",
+  woff2: "font/woff2",
+  map: "application/json",
 };
 
 function getContentType(filePath: string): string {

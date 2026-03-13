@@ -130,5 +130,13 @@ describe("isProjectDirSafe", () => {
       expect(isProjectDirSafe("/var/tmp/sandbox")).toBe(false);
       expect(isProjectDirSafe("/private/tmp/sandbox")).toBe(false);
     });
+
+    test("rejects /tmp regardless of HOME setting", () => {
+      // /tmp must be rejected even when HOME is unset or set to something else
+      delete process.env["HOME"];
+      expect(isProjectDirSafe("/tmp/sandbox")).toBe(false);
+      process.env["HOME"] = "/custom-home";
+      expect(isProjectDirSafe("/tmp/sandbox")).toBe(false);
+    });
   });
 });

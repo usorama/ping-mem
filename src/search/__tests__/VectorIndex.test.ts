@@ -7,7 +7,7 @@
  * @module search/__tests__/VectorIndex.test
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   VectorIndex,
   VectorIndexError,
@@ -288,7 +288,6 @@ describe("VectorIndex", () => {
   let vectorIndex: VectorIndex;
 
   beforeEach(() => {
-    vi.clearAllMocks();
     vectorIndex = createTestVectorIndex();
   });
 
