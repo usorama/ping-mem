@@ -534,8 +534,16 @@ describe("admin.ts - sanitizeAdminError", () => {
   });
 
   it("redacts AWS Access Key IDs (AKIA/ASIA/AROA/AIDA)", () => {
+    // Standard access key IDs (AKIA prefix)
     expect(sanitizeAdminError("AKIAIOSFODNN7EXAMPLE credential")).toBe("[REDACTED] credential");
+    // STS temporary credentials (ASIA prefix)
     expect(sanitizeAdminError("ASIAIOSFODNN7EXAMPLE credential")).toBe("[REDACTED] credential");
+    // IAM role principal IDs (AROA prefix)
+    expect(sanitizeAdminError("AROAIOSFODNN7EXAMPLE credential")).toBe("[REDACTED] credential");
+    // IAM assumed-role principal IDs (AIDA prefix)
+    expect(sanitizeAdminError("AIDAIOSFODNN7EXAMPLE credential")).toBe("[REDACTED] credential");
+    // Keys containing digits 0, 1, 8, 9 (previously excluded by erroneous base32 charset)
+    expect(sanitizeAdminError("AKIA5GSG0CFZ3LN1JPM9 leaked")).toBe("[REDACTED] leaked");
   });
 
   it("does not modify messages without API keys", () => {
@@ -578,6 +586,17 @@ describe("admin.ts - isSameHostOrigin", () => {
   it("returns false for malformed URLs", () => {
     expect(isSameHostOrigin("not-a-url", "myhost.com")).toBe(false);
     expect(isSameHostOrigin("", "myhost.com")).toBe(false);
+  });
+
+  it("WHATWG URL parser strips default ports — 'http://myhost.com:80' matches 'myhost.com'", () => {
+    // The WHATWG URL parser strips scheme-default ports: new URL("http://myhost.com:80").host
+    // returns "myhost.com" (port 80 stripped for http, port 443 stripped for https).
+    // This aligns with browser Fetch-spec behaviour, so explicit-default-port Origin headers
+    // from browsers will correctly match the plain Host header.
+    expect(isSameHostOrigin("http://myhost.com:80", "myhost.com")).toBe(true);
+    expect(isSameHostOrigin("https://myhost.com:443", "myhost.com")).toBe(true);
+    // Non-default ports are preserved and produce a mismatch
+    expect(isSameHostOrigin("http://myhost.com:8080", "myhost.com")).toBe(false);
   });
 });
 

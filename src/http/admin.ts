@@ -79,6 +79,11 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
   const now = Date.now();
 
   // Evict expired entries to prevent unbounded map growth under IP churn / spoofing attacks.
+  // Both scans are O(n) in the number of unique IPs seen. This is acceptable because the admin
+  // endpoint is not a high-throughput path (single human operator). Under an active IP-churn
+  // attack the maps grow transiently, but AUTH_FAILURE_STALE_MS and the rate-limit window
+  // bound the maximum entry lifetime. A hard cap or background sweep would be more robust
+  // under extreme sustained attack but adds complexity not warranted for this use case.
   for (const [key, entry] of adminRateLimitMap) {
     if (now > entry.resetAt) adminRateLimitMap.delete(key);
   }
@@ -182,8 +187,9 @@ export function sanitizeAdminError(message: string): string {
       .replace(/\btog[a-z]?[_-][A-Za-z0-9]{32,}\b/g, "[REDACTED]")
       // Perplexity
       .replace(/\bpplx-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
-      // AWS Access Key IDs (AKIA/ASIA/AROA/AIDA prefix)
-      .replace(/\b(AKIA|ASIA|AROA|AIDA)[A-Z2-7]{16}\b/g, "[REDACTED]")
+      // AWS Access Key IDs (AKIA/ASIA/AROA/AIDA prefix + 16 uppercase alphanumeric chars = 20 total)
+      // [A-Z0-9] not [A-Z2-7]: AWS uses full alphanumeric, not base32 (which excludes 0,1,8,9)
+      .replace(/\b(AKIA|ASIA|AROA|AIDA)[A-Z0-9]{16}\b/g, "[REDACTED]")
   );
 }
 
@@ -293,6 +299,8 @@ export async function handleAdminRequest(
         res.end(JSON.stringify({ error: "Forbidden", message: "Cross-origin request rejected" }));
         return true;
       }
+      // No origin AND no referer: allow — server-to-server / CLI callers omit browser headers;
+      // X-API-Key is the primary auth layer for those callers.
     }
     await handleAdminApi(req, res, deps, pathName);
     return true;
@@ -328,7 +336,7 @@ async function handleAdminApi(
       const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
       const isSafe = allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
       if (!isSafe) {
-        return respondJson(res, 400, { error: "projectDir must not contain path traversal sequences" });
+        return respondJson(res, 400, { error: "projectDir must be a subdirectory of an allowed root (not the root itself, and not outside allowed paths)" });
       }
     }
 
@@ -547,7 +555,7 @@ function deleteProjectManifest(projectDir: string): void {
   const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home", "/tmp"];
   const isSafe = allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
   if (!isSafe) {
-    throw new Error("projectDir must not contain path traversal sequences");
+    throw new Error("projectDir must be a subdirectory of an allowed root (not the root itself, and not outside allowed paths)");
   }
   const manifestPath = path.join(resolved, ".ping-mem", "manifest.json");
   if (fs.existsSync(manifestPath)) {
