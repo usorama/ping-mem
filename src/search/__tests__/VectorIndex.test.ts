@@ -62,10 +62,10 @@ class MockStatement implements VectorStatement {
       this.storage.set(memoryId, {
         memory_id: memoryId,
         session_id: sessionId,
-        content: content,
-        category: category,
+        content,
+        category,
         indexed_at: indexedAt,
-        metadata: metadata,
+        metadata,
         embedding: embedding,
       });
       return { changes: 1 };
@@ -147,6 +147,7 @@ class MockStatement implements VectorStatement {
 
       return Array.from(this.storage.values())
         .filter((row) => row.session_id === sessionId)
+        .sort((a, b) => b.indexed_at.localeCompare(a.indexed_at))
         .slice(0, limit);
     }
 
@@ -530,6 +531,7 @@ describe("VectorIndex", () => {
         threshold: 0.5,
       });
 
+      expect(results.length).toBeGreaterThan(0);
       results.forEach((result) => {
         expect(["similar-1", "similar-2"]).toContain(result.memoryId);
       });

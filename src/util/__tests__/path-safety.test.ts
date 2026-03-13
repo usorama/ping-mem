@@ -77,6 +77,9 @@ describe("isProjectDirSafe", () => {
       // relative path is not absolute, so HOME should not be used as an allowed root.
       // Paths under /etc should still be rejected regardless.
       expect(isProjectDirSafe("/etc/passwd")).toBe(false);
+      // Verify that absolute paths outside allowed roots are still rejected
+      // even when HOME is relative (HOME is not added to allowed roots)
+      expect(isProjectDirSafe("/opt/data/something")).toBe(false);
     });
 
     test("handles undefined HOME gracefully", () => {

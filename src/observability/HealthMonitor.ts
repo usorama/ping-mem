@@ -283,10 +283,14 @@ export class HealthMonitor {
       if (neo4jClient && (neo4jClient.isConnected() || neo4jClient.getCircuitState() === "half-open")) {
         try {
           const nullRows = await neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.nullProperties);
-          const nullNodeCount = nullRows.reduce((sum, row) => sum + Number(row.cnt), 0);
+          const nullNodeCount = nullRows.reduce((sum, row) => {
+            const val = Number(row.cnt);
+            return sum + (Number.isFinite(val) ? val : 0);
+          }, 0);
 
           const orphanRows = await neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.orphanNodes);
-          const orphanNodeCount = Number(orphanRows[0]?.cnt ?? 0);
+          const rawOrphan = Number(orphanRows[0]?.cnt ?? 0);
+          const orphanNodeCount = Number.isFinite(rawOrphan) ? rawOrphan : 0;
 
           this.checkThresholds({
             source: "neo4j",

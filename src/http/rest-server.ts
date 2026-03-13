@@ -50,9 +50,6 @@ import type {
   HTTPServerConfig,
   RESTErrorResponse,
   RESTSuccessResponse,
-  ContextSaveRequest,
-  ContextSearchParams,
-  CheckpointRequest,
 } from "./types.js";
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
 import { MemoryPubSub } from "../pubsub/index.js";
@@ -368,6 +365,12 @@ export class RESTPingMemServer {
           );
         }
         const body = parseResult.data;
+        if (body.projectDir !== undefined && !isProjectDirSafe(body.projectDir)) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "projectDir must be within an allowed root" },
+            400
+          );
+        }
         const session = await this.sessionManager.startSession({
           name: body.name,
           ...(body.projectDir !== undefined ? { projectDir: body.projectDir } : {}),
