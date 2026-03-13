@@ -17,10 +17,13 @@ import * as path from "path";
  * - /proc, /sys, /dev: kernel pseudo-filesystems
  * - /boot, /sbin, /bin: system binaries
  * - /snap, /run, /srv, /mnt, /media: system mount points
+ * - /lost+found: ext filesystem recovery directory
+ * - /var/tmp, /private/tmp: alternative temp directories (macOS, Linux)
  */
 const DENIED_ROOTS = new Set([
   "/root", "/tmp", "/proc", "/sys", "/dev", "/boot", "/sbin", "/bin",
   "/snap", "/run", "/srv", "/mnt", "/media", "/lost+found",
+  "/var/tmp", "/private/tmp",
 ]);
 
 /**

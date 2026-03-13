@@ -540,11 +540,11 @@ export class SessionManager {
    * PingMemServer and RESTPingMemServer).
    */
   async close(): Promise<void> {
-    // Clear all checkpoint timers
     for (const timer of this.checkpointTimers.values()) {
       clearInterval(timer);
     }
     this.checkpointTimers.clear();
+    // Does NOT close EventStore — caller that created it owns its lifecycle.
   }
 
   /**

@@ -237,8 +237,11 @@ export class AdminStore {
   }
 
   hasAnyActiveKey(): boolean {
-    const count = (this.stmtCountActiveKeys.get() as { count: number }).count;
-    return count > 0;
+    const row = this.stmtCountActiveKeys.get() as { count: number } | undefined;
+    if (!row) {
+      throw new Error("hasAnyActiveKey: admin_api_keys table query failed (schema corruption?)");
+    }
+    return row.count > 0;
   }
 
   isApiKeyValid(rawKey: string): boolean {

@@ -1697,7 +1697,11 @@ export class RESTPingMemServer {
    * Uses error.name (explicitly set in each error constructor via this.name = "...")
    * which survives minification, unlike error.constructor.name which reflects the
    * minified class variable name. An exact Set avoids false-positive substring
-   * matches (e.g., a hypothetical "MemoryManagerError" base class).
+   * matches from base classes or unrelated errors.
+   *
+   * Note: "MemoryManagerError" is intentionally excluded — it represents
+   * infrastructure failures (VECTOR_INDEX_NOT_CONFIGURED, AGENT_EXPIRED)
+   * that map via error.code or default to 500.
    */
   private static readonly DOMAIN_ERROR_NAMES = new Set([
     "MemoryKeyNotFoundError",
@@ -1721,9 +1725,18 @@ export class RESTPingMemServer {
     const statusCode = this.getStatusCode(error);
     const rawMessage = error instanceof Error ? error.message : "Unknown error";
 
+    // Truncate and sanitize log messages to prevent log injection from user-controlled
+    // input embedded in error messages (e.g., session IDs, memory keys, file paths).
+    const sanitizedMessage = rawMessage.replace(/[\r\n]/g, "?").slice(0, 200);
+
     if (statusCode >= 500) {
       const requestId = crypto.randomUUID().slice(0, 8);
-      log.error(`Error [${requestId}] ${c.req.method} ${c.req.path}`, { error: rawMessage });
+      log.error("Request error", {
+        requestId,
+        method: c.req.method,
+        path: c.req.path.replace(/[\r\n\t]/g, "?").slice(0, 200),
+        error: sanitizedMessage,
+      });
       return c.json(
         { error: this.getErrorName(statusCode), message: `An internal error occurred (ref: ${requestId})` },
         statusCode as ContentfulStatusCode
@@ -1737,7 +1750,7 @@ export class RESTPingMemServer {
       RESTPingMemServer.DOMAIN_ERROR_NAMES.has(error.name);
     const safeMessage = isDomainError ? rawMessage : this.getErrorName(statusCode);
 
-    log.error("Error", { message: rawMessage });
+    log.error("Error", { message: sanitizedMessage });
     return c.json(
       { error: this.getErrorName(statusCode), message: safeMessage },
       statusCode as ContentfulStatusCode
@@ -1751,7 +1764,7 @@ export class RESTPingMemServer {
     if (error instanceof Error) {
       // Use error.name for reliable mapping (explicitly set in each error constructor)
       const name = error.name;
-      if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError" || name === "SessionNotFoundError") return 404;
+      if (name === "MemoryKeyNotFoundError" || name === "MemoryNotFoundError" || name === "AgentNotRegisteredError" || name === "SessionNotFoundError") return 404;
       if (name === "QuotaExhaustedError" || name === "WriteLockConflictError") return 409;
       if (name === "EvidenceGateRejectionError" || name === "ScopeViolationError") return 403;
       if (name === "MemoryKeyExistsError") return 409;

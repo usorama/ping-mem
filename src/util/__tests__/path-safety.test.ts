@@ -96,4 +96,24 @@ describe("isProjectDirSafe", () => {
       expect(isProjectDirSafe("/custom-home/../etc/passwd")).toBe(false);
     });
   });
+
+  describe("DENIED_ROOTS coverage", () => {
+    test("rejects all DENIED_ROOTS entries as HOME", () => {
+      const deniedRoots = [
+        "/root", "/tmp", "/proc", "/sys", "/dev", "/boot", "/sbin", "/bin",
+        "/snap", "/run", "/srv", "/mnt", "/media", "/lost+found",
+        "/var/tmp", "/private/tmp",
+      ];
+      for (const root of deniedRoots) {
+        process.env["HOME"] = root;
+        expect(isProjectDirSafe(`${root}/subdir`)).toBe(false);
+      }
+    });
+
+    test("rejects /var/tmp and /private/tmp regardless of HOME", () => {
+      delete process.env["HOME"];
+      expect(isProjectDirSafe("/var/tmp/sandbox")).toBe(false);
+      expect(isProjectDirSafe("/private/tmp/sandbox")).toBe(false);
+    });
+  });
 });

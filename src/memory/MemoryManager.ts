@@ -1404,10 +1404,13 @@ export class MemoryManager {
   }
 
   /**
-   * Close resources
+   * Close resources.
+   * Does NOT close the EventStore — the caller that created it owns its lifecycle.
+   * MemoryManager receives EventStore via constructor injection; closing it here
+   * would violate the ownership contract when the store is shared across multiple
+   * MemoryManager instances or with other components (SessionManager, PingMemServer).
    */
   async close(): Promise<void> {
-    await this.eventStore.close();
     if (this.vectorIndex) {
       await this.vectorIndex.close();
     }
