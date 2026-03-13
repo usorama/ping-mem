@@ -51,13 +51,12 @@ const projectIdSchema = nonEmptyString.regex(
  */
 export const deleteProjectSchema = z
   .object({
-    // NOTE: the .refine() is NOT redundant despite optionalString using nonEmptyString.min(1).
-    // nonEmptyString applies .min(1) BEFORE .trim(), so "   " (3 spaces) passes min(1) and trims
-    // to "". The .refine() checks the post-trim value to catch whitespace-only strings.
-    projectDir: optionalString.refine(
-      (val) => val === undefined || val.length > 0,
-      "projectDir cannot be empty string"
-    ),
+    // projectDir uses its own schema with a PATH_MAX-aligned max (4096 bytes on Linux, 1024 on
+    // macOS) rather than nonEmptyString's 10,000-char limit, to avoid submitting overly long
+    // paths to path.resolve / fs APIs that have OS-level limits.
+    // .trim() precedes .min(1) so the minimum-length check fires on the post-trim value:
+    // whitespace-only strings (e.g. "   ") trim to "" and are rejected by min(1).
+    projectDir: z.string().trim().min(1).max(4096).optional(),
     projectId: projectIdSchema.optional(),
   })
   // Refinement order matters: the "at least one" check must come first so that when both
@@ -148,8 +147,11 @@ export const setLLMConfigSchema = z.object({
   provider: z.enum(SUPPORTED_PROVIDERS, {
     message: "provider must be one of: " + SUPPORTED_PROVIDERS.join(", "),
   }),
-  apiKey: z.string().min(1).max(10_000).trim(),
-  model: z.string().min(1).max(500).trim().optional(),
+  // .trim() must precede .min(1) so that the minimum-length check fires on the post-trim value.
+  // With .min(1).trim(), a whitespace-only string passes min(1) (pre-trim length > 0) then
+  // trims to "" — an empty key/model would be silently stored.
+  apiKey: z.string().trim().min(1).max(10_000),
+  model: z.string().trim().min(1).max(500).optional(),
   baseUrl: z.preprocess(
     // Treat empty or whitespace-only string as "unset" — allows the UI to clear the field
     // by submitting an empty input without triggering a URL validation error.

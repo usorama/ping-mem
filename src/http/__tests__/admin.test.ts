@@ -16,6 +16,7 @@ import {
   _resetAdminRateLimitMapsForTest,
   _getAuthFailureMapForTest,
   _getAdminRateLimitMapForTest,
+  ADMIN_RATE_LIMIT_MAX,
   type AdminDependencies,
 } from "../admin.js";
 
@@ -42,11 +43,16 @@ function createMockResponse() {
   const res = {
     statusCode: undefined as number | undefined,
     headers: {} as Record<string, unknown>,
+    body: undefined as unknown,
+    headersSent: false,
     writeHead(statusCode: number, headers?: Record<string, string | string[] | undefined>) {
       res.statusCode = statusCode;
+      res.headersSent = true;
       if (headers) Object.assign(res.headers, headers);
     },
-    end(_data?: unknown) {},
+    end(data?: unknown) {
+      res.body = data;
+    },
   };
   return res;
 }
@@ -56,21 +62,24 @@ function createMockResponse() {
 // ---------------------------------------------------------------------------
 
 describe("admin.ts - checkBasicAuth", () => {
-  const OLD_ENV = process.env;
-
   beforeEach(() => {
-    process.env = { ...OLD_ENV };
+    // Set specific vars rather than replacing the entire process.env object.
+    // Replacing process.env breaks modules that hold a reference to the original object.
+    delete process.env["PING_MEM_ADMIN_USER"];
+    delete process.env["PING_MEM_ADMIN_PASS"];
+    delete process.env["PING_MEM_BEHIND_PROXY"];
     _resetAdminRateLimitMapsForTest();
   });
 
   afterEach(() => {
-    process.env = OLD_ENV;
+    delete process.env["PING_MEM_ADMIN_USER"];
+    delete process.env["PING_MEM_ADMIN_PASS"];
+    delete process.env["PING_MEM_BEHIND_PROXY"];
   });
 
   describe("when no auth is configured", () => {
     it("should return false and send 401 when PING_MEM_ADMIN_USER is not set", () => {
-      delete process.env.PING_MEM_ADMIN_USER;
-      delete process.env.PING_MEM_ADMIN_PASS;
+      // Vars already deleted in beforeEach
 
       const req = createMockRequest();
       const res = createMockResponse();
@@ -81,8 +90,8 @@ describe("admin.ts - checkBasicAuth", () => {
     });
 
     it("should return false and send 401 when PING_MEM_ADMIN_PASS is not set", () => {
-      process.env.PING_MEM_ADMIN_USER = "admin";
-      delete process.env.PING_MEM_ADMIN_PASS;
+      process.env["PING_MEM_ADMIN_USER"] = "admin";
+      // PING_MEM_ADMIN_PASS already deleted in beforeEach
 
       const req = createMockRequest();
       const res = createMockResponse();
@@ -95,8 +104,8 @@ describe("admin.ts - checkBasicAuth", () => {
 
   describe("when auth is configured", () => {
     beforeEach(() => {
-      process.env.PING_MEM_ADMIN_USER = "admin";
-      process.env.PING_MEM_ADMIN_PASS = "secret-password";
+      process.env["PING_MEM_ADMIN_USER"] = "admin";
+      process.env["PING_MEM_ADMIN_PASS"] = "secret-password";
     });
 
     it("should return true for correct credentials", () => {
@@ -155,7 +164,7 @@ describe("admin.ts - checkBasicAuth", () => {
     });
 
     it("should handle special characters in password", () => {
-      process.env.PING_MEM_ADMIN_PASS = "p@ssw0rd!#$%^&*()";
+      process.env["PING_MEM_ADMIN_PASS"] = "p@ssw0rd!#$%^&*()";
       const credentials = Buffer.from("admin:p@ssw0rd!#$%^&*()").toString("base64");
       const req = createMockRequest(`Basic ${credentials}`);
       const res = createMockResponse();
@@ -164,8 +173,8 @@ describe("admin.ts - checkBasicAuth", () => {
     });
 
     it("should handle unicode characters in credentials", () => {
-      process.env.PING_MEM_ADMIN_USER = "管理者";
-      process.env.PING_MEM_ADMIN_PASS = "パスワード123";
+      process.env["PING_MEM_ADMIN_USER"] = "管理者";
+      process.env["PING_MEM_ADMIN_PASS"] = "パスワード123";
       const credentials = Buffer.from("管理者:パスワード123").toString("base64");
       const req = createMockRequest(`Basic ${credentials}`);
       const res = createMockResponse();
@@ -199,8 +208,8 @@ describe("admin.ts - checkBasicAuth", () => {
 
   describe("timing attack resistance", () => {
     beforeEach(() => {
-      process.env.PING_MEM_ADMIN_USER = "admin";
-      process.env.PING_MEM_ADMIN_PASS = "very-long-secret-password-12345";
+      process.env["PING_MEM_ADMIN_USER"] = "admin";
+      process.env["PING_MEM_ADMIN_PASS"] = "very-long-secret-password-12345";
     });
 
     it("should use constant-time comparison for username", () => {
@@ -262,23 +271,21 @@ describe("admin.ts - checkBasicAuth", () => {
 // ---------------------------------------------------------------------------
 
 describe("admin.ts - checkAdminRateLimit", () => {
-  const OLD_ENV = process.env;
-
   beforeEach(() => {
-    process.env = { ...OLD_ENV };
+    delete process.env["PING_MEM_BEHIND_PROXY"];
     _resetAdminRateLimitMapsForTest();
   });
 
   afterEach(() => {
-    process.env = OLD_ENV;
+    delete process.env["PING_MEM_BEHIND_PROXY"];
   });
 
-  it("allows exactly ADMIN_RATE_LIMIT_MAX (20) requests and blocks the 21st with 429 + Retry-After", () => {
-    // Combined boundary test: verifies both that 20 requests are allowed AND that the 21st
-    // is blocked. Keeping them together prevents a regression where the boundary is correct
-    // in isolation but breaks under the combined quota pressure.
+  it("allows exactly ADMIN_RATE_LIMIT_MAX requests and blocks the next one with 429 + Retry-After", () => {
+    // Uses the exported constant so the test auto-tracks changes to the limit value.
+    // Combined boundary test: verifies both that MAX requests are allowed AND that the
+    // (MAX+1)th is blocked to prevent regressions where boundary is correct in isolation.
     const ip = "192.168.1.10";
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < ADMIN_RATE_LIMIT_MAX; i++) {
       const req = createMockRequest(undefined, ip);
       const res = createMockResponse();
       expect(
@@ -295,7 +302,7 @@ describe("admin.ts - checkAdminRateLimit", () => {
   });
 
   it("uses X-Forwarded-For when PING_MEM_BEHIND_PROXY is true", () => {
-    process.env.PING_MEM_BEHIND_PROXY = "true";
+    process.env["PING_MEM_BEHIND_PROXY"] = "true";
     const clientIp = "10.0.0.50";
     const proxyIp = "172.16.0.1"; // different from client
 
@@ -329,7 +336,7 @@ describe("admin.ts - checkAdminRateLimit", () => {
   });
 
   it("X-Forwarded-For: extracts first IP from comma-separated list", () => {
-    process.env.PING_MEM_BEHIND_PROXY = "true";
+    process.env["PING_MEM_BEHIND_PROXY"] = "true";
     const clientIp = "10.0.0.52";
     // Comma-separated XFF header: first entry is the original client IP
     const xffList = `${clientIp}, 172.16.0.1, 10.10.0.1`;
@@ -356,7 +363,7 @@ describe("admin.ts - checkAdminRateLimit", () => {
     const rateLimitMap = _getAdminRateLimitMapForTest();
 
     // Exhaust quota
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < ADMIN_RATE_LIMIT_MAX; i++) {
       checkAdminRateLimit(createMockRequest(undefined, ip) as IncomingMessage, createMockResponse() as unknown as ServerResponse);
     }
     // 21st is blocked
@@ -380,17 +387,15 @@ describe("admin.ts - checkAdminRateLimit", () => {
 // ---------------------------------------------------------------------------
 
 describe("admin.ts - brute-force lockout", () => {
-  const OLD_ENV = process.env;
-
   beforeEach(() => {
-    process.env = { ...OLD_ENV };
-    process.env.PING_MEM_ADMIN_USER = "admin";
-    process.env.PING_MEM_ADMIN_PASS = "correct-pass";
+    process.env["PING_MEM_ADMIN_USER"] = "admin";
+    process.env["PING_MEM_ADMIN_PASS"] = "correct-pass";
     _resetAdminRateLimitMapsForTest();
   });
 
   afterEach(() => {
-    process.env = OLD_ENV;
+    delete process.env["PING_MEM_ADMIN_USER"];
+    delete process.env["PING_MEM_ADMIN_PASS"];
   });
 
   const wrongCreds = (ip: string) =>
@@ -742,17 +747,15 @@ describe("admin.ts - _isProjectDirSafe", () => {
 // ---------------------------------------------------------------------------
 
 describe("admin.ts - handleAdminRequest CSRF rejection", () => {
-  const OLD_ENV = process.env;
-
   beforeEach(() => {
-    process.env = { ...OLD_ENV };
-    process.env.PING_MEM_ADMIN_USER = "admin";
-    process.env.PING_MEM_ADMIN_PASS = "test-pass";
+    process.env["PING_MEM_ADMIN_USER"] = "admin";
+    process.env["PING_MEM_ADMIN_PASS"] = "test-pass";
     _resetAdminRateLimitMapsForTest();
   });
 
   afterEach(() => {
-    process.env = OLD_ENV;
+    delete process.env["PING_MEM_ADMIN_USER"];
+    delete process.env["PING_MEM_ADMIN_PASS"];
   });
 
   const authHeader = Buffer.from("admin:test-pass").toString("base64");
@@ -854,5 +857,174 @@ describe("admin.ts - handleAdminRequest CSRF rejection", () => {
       mockDeps
     );
     expect(res.statusCode).toBe(404); // CSRF passed, reached handler
+  });
+
+  it("rejects POST with absent Host header with 400 (CSRF cannot be evaluated)", async () => {
+    // Well-formed HTTP/1.1 requests always include Host. Absent Host means the CSRF check
+    // cannot compare origin against host — we reject rather than silently skipping CSRF.
+    const req = {
+      url: "/api/admin/projects",
+      method: "POST",
+      headers: {
+        authorization: `Basic ${authHeader}`,
+        // no host header
+        "x-api-key": "test-key",
+      },
+      socket: { remoteAddress: "127.0.0.1" },
+    };
+    const res = createMockResponse();
+    await handleAdminRequest(
+      req as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+      mockDeps
+    );
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("rejects request with invalid API key with 401 (before CSRF is evaluated)", async () => {
+    // Verifies the API key guard fires before CSRF, and that a mock with isValid=false
+    // correctly blocks the request — guards execute in the expected order.
+    const mockDepsInvalidKey = {
+      apiKeyManager: { isValid: (_key: string | undefined) => false },
+      adminStore: {},
+      diagnosticsStore: {},
+      eventStore: {},
+    } as unknown as AdminDependencies;
+    const req = {
+      url: "/api/admin/projects",
+      method: "POST",
+      headers: {
+        authorization: `Basic ${authHeader}`,
+        host: "myhost.com",
+        origin: "http://myhost.com",
+        "x-api-key": "wrong-key",
+      },
+      socket: { remoteAddress: "127.0.0.1" },
+    };
+    const res = createMockResponse();
+    await handleAdminRequest(
+      req as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+      mockDepsInvalidKey
+    );
+    expect(res.statusCode).toBe(401); // API key rejected — not 403 CSRF
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleAdminApi route handler error containment
+// ---------------------------------------------------------------------------
+
+describe("admin.ts - handleAdminApi error containment", () => {
+  const authHeader = Buffer.from("admin:handler-test-pass").toString("base64");
+
+  beforeEach(() => {
+    process.env["PING_MEM_ADMIN_USER"] = "admin";
+    process.env["PING_MEM_ADMIN_PASS"] = "handler-test-pass";
+    _resetAdminRateLimitMapsForTest();
+  });
+
+  afterEach(() => {
+    delete process.env["PING_MEM_ADMIN_USER"];
+    delete process.env["PING_MEM_ADMIN_PASS"];
+  });
+
+  function makeReq(method: string, url: string, body?: string) {
+    // Minimal request fixture that satisfies handleAdminRequest gate checks.
+    // readJsonBody uses `for await (const chunk of req)` which requires [Symbol.asyncIterator].
+    // The old `.on`-based approach never triggered body delivery because readJsonBody
+    // doesn't use EventEmitter callbacks — it consumes the request as an async iterable.
+    const captured = body;
+    return {
+      url,
+      method,
+      headers: {
+        authorization: `Basic ${authHeader}`,
+        host: "localhost",
+        ...(method !== "GET" && method !== "HEAD" ? { origin: "http://localhost" } : {}),
+        "x-api-key": "valid-key",
+        "content-type": "application/json",
+      },
+      socket: { remoteAddress: "127.0.0.1" },
+      [Symbol.asyncIterator]: async function* () {
+        if (captured) yield Buffer.from(captured);
+      },
+    };
+  }
+
+  it("GET /api/admin/projects → listProjects throws → returns 500", async () => {
+    const deps = {
+      apiKeyManager: { isValid: () => true },
+      adminStore: {
+        listProjects: () => { throw new Error("SQLite locked"); },
+      },
+      diagnosticsStore: {},
+      eventStore: {},
+    } as unknown as AdminDependencies;
+
+    const res = createMockResponse();
+    await handleAdminRequest(makeReq("GET", "/api/admin/projects") as unknown as IncomingMessage, res as unknown as ServerResponse, deps);
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("GET /api/admin/keys → listApiKeys throws → returns 500", async () => {
+    const deps = {
+      apiKeyManager: { isValid: () => true },
+      adminStore: {
+        listApiKeys: () => { throw new Error("DB error"); },
+      },
+      diagnosticsStore: {},
+      eventStore: {},
+    } as unknown as AdminDependencies;
+
+    const res = createMockResponse();
+    await handleAdminRequest(makeReq("GET", "/api/admin/keys") as unknown as IncomingMessage, res as unknown as ServerResponse, deps);
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("POST /api/admin/keys/rotate → createApiKey throws → returns 500", async () => {
+    const deps = {
+      apiKeyManager: { isValid: () => true },
+      adminStore: {
+        createApiKey: () => { throw new Error("Insert failed"); },
+      },
+      diagnosticsStore: {},
+      eventStore: {},
+    } as unknown as AdminDependencies;
+
+    const res = createMockResponse();
+    await handleAdminRequest(makeReq("POST", "/api/admin/keys/rotate", JSON.stringify({ deactivateOld: false })) as unknown as IncomingMessage, res as unknown as ServerResponse, deps);
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("POST /api/admin/keys/deactivate → deactivateApiKey throws → returns 500", async () => {
+    const deps = {
+      apiKeyManager: { isValid: () => true },
+      adminStore: {
+        deactivateApiKey: () => { throw new Error("Update failed"); },
+      },
+      diagnosticsStore: {},
+      eventStore: {},
+    } as unknown as AdminDependencies;
+
+    const validId = "550e8400-e29b-41d4-a716-446655440000";
+    const res = createMockResponse();
+    await handleAdminRequest(makeReq("POST", "/api/admin/keys/deactivate", JSON.stringify({ id: validId })) as unknown as IncomingMessage, res as unknown as ServerResponse, deps);
+    expect(res.statusCode).toBe(500);
+  });
+
+  it("GET /api/admin/llm-config → getLLMConfig throws → returns 500", async () => {
+    const deps = {
+      apiKeyManager: { isValid: () => true },
+      adminStore: {
+        getLLMConfig: () => { throw new Error("Decrypt error"); },
+      },
+      diagnosticsStore: {},
+      eventStore: {},
+    } as unknown as AdminDependencies;
+
+    const res = createMockResponse();
+    await handleAdminRequest(makeReq("GET", "/api/admin/llm-config") as unknown as IncomingMessage, res as unknown as ServerResponse, deps);
+    expect(res.statusCode).toBe(500);
   });
 });

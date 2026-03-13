@@ -413,22 +413,10 @@ export class AdminStore {
   }
 
   private generateUUID(): string {
-    const timestamp = Date.now();
-    const timestampHex = timestamp.toString(16).padStart(12, "0");
-    const randomBytes = crypto.randomBytes(10);
-    const randomHex = randomBytes.toString("hex");
-    return (
-      timestampHex.slice(0, 8) +
-      "-" +
-      timestampHex.slice(8, 12) +
-      "-7" +
-      randomHex.slice(0, 3) +
-      "-" +
-      ((parseInt(randomHex.slice(3, 4), 16) & 0x3) | 0x8).toString(16) +
-      randomHex.slice(4, 7) +
-      "-" +
-      randomHex.slice(7, 19)
-    );
+    // Use crypto.randomUUID() (Node.js 14.17+ / Bun) for RFC 4122-compliant v4 UUIDs.
+    // Previous implementation used a timestamp-prefixed bespoke format whose leading bits
+    // were time-based and monotonically increasing, making key IDs partially predictable.
+    return crypto.randomUUID();
   }
 
   private generateApiKey(): string {

@@ -38,12 +38,10 @@ describe("admin-schemas", () => {
       }
     });
 
-    it("should reject empty projectDir", () => {
+    it("should reject whitespace-only projectDir", () => {
+      // .trim() fires before .min(1), so "   " trims to "" and is rejected by min(1).
       const result = deleteProjectSchema.safeParse({ projectDir: "   " });
       expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues[0].message).toContain("projectDir cannot be empty");
-      }
     });
 
     it("should reject invalid projectId format", () => {

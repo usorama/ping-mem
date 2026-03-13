@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import * as fs from "fs";
+import * as fs from "fs/promises";
 import * as path from "path";
 import * as crypto from "node:crypto";
 
@@ -32,8 +32,9 @@ import { parseBody, isParseSuccess } from "../validation/parse-body.js";
  *  Count starts at 1 on the first request in a new window; the check fires when
  *  count >= MAX (i.e., the (MAX+1)th request is blocked, exactly MAX are served). */
 const adminRateLimitMap = new Map<string, { count: number; resetAt: number }>();
-/** Maximum requests served per window before the next one is blocked. */
-const ADMIN_RATE_LIMIT_MAX = 20;
+/** Maximum requests served per window before the next one is blocked.
+ *  Exported so tests can import the constant rather than hard-coding the magic number 20. */
+export const ADMIN_RATE_LIMIT_MAX = 20;
 const ADMIN_RATE_LIMIT_WINDOW_MS = 60_000;
 
 /** Brute-force lockout: lock after 5 failed Basic Auth attempts for 30 min.
@@ -129,13 +130,18 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
 function isLockedOut(ip: string, res: ServerResponse): boolean {
   const record = authFailureMap.get(ip);
   const now = Date.now();
-  if (record && now < record.lockedUntil) {
-    const retryAfter = Math.ceil((record.lockedUntil - now) / 1000);
-    res.writeHead(429, { "Content-Type": "application/json", "Retry-After": String(retryAfter) });
-    res.end(JSON.stringify({ error: "Too Many Requests", message: "Account locked due to repeated failures. Try again later." }));
-    return true;
+  if (!record || record.lockedUntil === 0) return false;
+  if (now >= record.lockedUntil) {
+    // Lockout window has expired — eagerly evict this entry rather than waiting for
+    // the next checkAdminRateLimit sweep. This ensures expired lockouts don't linger
+    // when checkAdminRateLimit is not called (e.g., test scenarios or low-traffic paths).
+    authFailureMap.delete(ip);
+    return false;
   }
-  return false;
+  const retryAfter = Math.ceil((record.lockedUntil - now) / 1000);
+  res.writeHead(429, { "Content-Type": "application/json", "Retry-After": String(retryAfter) });
+  res.end(JSON.stringify({ error: "Too Many Requests", message: "Account locked due to repeated failures. Try again later." }));
+  return true;
 }
 
 function recordAuthFailure(ip: string): void {
@@ -180,8 +186,11 @@ function clearAuthFailures(ip: string): void {
  *  Error paths for those providers should not include raw key values in messages. */
 /** @internal Exported for unit testing only — not part of the public API */
 export function sanitizeAdminError(message: string): string {
+  // Cap message length before applying regex chain to prevent DoS via pathologically long
+  // error strings from misbehaving LLM providers (each regex scans the entire string).
+  const capped = message.slice(0, 4096);
   return (
-    message
+    capped
       // OpenAI, Anthropic (sk-ant-...), OpenRouter (sk-or-...), DeepSeek, etc.
       .replace(/\bsk-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // Gemini / Google AI Studio
@@ -230,7 +239,12 @@ export function sanitizeAdminError(message: string): string {
  *  to trigger EventStore, DiagnosticsStore, and manifest deletions for arbitrary /tmp paths. */
 export function _isProjectDirSafe(projectDir: string): boolean {
   const resolved = path.resolve(projectDir);
-  const allowedRoots = [process.env["HOME"] ?? "", "/projects", "/Users", "/home"];
+  // Validate HOME before including: HOME='/' or an unusually short value (e.g. HOME='' or HOME='/')
+  // would expand the allowed set to the entire filesystem, enabling path traversal to any location.
+  // Require HOME to be an absolute path of meaningful length (> 3 chars, e.g. not '/' or '/a').
+  const home = process.env["HOME"];
+  const validHome = home && home.length > 3 && path.isAbsolute(home) ? home : null;
+  const allowedRoots = [...(validHome ? [validHome] : []), "/projects", "/Users", "/home"];
   return allowedRoots.some((root) => root && resolved.startsWith(root + path.sep));
 }
 
@@ -289,6 +303,9 @@ export async function handleAdminRequest(
     const html = renderAdminPage(nonce);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
+      // no-store: the admin page contains the admin panel structure. Even though the API key
+      // is not stored in the HTML, the page structure should not be cached by shared proxies.
+      "Cache-Control": "no-store",
       // frame-ancestors 'none' is the modern replacement for X-Frame-Options: DENY.
       // Both are included for maximum browser compatibility.
       // connect-src 'self': restricts fetch() calls to same origin (all /api/admin/* calls).
@@ -326,21 +343,22 @@ export async function handleAdminRequest(
     // bypass via a domain whose name contains the server hostname as a substring.
     if (req.method !== "GET" && req.method !== "HEAD") {
       const host = req.headers.host;
-      // Note: if `host` is absent (malformed request that omits the Host header), the CSRF
-      // check is silently skipped. This is intentional: X-API-Key is the primary auth layer
-      // for server-to-server/CLI callers that legitimately omit browser headers. We log a
-      // warning for observability so abnormal patterns can be detected in production.
+      // Reject: a well-formed HTTP/1.1 request always includes Host. Accepting state-changing
+      // requests without Host would silently bypass the CSRF origin check entirely, since the
+      // isSameHostOrigin comparison requires both sides to be present.
       if (!host) {
-        log.warn("CSRF check skipped: Host header absent on state-changing request", { method: req.method, path: pathName });
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Bad Request", message: "Host header is required" }));
+        return true;
       }
       const origin = req.headers["origin"];
       const referer = req.headers["referer"];
-      if (origin && host && !isSameHostOrigin(origin, host)) {
+      if (origin && !isSameHostOrigin(origin, host)) {
         res.writeHead(403, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Forbidden", message: "Cross-origin request rejected" }));
         return true;
       }
-      if (!origin && referer && host && !isSameHostOrigin(referer, host)) {
+      if (!origin && referer && !isSameHostOrigin(referer, host)) {
         res.writeHead(403, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Forbidden", message: "Cross-origin request rejected" }));
         return true;
@@ -353,7 +371,15 @@ export async function handleAdminRequest(
       // The current design accepts this residual risk because X-API-Key is a high-entropy
       // secret that must be explicitly obtained and configured by the caller.
     }
-    await handleAdminApi(req, res, deps, pathName);
+    try {
+      await handleAdminApi(req, res, deps, pathName);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Unexpected error";
+      log.error("handleAdminApi: unexpected error", { method: req.method, path: pathName, error: message });
+      if (!res.headersSent) {
+        respondJson(res, 500, { error: "Internal Server Error" });
+      }
+    }
     return true;
   }
 
@@ -367,8 +393,14 @@ async function handleAdminApi(
   pathName: string
 ): Promise<void> {
   if (req.method === "GET" && pathName === "/api/admin/projects") {
-    const projects = deps.adminStore.listProjects();
-    return respondJson(res, 200, { data: projects });
+    try {
+      const projects = deps.adminStore.listProjects();
+      return respondJson(res, 200, { data: projects });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to list projects";
+      log.error("listProjects failed", { error: message });
+      return respondJson(res, 500, { error: "Internal Server Error" });
+    }
   }
 
   if (req.method === "DELETE" && pathName === "/api/admin/projects") {
@@ -411,7 +443,9 @@ async function handleAdminApi(
       } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : String(error);
         log.error("deleteProject: ingestion cleanup failed", { projectId: resolvedProjectId, error: msg });
-        warnings.push(msg);
+        // Sanitize before including in the response body — raw error messages may contain
+        // internal paths, SQLite errors, or other details unsuitable for client exposure.
+        warnings.push(sanitizeAdminError(msg));
       }
     }
     try {
@@ -419,16 +453,16 @@ async function handleAdminApi(
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       log.error("deleteProject: diagnostics cleanup failed", { projectId: resolvedProjectId, error: msg });
-      warnings.push(msg);
+      warnings.push(sanitizeAdminError(msg));
     }
 
     if (projectDir) {
       try {
-        deleteProjectManifest(projectDir);
+        await deleteProjectManifest(projectDir);
       } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : String(error);
         log.error("deleteProject: manifest cleanup failed", { projectDir, error: msg });
-        warnings.push(msg);
+        warnings.push(sanitizeAdminError(msg));
       }
       try {
         const sessionIds = deps.eventStore.findSessionIdsByProjectDir(projectDir);
@@ -436,7 +470,7 @@ async function handleAdminApi(
       } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : String(error);
         log.error("deleteProject: session cleanup failed", { projectDir, error: msg });
-        warnings.push(msg);
+        warnings.push(sanitizeAdminError(msg));
       }
     }
 
@@ -445,7 +479,7 @@ async function handleAdminApi(
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       log.error("deleteProject: adminStore cleanup failed", { projectId: resolvedProjectId, error: msg });
-      warnings.push(msg);
+      warnings.push(sanitizeAdminError(msg));
     }
 
     // Return 207 Multi-Status when partial failures occurred so the caller knows
@@ -455,8 +489,14 @@ async function handleAdminApi(
   }
 
   if (req.method === "GET" && pathName === "/api/admin/keys") {
-    const keys = deps.adminStore.listApiKeys();
-    return respondJson(res, 200, { data: keys });
+    try {
+      const keys = deps.adminStore.listApiKeys();
+      return respondJson(res, 200, { data: keys });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to list keys";
+      log.error("listApiKeys failed", { error: message });
+      return respondJson(res, 500, { error: "Internal Server Error" });
+    }
   }
 
   if (req.method === "POST" && pathName === "/api/admin/keys/rotate") {
@@ -465,8 +505,14 @@ async function handleAdminApi(
       return respondJson(res, 400, { error: result.error });
     }
 
-    const rotateResult = deps.adminStore.createApiKey(result.data);
-    return respondJson(res, 200, { data: rotateResult });
+    try {
+      const rotateResult = deps.adminStore.createApiKey(result.data);
+      return respondJson(res, 200, { data: rotateResult });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to rotate key";
+      log.error("createApiKey failed", { error: message });
+      return respondJson(res, 500, { error: "Internal Server Error" });
+    }
   }
 
   if (req.method === "POST" && pathName === "/api/admin/keys/deactivate") {
@@ -475,13 +521,25 @@ async function handleAdminApi(
       return respondJson(res, 400, { error: result.error });
     }
 
-    deps.adminStore.deactivateApiKey(result.data.id);
-    return respondJson(res, 200, { data: { id: result.data.id } });
+    try {
+      deps.adminStore.deactivateApiKey(result.data.id);
+      return respondJson(res, 200, { data: { id: result.data.id } });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to deactivate key";
+      log.error("deactivateApiKey failed", { error: message });
+      return respondJson(res, 500, { error: "Internal Server Error" });
+    }
   }
 
   if (req.method === "GET" && pathName === "/api/admin/llm-config") {
-    const config = deps.adminStore.getLLMConfig();
-    return respondJson(res, 200, { data: config });
+    try {
+      const config = deps.adminStore.getLLMConfig();
+      return respondJson(res, 200, { data: config });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to get LLM config";
+      log.error("getLLMConfig failed", { error: message });
+      return respondJson(res, 500, { error: "Internal Server Error" });
+    }
   }
 
   if (req.method === "POST" && pathName === "/api/admin/llm-config") {
@@ -493,7 +551,7 @@ async function handleAdminApi(
     try {
       const setResult = deps.adminStore.setLLMConfig(result.data);
       return respondJson(res, 200, { data: setResult });
-    } catch (error) {
+    } catch (error: unknown) {
       const rawMessage = error instanceof Error ? error.message : "Unable to save LLM config";
       return respondJson(res, 500, {
         error: "LLMConfigError",
@@ -523,8 +581,12 @@ export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boole
   }
 
   const header = req.headers["authorization"] ?? "";
-  const [scheme, encoded] = header.split(" ");
-  if (scheme !== "Basic" || !encoded) {
+  // Split only on the first space to handle edge cases. RFC 7235 §2.1 specifies the auth-scheme
+  // is case-insensitive, so normalize to lowercase before comparing.
+  const spaceIdx = header.indexOf(" ");
+  const scheme = spaceIdx === -1 ? header : header.slice(0, spaceIdx);
+  const encoded = spaceIdx === -1 ? "" : header.slice(spaceIdx + 1).trim();
+  if (scheme.toLowerCase() !== "basic" || !encoded) {
     res.writeHead(401, { "WWW-Authenticate": "Basic" });
     res.end("Unauthorized");
     return false;
@@ -571,21 +633,38 @@ function requireApiKey(
   return true;
 }
 
-/** Escape HTML special characters to prevent XSS when interpolating values into HTML. */
+/**
+ * Escape HTML special characters to prevent XSS when interpolating values into HTML.
+ * Safe for both element content and attribute contexts (double-quoted or single-quoted).
+ */
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
+    .replace(/'/g, "&#39;")
     .replace(/"/g, "&quot;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }
 
 function respondJson(res: ServerResponse, status: number, payload: unknown): void {
+  let body: string;
+  try {
+    body = JSON.stringify(payload);
+  } catch {
+    // Fallback: payload contained a circular reference, BigInt, or other non-serializable value.
+    // Use a safe literal so the client always receives a valid JSON body.
+    body = JSON.stringify({ error: "Internal Server Error", message: "Response serialization failed" });
+    status = 500;
+  }
   res.writeHead(status, {
     "Content-Type": "application/json",
     "X-Content-Type-Options": "nosniff",
+    // Unconditional no-store: admin responses contain sensitive data (key lists, project IDs,
+    // LLM config) and must never be cached by intermediary proxies or the browser.
+    "Cache-Control": "no-store",
+    "Content-Length": String(Buffer.byteLength(body, "utf8")),
   });
-  res.end(JSON.stringify(payload));
+  res.end(body);
 }
 
 async function resolveProjectId(projectDir: string, adminStore: AdminStore): Promise<string | null> {
@@ -595,9 +674,9 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
     return record.projectId;
   }
 
-  if (!fs.existsSync(normalized)) {
-    return null;
-  }
+  // Do not pre-check with existsSync — that creates a TOCTOU race: the directory could be
+  // replaced between the existence check and the scan. scanProject will throw if the directory
+  // is not accessible; the caller's catch block handles this as a 400 response.
   try {
     const scanner = new ProjectScanner();
     const scan = await scanner.scanProject(normalized);
@@ -609,7 +688,7 @@ async function resolveProjectId(projectDir: string, adminStore: AdminStore): Pro
   }
 }
 
-function deleteProjectManifest(projectDir: string): void {
+async function deleteProjectManifest(projectDir: string): Promise<void> {
   // Defense-in-depth: re-check containment here even though the caller (handleAdminApi)
   // already called _isProjectDirSafe(). deleteProjectManifest is a standalone function
   // that could be invoked from other call sites in the future. A path-traversal escape
@@ -620,21 +699,28 @@ function deleteProjectManifest(projectDir: string): void {
   }
   const resolved = path.resolve(projectDir);
   const manifestPath = path.join(resolved, ".ping-mem", "manifest.json");
-  if (fs.existsSync(manifestPath)) {
-    fs.unlinkSync(manifestPath);
-  }
+  // Use fs.promises.unlink with an ENOENT-tolerant catch so we avoid both sync I/O blocking
+  // the event loop and the TOCTOU race between an existsSync check and the unlink call.
+  await fs.unlink(manifestPath).catch((e: NodeJS.ErrnoException) => {
+    if (e.code !== "ENOENT") throw e;
+  });
   const manifestDir = path.join(resolved, ".ping-mem");
-  if (fs.existsSync(manifestDir)) {
-    const remaining = fs.readdirSync(manifestDir);
+  try {
+    const remaining = await fs.readdir(manifestDir);
     if (remaining.length === 0) {
-      fs.rmdirSync(manifestDir);
+      await fs.rmdir(manifestDir);
     }
+  } catch (e: unknown) {
+    // Directory does not exist — nothing to clean up.
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
   }
 }
 
 function renderAdminPage(nonce: string): string {
   const providerOptions = SUPPORTED_PROVIDERS.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
-  const providersJson = JSON.stringify(SUPPORTED_PROVIDERS);
+  // escapeHtml applied to the JSON string: SUPPORTED_PROVIDERS are hardcoded safe strings today,
+  // but future provider names containing < > & could otherwise create an XSS injection point.
+  const providersJson = escapeHtml(JSON.stringify(SUPPORTED_PROVIDERS));
 
   return `<!doctype html>
 <html lang="en">
@@ -836,10 +922,14 @@ function renderAdminPage(nonce: string): string {
     const apiKeyStatus = document.getElementById("apiKeyStatus");
     const saveApiKey = document.getElementById("saveApiKey");
 
-    saveApiKey.addEventListener("click", () => {
-      state.apiKey = apiKeyInput.value.trim();
-      apiKeyStatus.textContent = state.apiKey ? "Saved (in-memory only)" : "Missing";
-    });
+    if (!apiKeyInput || !apiKeyStatus || !saveApiKey) {
+      console.error("Admin UI: missing required DOM elements (currentApiKey/apiKeyStatus/saveApiKey)");
+    } else {
+      saveApiKey.addEventListener("click", () => {
+        state.apiKey = apiKeyInput.value.trim();
+        apiKeyStatus.textContent = state.apiKey ? "Saved (in-memory only)" : "Missing";
+      });
+    }
 
     async function apiFetch(path, options = {}) {
       if (!state.apiKey) {
@@ -850,10 +940,19 @@ function renderAdminPage(nonce: string): string {
         options.headers || {}
       );
       const response = await fetch(path, { ...options, headers });
-      const json = await response.json();
+      // Check ok before calling .json(): a non-JSON error body (e.g. proxy HTML error page,
+      // plain-text 429) would throw a SyntaxError, masking the real HTTP error status.
       if (!response.ok) {
-        throw new Error(json?.message || json?.error || "Request failed");
+        let errMsg = "Request failed";
+        try {
+          const json = await response.json();
+          errMsg = json?.message || json?.error || errMsg;
+        } catch {
+          errMsg = await response.text().catch(() => errMsg);
+        }
+        throw new Error(errMsg);
       }
+      const json = await response.json();
       return json.data;
     }
 
@@ -866,6 +965,7 @@ function renderAdminPage(nonce: string): string {
     async function refreshKeys() {
       const keys = await apiFetch("/api/admin/keys");
       const table = document.getElementById("keysTable");
+      if (!table) { console.error("refreshKeys: missing DOM element keysTable"); return; }
       table.textContent = "";
       keys.forEach((key) => {
         const row = document.createElement("tr");
@@ -880,10 +980,14 @@ function renderAdminPage(nonce: string): string {
           btn.textContent = "Deactivate";
           btn.dataset.id = key.id;
           btn.addEventListener("click", () => {
+            const statusEl = document.getElementById("apiKeyStatus");
             apiFetch("/api/admin/keys/deactivate", {
               method: "POST",
               body: JSON.stringify({ id: key.id }),
-            }).then(() => refreshKeys()).catch((err) => console.error("Deactivate key failed:", err));
+            }).then(() => refreshKeys()).catch((err) => {
+              console.error("Deactivate key failed:", err);
+              if (statusEl) statusEl.textContent = "Error: " + (err?.message ?? "Deactivate failed");
+            });
           });
           actionTd.appendChild(btn);
         }
@@ -897,8 +1001,16 @@ function renderAdminPage(nonce: string): string {
         method: "POST",
         body: JSON.stringify({ deactivateOld: true }),
       });
+      if (!result?.key) {
+        console.error("rotateKey: unexpected response — no key in data", result);
+        return;
+      }
       const box = document.getElementById("newKeyBox");
       const value = document.getElementById("newKeyValue");
+      if (!box || !value) {
+        console.error("rotateKey: missing DOM elements newKeyBox/newKeyValue");
+        return;
+      }
       value.textContent = result.key;
       box.style.display = "block";
       refreshKeys().catch((err) => console.error("refreshKeys failed:", err));
@@ -907,6 +1019,7 @@ function renderAdminPage(nonce: string): string {
     async function refreshProjects() {
       const projects = await apiFetch("/api/admin/projects");
       const table = document.getElementById("projectsTable");
+      if (!table) { console.error("refreshProjects: missing DOM element projectsTable"); return; }
       table.textContent = "";
       projects.forEach((project) => {
         const row = document.createElement("tr");
@@ -924,10 +1037,20 @@ function renderAdminPage(nonce: string): string {
           if (!confirm("Delete all memory, graph, and diagnostics for this project?")) {
             return;
           }
+          const statusNote = document.querySelector(".card h2");
           apiFetch("/api/admin/projects", {
             method: "DELETE",
             body: JSON.stringify({ projectDir: project.projectDir }),
-          }).then(() => refreshProjects()).catch((err) => console.error("Delete project failed:", err));
+          }).then(() => refreshProjects()).catch((err) => {
+            console.error("Delete project failed:", err);
+            if (statusNote) {
+              const errEl = document.createElement("span");
+              errEl.className = "error";
+              errEl.textContent = " Error: " + (err?.message ?? "Delete failed");
+              statusNote.appendChild(errEl);
+              setTimeout(() => errEl.remove(), 5000);
+            }
+          });
         });
         actionTd.appendChild(btn);
         row.appendChild(actionTd);
@@ -940,37 +1063,63 @@ function renderAdminPage(nonce: string): string {
       if (!config) {
         return;
       }
-      document.getElementById("llmProvider").value = config.provider;
-      document.getElementById("llmModel").value = config.model || "";
-      document.getElementById("llmBaseUrl").value = config.baseUrl || "";
-      document.getElementById("llmStatus").textContent = config.hasApiKey ? "Configured" : "Missing";
+      const providerEl = document.getElementById("llmProvider");
+      const modelEl = document.getElementById("llmModel");
+      const baseUrlEl = document.getElementById("llmBaseUrl");
+      const statusEl = document.getElementById("llmStatus");
+      if (!providerEl || !modelEl || !baseUrlEl || !statusEl) {
+        console.error("loadLLMConfig: missing DOM elements");
+        return;
+      }
+      providerEl.value = config.provider;
+      modelEl.value = config.model || "";
+      baseUrlEl.value = config.baseUrl || "";
+      statusEl.textContent = config.hasApiKey ? "Configured" : "Missing";
     }
 
     async function saveLLMConfig() {
+      const providerEl = document.getElementById("llmProvider");
+      const modelEl = document.getElementById("llmModel");
+      const baseUrlEl = document.getElementById("llmBaseUrl");
+      const llmApiKeyEl = document.getElementById("llmApiKey");
+      const statusEl = document.getElementById("llmStatus");
+      if (!providerEl || !modelEl || !baseUrlEl || !llmApiKeyEl || !statusEl) {
+        console.error("saveLLMConfig: missing DOM elements");
+        return;
+      }
       const payload = {
-        provider: document.getElementById("llmProvider").value,
-        model: document.getElementById("llmModel").value,
-        baseUrl: document.getElementById("llmBaseUrl").value,
-        apiKey: document.getElementById("llmApiKey").value,
+        provider: providerEl.value,
+        model: modelEl.value,
+        baseUrl: baseUrlEl.value,
+        apiKey: llmApiKeyEl.value,
       };
       await apiFetch("/api/admin/llm-config", {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      document.getElementById("llmStatus").textContent = "Saved";
-      document.getElementById("llmApiKey").value = "";
+      statusEl.textContent = "Saved";
+      llmApiKeyEl.value = "";
     }
 
-    document.getElementById("refreshKeys").addEventListener("click", () => refreshKeys().catch((err) => console.error("refreshKeys failed:", err)));
-    document.getElementById("rotateKey").addEventListener("click", () => rotateKey().catch((err) => console.error("rotateKey failed:", err)));
-    document.getElementById("refreshProjects").addEventListener("click", () => refreshProjects().catch((err) => console.error("refreshProjects failed:", err)));
-    document.getElementById("saveLLMConfig").addEventListener("click", () => saveLLMConfig().catch((err) => console.error("saveLLMConfig failed:", err)));
+    // Wire up button event listeners with null-guards: if the HTML template ever changes
+    // and an element is missing, we log an error instead of throwing a silent TypeError.
+    const btn_refreshKeys = document.getElementById("refreshKeys");
+    const btn_rotateKey = document.getElementById("rotateKey");
+    const btn_refreshProjects = document.getElementById("refreshProjects");
+    const btn_saveLLMConfig = document.getElementById("saveLLMConfig");
 
-    if (state.apiKey) {
-      refreshKeys().catch(console.error);
-      refreshProjects().catch(console.error);
-      loadLLMConfig().catch(console.error);
-    }
+    if (btn_refreshKeys) btn_refreshKeys.addEventListener("click", () => refreshKeys().catch((err) => console.error("refreshKeys failed:", err)));
+    else console.error("Admin UI: missing element refreshKeys");
+    if (btn_rotateKey) btn_rotateKey.addEventListener("click", () => rotateKey().catch((err) => console.error("rotateKey failed:", err)));
+    else console.error("Admin UI: missing element rotateKey");
+    if (btn_refreshProjects) btn_refreshProjects.addEventListener("click", () => refreshProjects().catch((err) => console.error("refreshProjects failed:", err)));
+    else console.error("Admin UI: missing element refreshProjects");
+    if (btn_saveLLMConfig) btn_saveLLMConfig.addEventListener("click", () => saveLLMConfig().catch((err) => console.error("saveLLMConfig failed:", err)));
+    else console.error("Admin UI: missing element saveLLMConfig");
+
+    // Data is not auto-loaded on page open: the API key must be entered via 'Save for Admin UI'
+    // before any API calls can be made. The key is stored in memory only (not sessionStorage)
+    // to reduce the XSS exposure window — refreshing the page clears the key.
   </script>
 </body>
 </html>`;
