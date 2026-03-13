@@ -4,9 +4,11 @@
  * @module util/__tests__/path-safety.test
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, afterEach } from "bun:test";
 import { isProjectDirSafe } from "../path-safety.js";
 
+// These tests use paths that don't exist on the test machine (e.g., /custom-home),
+// so fs.realpathSync falls back to path.resolve — which is the intended code path.
 describe("isProjectDirSafe", () => {
   const originalHome = process.env["HOME"];
 

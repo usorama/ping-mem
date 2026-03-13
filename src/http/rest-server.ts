@@ -1693,13 +1693,26 @@ export class RESTPingMemServer {
   }
 
   /**
-   * Regex matching domain error class names whose messages are safe to expose
-   * to clients. Used by both handleError (4xx message filtering) and getStatusCode
-   * (message-based fallback classification). Uses error.name (survives minification)
-   * rather than error.constructor.name (which is renamed during bundling).
+   * Exact set of domain error names whose messages are safe to expose to clients.
+   * Uses error.name (explicitly set in each error constructor via this.name = "...")
+   * which survives minification, unlike error.constructor.name which reflects the
+   * minified class variable name. An exact Set avoids false-positive substring
+   * matches (e.g., a hypothetical "MemoryManagerError" base class).
    */
-  private static readonly DOMAIN_ERROR_RE =
-    /Memory|Agent|Quota|Lock|Evidence|Schema|Scope|Session/;
+  private static readonly DOMAIN_ERROR_NAMES = new Set([
+    "MemoryKeyNotFoundError",
+    "MemoryKeyExistsError",
+    "MemoryNotFoundError",
+    "AgentNotRegisteredError",
+    "QuotaExhaustedError",
+    "WriteLockConflictError",
+    "EvidenceGateRejectionError",
+    "ScopeViolationError",
+    "SchemaValidationError",
+    "InvalidSessionError",
+    "InvalidSessionStateError",
+    "SessionNotFoundError",
+  ]);
 
   /**
    * Handle errors and return consistent error responses
@@ -1720,10 +1733,8 @@ export class RESTPingMemServer {
     // For 4xx: only return raw message for known domain error classes whose messages
     // are safe to expose. All others get a generic message to prevent leaking internal
     // details (SQL errors, file paths) from misclassified exceptions.
-    // Uses error.name (set explicitly in constructors) which survives minification,
-    // unlike error.constructor.name which is renamed during bundling.
     const isDomainError = error instanceof Error &&
-      RESTPingMemServer.DOMAIN_ERROR_RE.test(error.name);
+      RESTPingMemServer.DOMAIN_ERROR_NAMES.has(error.name);
     const safeMessage = isDomainError ? rawMessage : this.getErrorName(statusCode);
 
     log.error("Error", { message: rawMessage });
@@ -1738,9 +1749,9 @@ export class RESTPingMemServer {
    */
   private getStatusCode(error: unknown): number {
     if (error instanceof Error) {
-      // Use error.name for reliable mapping (survives minification — set explicitly in constructors)
+      // Use error.name for reliable mapping (explicitly set in each error constructor)
       const name = error.name;
-      if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError") return 404;
+      if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError" || name === "SessionNotFoundError") return 404;
       if (name === "QuotaExhaustedError" || name === "WriteLockConflictError") return 409;
       if (name === "EvidenceGateRejectionError" || name === "ScopeViolationError") return 403;
       if (name === "MemoryKeyExistsError") return 409;
@@ -1748,20 +1759,21 @@ export class RESTPingMemServer {
       if (name === "InvalidSessionStateError") return 409;
       // Check for known error codes
       const codeErr = error as { code?: string };
-      if (codeErr.code === "MEMORY_NOT_FOUND") return 404;
+      if (codeErr.code === "MEMORY_NOT_FOUND" || codeErr.code === "SESSION_NOT_FOUND") return 404;
       if (codeErr.code === "QUOTA_EXHAUSTED" || codeErr.code === "WRITE_LOCK_CONFLICT") return 409;
       if (codeErr.code === "MEMORY_EXISTS") return 409;
       if (codeErr.code === "INVALID_SESSION") return 400;
       if (codeErr.code === "INVALID_SESSION_STATE") return 409;
       if (codeErr.code === "AGENT_EXPIRED") return 410;
       // Fallback to message-based detection — only for known domain error names
-      if (RESTPingMemServer.DOMAIN_ERROR_RE.test(error.name)) {
+      if (RESTPingMemServer.DOMAIN_ERROR_NAMES.has(error.name)) {
+        const safeName = error.name.replace(/[\r\n\t]/g, "?").slice(0, 64);
         if (error.message.includes("not found")) {
-          log.warn(`getStatusCode: message-based 404 for '${error.name}': ${error.message.slice(0, 80)}`);
+          log.warn("getStatusCode: message-based 404", { errorName: safeName, message: error.message.slice(0, 80) });
           return 404;
         }
         if (error.message.includes("invalid") || error.message.includes("required")) {
-          log.warn(`getStatusCode: message-based 400 for '${error.name}': ${error.message.slice(0, 80)}`);
+          log.warn("getStatusCode: message-based 400", { errorName: safeName, message: error.message.slice(0, 80) });
           return 400;
         }
       }

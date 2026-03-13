@@ -112,7 +112,7 @@ export function registerDashboardRoutes(deps: UIDependencies) {
         csrfToken,
       }));
     } catch (err) {
-      const errName = err instanceof Error ? err.constructor.name : "Unknown";
+      const errName = err instanceof Error ? err.name : "Unknown";
       const errMsg = err instanceof Error ? err.message : String(err);
       log.error("Error", { name: errName, message: errMsg });
       const nonce = getCspNonce(c);

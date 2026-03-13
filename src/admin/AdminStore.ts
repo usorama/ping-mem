@@ -219,8 +219,11 @@ export class AdminStore {
    * seed key and creating a new one via createApiKey() doesn't re-seed on restart.
    */
   ensureSeedApiKey(rawKey: string): void {
-    const count = (this.stmtCountAllKeys.get() as { count: number }).count;
-    if (count > 0) {
+    const row = this.stmtCountAllKeys.get() as { count: number } | undefined;
+    if (!row) {
+      throw new Error("ensureSeedApiKey: admin_api_keys table query failed (schema corruption?)");
+    }
+    if (row.count > 0) {
       return;
     }
     const { keyHash, last4 } = this.hashApiKey(rawKey);

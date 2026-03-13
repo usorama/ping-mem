@@ -533,7 +533,11 @@ export class SessionManager {
   }
 
   /**
-   * Cleanup resources
+   * Cleanup resources.
+   * Does NOT close the EventStore — the caller that created it owns its lifecycle.
+   * SessionManager receives EventStore via constructor injection, so closing it here
+   * would violate the ownership contract when the store is shared (e.g., between
+   * PingMemServer and RESTPingMemServer).
    */
   async close(): Promise<void> {
     // Clear all checkpoint timers
@@ -541,9 +545,6 @@ export class SessionManager {
       clearInterval(timer);
     }
     this.checkpointTimers.clear();
-
-    // Close event store
-    await this.eventStore.close();
   }
 
   /**

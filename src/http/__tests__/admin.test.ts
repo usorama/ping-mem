@@ -690,7 +690,9 @@ describe("admin.ts - lockout 429 includes Retry-After", () => {
 
 
 // ---------------------------------------------------------------------------
-// _isProjectDirSafe — path traversal containment
+// _isProjectDirSafe — path traversal containment (re-exported from util/path-safety.ts)
+// Comprehensive unit tests live in src/util/__tests__/path-safety.test.ts.
+// These integration tests verify admin.ts correctly re-exports and uses the function.
 // ---------------------------------------------------------------------------
 
 describe("admin.ts - _isProjectDirSafe", () => {

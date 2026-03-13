@@ -11,10 +11,17 @@ import * as path from "path";
 
 /**
  * System paths that must never be used as allowed roots, even if they
- * pass the length check. /root is 5 chars but is the root user's home
- * directory — allowing it would grant access to all of /root/*.
+ * pass the length check. Includes:
+ * - /root: root user's home directory (5 chars, passes length check)
+ * - /tmp: world-writable on POSIX (explicit deny, not just length-based)
+ * - /proc, /sys, /dev: kernel pseudo-filesystems
+ * - /boot, /sbin, /bin: system binaries
+ * - /snap, /run, /srv, /mnt, /media: system mount points
  */
-const DENIED_ROOTS = new Set(["/root"]);
+const DENIED_ROOTS = new Set([
+  "/root", "/tmp", "/proc", "/sys", "/dev", "/boot", "/sbin", "/bin",
+  "/snap", "/run", "/srv", "/mnt", "/media", "/lost+found",
+]);
 
 /**
  * Checks whether a resolved projectDir is within an allowed root.
