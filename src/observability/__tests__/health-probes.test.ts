@@ -118,9 +118,15 @@ describe("sanitizeHealthError", () => {
     expect(sanitizeHealthError(new Error("SSL_ERROR_SYSCALL"))).toBe("TLS/certificate error");
   });
 
-  test("returns generic message for unknown errors", () => {
-    expect(sanitizeHealthError(new Error("something weird happened"))).toBe("service unavailable");
-    expect(sanitizeHealthError("string error")).toBe("service unavailable");
+  test("returns partial message for unknown errors (first 64 chars for diagnostics)", () => {
+    // Fallback includes the first 64 sanitized chars so authenticated callers get some context.
+    expect(sanitizeHealthError(new Error("something weird happened"))).toBe("something weird happened");
+    expect(sanitizeHealthError("string error")).toBe("string error");
+    // Very long unknown errors are capped at 64 chars.
+    const longMsg = "x".repeat(100);
+    expect(sanitizeHealthError(new Error(longMsg))).toBe("x".repeat(64));
+    // Empty/blank falls back to generic string.
+    expect(sanitizeHealthError(new Error(""))).toBe("service unavailable");
   });
 
   test("is case-insensitive", () => {

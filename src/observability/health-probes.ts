@@ -75,7 +75,10 @@ export function sanitizeHealthError(error: unknown): string {
   if (lower.includes("certificate") || lower.includes("tls") || lower.includes("ssl")) return "TLS/certificate error";
   if (lower.includes("enospc") || lower.includes("disk")) return "disk space issue";
   if (lower.includes("auth") || lower.includes("credentials") || lower.includes("unauthorized")) return "authentication failed";
-  return "service unavailable";
+  // Fallback: return first 64 sanitized chars for diagnostic context.
+  // This endpoint is only accessible to authenticated callers, so partial
+  // error text does not leak sensitive data to unauthenticated parties.
+  return msg.slice(0, 64) || "service unavailable";
 }
 
 function roundMs(value: number): number {

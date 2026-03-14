@@ -212,7 +212,9 @@ export class EventStore {
     }
     const rawTimeout = Number(this.config.busyTimeout);
     const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(rawTimeout, 60000) : 5000;
-    this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
+    // Math.trunc ensures an integer string (no "5000.0") — value is already validated/clamped above
+    // so numeric injection is not possible, but integer form is canonical for PRAGMA.
+    this.db.exec(`PRAGMA busy_timeout = ${Math.trunc(timeout)}`);
 
     // Initialize schema
     this.initializeSchema();
@@ -293,12 +295,18 @@ export class EventStore {
     );
     // Fetch only the latest event for a session — used by createCheckpoint() to avoid
     // loading the full event history when all we need is the last event ID.
+    // ORDER BY event_id DESC (not timestamp): UUIDv7 event IDs encode millisecond timestamp
+    // + a 12-bit monotonic sequence counter, guaranteeing total order even for same-millisecond
+    // events. Ordering by the ISO-8601 timestamp string is non-deterministic when two events
+    // share the same millisecond.
     this.stmtGetLastEventBySession = this.db.prepare(
-      "SELECT event_id FROM events WHERE session_id = $session_id ORDER BY timestamp DESC LIMIT 1"
+      "SELECT event_id FROM events WHERE session_id = $session_id ORDER BY event_id DESC LIMIT 1"
     );
-    // LIMIT 10000: prevent unbounded memory load on a store with many historical sessions.
+    // GROUP BY + MIN(timestamp): correct way to get distinct sessions ordered by first appearance.
+    // DISTINCT + ORDER BY on a non-projected column forces a full-table scan without benefiting
+    // from the idx_events_session index. LIMIT 10000: prevent unbounded memory load.
     this.stmtListSessions = this.db.prepare(
-      "SELECT DISTINCT session_id FROM events ORDER BY timestamp ASC LIMIT 10000"
+      "SELECT session_id FROM events GROUP BY session_id ORDER BY MIN(timestamp) ASC LIMIT 10000"
     );
     // $limit is a bind parameter so we can reuse this statement for all limit values.
     this.stmtGetRecentEvents = this.db.prepare(
@@ -422,17 +430,21 @@ export class EventStore {
         "ALTER TABLE events ADD COLUMN agent_id TEXT"
       );
     } else {
-      // Record migration as applied if column already exists (e.g., from manual ALTER)
+      // Record migration as applied if column already exists (e.g., from manual ALTER).
+      // Wrapped in a transaction (same as runMigration) so a crash between check and insert
+      // does not leave migrations table in an inconsistent state.
       const existing = this.db
         .prepare("SELECT migration_id FROM migrations WHERE migration_id = $id")
         .get({ $id: "v2_agent_id_column" }) as { migration_id: string } | undefined;
       if (!existing) {
-        this.db.prepare(
-          "INSERT INTO migrations (migration_id, applied_at) VALUES ($id, $applied_at)"
-        ).run({
-          $id: "v2_agent_id_column",
-          $applied_at: new Date().toISOString(),
-        });
+        this.db.transaction(() => {
+          this.db.prepare(
+            "INSERT INTO migrations (migration_id, applied_at) VALUES ($id, $applied_at)"
+          ).run({
+            $id: "v2_agent_id_column",
+            $applied_at: new Date().toISOString(),
+          });
+        })();
       }
     }
 

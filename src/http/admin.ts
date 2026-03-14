@@ -119,13 +119,23 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
     }
   }
 
-  // Enforce hard cap on rate limit map size - evict oldest entries if over limit
+  // Enforce hard cap on rate limit map size.
+  // First pass: evict expired entries O(N) — common under an attack with many distinct IPs
+  // because expired windows make up the bulk of entries. Only fall back to the O(N log N) sort
+  // if the map is still over capacity after expiry cleanup (i.e., all entries are active).
   if (adminRateLimitMap.size >= MAX_RATE_LIMIT_ENTRIES) {
-    const sortedEntries = Array.from(adminRateLimitMap.entries())
-      .sort(([, a], [, b]) => a.resetAt - b.resetAt);
-    const toEvict = sortedEntries.slice(0, Math.max(1, sortedEntries.length - MAX_RATE_LIMIT_ENTRIES + 1));
-    for (const [key] of toEvict) {
-      adminRateLimitMap.delete(key);
+    for (const [key, entry] of adminRateLimitMap) {
+      if (now > entry.resetAt) {
+        adminRateLimitMap.delete(key);
+      }
+    }
+    if (adminRateLimitMap.size >= MAX_RATE_LIMIT_ENTRIES) {
+      const sortedEntries = Array.from(adminRateLimitMap.entries())
+        .sort(([, a], [, b]) => a.resetAt - b.resetAt);
+      const toEvict = sortedEntries.slice(0, Math.max(1, sortedEntries.length - MAX_RATE_LIMIT_ENTRIES + 1));
+      for (const [key] of toEvict) {
+        adminRateLimitMap.delete(key);
+      }
     }
   }
 
@@ -234,6 +244,10 @@ export function sanitizeAdminError(message: string): string {
   // Strip control characters first; apply fast short-circuit before the regex chain
   // so inputs without any detectable key prefix skip the expensive scanning.
   const capped = message.slice(0, 4096).replace(/[\r\n\t\x00-\x1F\x7F]/g, "");
+  // Fast short-circuit: skip the regex chain for inputs that contain no known key prefixes.
+  // The tog[a-z]?_ test covers all Together AI legacy prefixes (tog_, togx_, toga_, togb_, …)
+  // matching the \btog[a-z]?_[A-Za-z0-9]{32,}\b regex below — using a single test instead of
+  // enumerating each prefix prevents the gap where e.g. toga_ or togb_ would pass the check.
   if (
     !capped.includes("sk-") &&
     !capped.includes("AIza") &&
@@ -241,8 +255,7 @@ export function sanitizeAdminError(message: string): string {
     !capped.includes("fw_") &&
     !capped.includes("xai-") &&
     !capped.includes("together_api_") &&
-    !capped.includes("tog_") &&
-    !capped.includes("togx_") &&
+    !/tog[a-z]?_/.test(capped) &&
     !capped.includes("pplx-") &&
     !capped.includes("AKIA") &&
     !capped.includes("ASIA") &&
@@ -331,6 +344,7 @@ const log = createLogger("Admin");
 
 const ADMIN_USER_ENV = "PING_MEM_ADMIN_USER";
 const ADMIN_PASS_ENV = "PING_MEM_ADMIN_PASS";
+
 
 // SUPPORTED_PROVIDERS is imported from admin-schemas.ts — single source of truth.
 // Do not redeclare a local list here; the two arrays must never drift out of sync.
@@ -629,6 +643,10 @@ async function handleAdminApi(
 
 export function checkBasicAuth(req: IncomingMessage, res: ServerResponse): boolean {
   const ip = getRemoteIp(req);
+  // Per-call env reads: credential hot-reload (without restart) is a valid operational need.
+  // The theoretical runtime process.env modification attack is mitigated by brute-force lockout
+  // and rate limiting below. Module-level capture would break test isolation (same caveat as
+  // cycle-33 regression — env vars are set in beforeEach, after module import).
   const adminUser = process.env[ADMIN_USER_ENV];
   const adminPass = process.env[ADMIN_PASS_ENV];
   if (!adminUser || !adminPass) {
@@ -781,7 +799,9 @@ async function deleteProjectManifest(projectDir: string): Promise<void> {
   try {
     const remaining = await fs.readdir(manifestDir);
     if (remaining.length === 0) {
-      await fs.rmdir(manifestDir);
+      // fs.rmdir is deprecated since Node 16; fs.rm is the preferred replacement.
+      // recursive: false prevents accidental deletion of non-empty dirs.
+      await fs.rm(manifestDir, { recursive: false });
     }
   } catch (e: unknown) {
     // Directory does not exist — nothing to clean up.

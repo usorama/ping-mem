@@ -405,10 +405,14 @@ export class HealthMonitor {
     // Strip control characters that could cause log injection if alert messages
     // ever include error strings from external systems.
     // Strip C0 (0x00-0x1F), DEL (0x7F), C1 (0x80-0x9F) control characters, and
-    // Unicode BiDi control characters (U+202A-U+202E, U+2066-U+2069).
+    // Unicode BiDi/invisible formatting characters:
+    //   U+202A-U+202E: LRE, RLE, PDF, LRO, RLO — bidi embedding/override controls
+    //   U+2066-U+2069: LRI, RLI, FSI, PDI — bidi isolation controls
+    //   U+061C: Arabic Letter Mark — invisible bidi direction control
+    //   U+FEFF: BOM / Zero-Width No-Break Space — can cause display issues in some browsers
     // C1 characters are interpreted as ANSI escape sequences by many terminal emulators.
-    // BiDi controls can reorder displayed text to misrepresent alert messages in dashboards.
-    const safeMessage = message.replace(/[\x00-\x1f\x7f-\x9f\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 500);
+    // BiDi/invisible controls can reorder or corrupt displayed text in dashboards.
+    const safeMessage = message.replace(/[\x00-\x1f\x7f-\x9f\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 500);
     const previous = this.lastAlerts.get(key) ?? 0;
 
     // Allow severity escalation (warn→critical) and de-escalation (critical→warn) to bypass dedup window

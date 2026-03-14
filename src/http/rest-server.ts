@@ -639,6 +639,12 @@ export class RESTPingMemServer {
         let rawSarif: string | undefined;
 
         if (body.sarif !== undefined) {
+          // Pre-parse size guard: if sarif is a string, reject before JSON.parse to prevent
+          // memory-amplification DoS (a crafted 10 MB JSON string can expand significantly
+          // during deserialization before the post-serialize check would fire).
+          if (typeof body.sarif === "string" && body.sarif.length > MAX_SARIF_BYTES) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "SARIF payload too large (max 5 MB)" }, 400);
+          }
           let sarifPayload: unknown;
           try {
             sarifPayload = typeof body.sarif === "string" ? JSON.parse(body.sarif) : body.sarif;
@@ -654,8 +660,7 @@ export class RESTPingMemServer {
           toolName = toolName ?? parsed.toolName;
           toolVersion = toolVersion ?? parsed.toolVersion;
           rawSarif = typeof body.sarif === "string" ? body.sarif : JSON.stringify(body.sarif);
-          // Guard against memory-amplification DoS: full JSON deserialization + re-serialization
-          // can amplify a crafted payload significantly before reaching the DB write.
+          // Post-serialize check: catches object inputs that serialize to > 5 MB.
           if (rawSarif.length > MAX_SARIF_BYTES) {
             return c.json<RESTErrorResponse>({ error: "Bad Request", message: "SARIF payload too large (max 5 MB)" }, 400);
           }
@@ -1206,8 +1211,9 @@ export class RESTPingMemServer {
         // Build query params — map query text to keyPattern for wildcard matching.
         // Strip glob metacharacters and SQLite LIKE wildcards from user input before wrapping
         // in wildcards. % and _ are also stripped defensively in case the underlying store
-        // ever uses a LIKE expression for pattern matching.
-        const safeQuery = query.replace(/[*?[\]\\%_]/g, "");
+        // ever uses a LIKE expression for pattern matching. Capped at 1000 chars: the query
+        // param itself is validated at 2000, but stripping metacharacters doesn't reduce length.
+        const safeQuery = query.replace(/[*?[\]\\%_]/g, "").slice(0, 1000);
         const queryParams: Record<string, unknown> = { keyPattern: `*${safeQuery}*` };
 
         if (c.req.query("category")) {
@@ -1496,13 +1502,15 @@ export class RESTPingMemServer {
           try {
             validatedAgentId = createAgentId(agentId);
           } catch (err) {
-            if (err instanceof Error && err.message.includes("Invalid agent ID")) {
+            if (err instanceof Error && err.message.startsWith("Invalid agent ID")) {
               return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
             }
             throw err;
           }
+          // Exclude admin column — same policy as the list endpoint to prevent
+          // privilege-level reconnaissance via per-agent lookup.
           const row = db.prepare(
-            "SELECT * FROM agent_quotas WHERE agent_id = $agent_id"
+            "SELECT agent_id, role, ttl_ms, quota_bytes, quota_count, expires_at, created_at, updated_at FROM agent_quotas WHERE agent_id = $agent_id"
           ).get({ $agent_id: validatedAgentId }) as Record<string, unknown> | undefined;
 
           if (!row) {
@@ -1532,7 +1540,7 @@ export class RESTPingMemServer {
         try {
           agentId = createAgentId(rawId);
         } catch (err) {
-          if (err instanceof Error && err.message.includes("Invalid agent ID")) {
+          if (err instanceof Error && err.message.startsWith("Invalid agent ID")) {
             return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
           }
           throw err;
@@ -1571,12 +1579,19 @@ export class RESTPingMemServer {
         return c.json<RESTErrorResponse>({ error: "Unauthorized", message: "Valid API key required" }, 401);
       }
 
-      const channel = c.req.query("channel");
+      const rawChannel = c.req.query("channel");
       const category = c.req.query("category");
       const agentId = c.req.query("agentId");
-      if ((channel && channel.length > 200) || (category && category.length > 200)) {
+      if ((rawChannel && rawChannel.length > 200) || (category && category.length > 200)) {
         return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Filter parameter exceeds maximum length" }, 400);
       }
+      // Validate category against the known set to prevent arbitrary strings in subscription filters.
+      if (category && !RESTPingMemServer.VALID_CATEGORIES.has(category)) {
+        return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid category: must be task, decision, progress, note, error, or warning" }, 400);
+      }
+      // Strip control characters from channel: it's user-defined so an allowlist isn't possible,
+      // but control chars must not reach subscription map keys or log lines.
+      const channel = rawChannel ? rawChannel.replace(/[\x00-\x1f\x7f]/g, "") : undefined;
 
       // Validate agentId exists and is not expired if provided
       if (agentId) {
@@ -1601,7 +1616,9 @@ export class RESTPingMemServer {
       }
 
       // Track cleanup state shared between start() and cancel()
-      let sseHeartbeat: ReturnType<typeof setInterval> = 0 as unknown as ReturnType<typeof setInterval>;
+      // Initialized to null so clearInterval is never called with a bogus 0 handle
+      // before start() assigns the real interval (e.g., on an early abort/cancel event).
+      let sseHeartbeat: ReturnType<typeof setInterval> | null = null;
       let sseSubscriptionId = "";
       let sseReleaseConnection: (() => void) | null = null;
 
@@ -1630,7 +1647,7 @@ export class RESTPingMemServer {
               } catch (err) {
                 // Stream closed — clean up subscription and heartbeat
                 this.pubsub?.unsubscribe(sseSubscriptionId);
-                clearInterval(sseHeartbeat);
+                if (sseHeartbeat !== null) clearInterval(sseHeartbeat);
                 releaseConnection();
                 if (err instanceof TypeError && /closed|errored/i.test(String(err.message))) return;
                 log.error("SSE failed to send event", { error: err instanceof Error ? err.message : String(err) });
@@ -1643,7 +1660,7 @@ export class RESTPingMemServer {
             try {
               controller.enqueue(encoder.encode(`: heartbeat\n\n`));
             } catch (err) {
-              clearInterval(sseHeartbeat);
+              if (sseHeartbeat !== null) clearInterval(sseHeartbeat);
               this.pubsub?.unsubscribe(sseSubscriptionId);
               releaseConnection();
               if (!(err instanceof TypeError && /closed|errored/i.test(String(err.message)))) {
@@ -1654,7 +1671,7 @@ export class RESTPingMemServer {
 
           // Clean up on abort
           c.req.raw.signal.addEventListener("abort", () => {
-            clearInterval(sseHeartbeat);
+            if (sseHeartbeat !== null) clearInterval(sseHeartbeat);
             this.pubsub.unsubscribe(sseSubscriptionId);
             releaseConnection();
             try {
@@ -1669,7 +1686,7 @@ export class RESTPingMemServer {
         },
         cancel: () => {
           // Fires when consumer calls reader.cancel() or stream is otherwise cancelled
-          clearInterval(sseHeartbeat);
+          if (sseHeartbeat !== null) clearInterval(sseHeartbeat);
           if (sseSubscriptionId) this.pubsub?.unsubscribe(sseSubscriptionId);
           sseReleaseConnection?.();
         },
@@ -2094,8 +2111,9 @@ export class RESTPingMemServer {
         config.agentId = createAgentId(meta.agentId);
       }
       if (meta?.agentRole && typeof meta.agentRole === "string") {
-        // Strip control characters (log injection) and cap length before storing.
-        config.agentRole = meta.agentRole.replace(/[\x00-\x1f]/g, "?").slice(0, 200);
+        // Strip (not replace) control characters: replacing with '?' creates misleading
+        // strings like "admin?user" from "admin\x01user" that could match downstream comparisons.
+        config.agentRole = meta.agentRole.replace(/[\x00-\x1f]/g, "").slice(0, 200);
       }
     }
 
