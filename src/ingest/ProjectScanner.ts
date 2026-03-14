@@ -72,7 +72,16 @@ export class ProjectScanner {
     // (which always resolves symlinks). macOS: /var → /private/var.
     const rootPath = fs.realpathSync(path.resolve(projectDir));
     const files = await this.collectFiles(rootPath);
-    const fileEntries = files.map((filePath) =>
+    // Filter out files returned by git ls-files that no longer exist on disk
+    // (tracked but locally deleted, or stale index entries).
+    const existingFiles = files.filter((f) => {
+      try { fs.accessSync(f, fs.constants.R_OK); return true; }
+      catch { return false; }
+    });
+    if (existingFiles.length < files.length) {
+      log.info(`Skipped ${files.length - existingFiles.length} missing files from git index`);
+    }
+    const fileEntries = existingFiles.map((filePath) =>
       this.hashFile(rootPath, filePath)
     );
 
