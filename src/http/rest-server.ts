@@ -407,15 +407,6 @@ export class RESTPingMemServer {
           ...(body.projectDir !== undefined ? { projectDir: body.projectDir } : {}),
           ...(body.continueFrom !== undefined ? { continueFrom: body.continueFrom } : {}),
           ...(body.defaultChannel !== undefined ? { defaultChannel: body.defaultChannel } : {}),
-          ...(agentId !== undefined ? { agentId: createAgentId(agentId) } : {}),
-          ...(agentId !== undefined || agentRole !== undefined
-            ? {
-                metadata: {
-                  ...(agentId !== undefined ? { agentId } : {}),
-                  ...(agentRole !== undefined ? { agentRole } : {}),
-                },
-              }
-            : {}),
         });
 
         this.currentSessionId = session.id;
@@ -429,14 +420,6 @@ export class RESTPingMemServer {
 
         if (this.vectorIndex) {
           memoryConfig.vectorIndex = this.vectorIndex;
-        }
-
-        // Propagate agent identity to memory manager
-        if (agentId) {
-          memoryConfig.agentId = createAgentId(agentId);
-        }
-        if (agentRole) {
-          memoryConfig.agentRole = agentRole;
         }
 
         const memoryManager = new MemoryManager(memoryConfig);

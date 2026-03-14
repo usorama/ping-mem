@@ -311,10 +311,6 @@ export class Neo4jClient {
     return "closed";
   }
 
-  getCircuitState(): "closed" | "open" | "half-open" {
-    return this.servicePolicy.state;
-  }
-
   /**
    * Get a new session from the driver
    *
