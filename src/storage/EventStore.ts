@@ -590,11 +590,16 @@ export class EventStore {
         const checkpointItemsResult = stmtCheckpointItems.run({ $sessionId: sessionId });
         const checkpointResult = stmtCheckpoint.run({ $sessionId: sessionId });
         const eventResult = stmtEvent.run({ $sessionId: sessionId });
+      }
 
-        // Verify deletions completed successfully without constraint violations
-        if (checkpointItemsResult.changes < 0 || checkpointResult.changes < 0 || eventResult.changes < 0) {
-          throw new Error(`Session deletion failed: negative change count for session ${sessionId}`);
-        }
+      // Verify referential integrity after all deletions (SQLite changes are never negative, so check for orphans instead)
+      const orphanCheck = this.db.prepare(`
+        SELECT COUNT(*) as orphans FROM checkpoints
+        WHERE last_event_id NOT IN (SELECT event_id FROM events)
+      `).get() as { orphans: number };
+
+      if (orphanCheck.orphans > 0) {
+        throw new Error(`Session deletion created ${orphanCheck.orphans} orphaned checkpoint references`);
       }
     });
     deleteMany();
@@ -823,7 +828,16 @@ export class EventStore {
     if (this.config.dbPath === ":memory:") {
       return; // no WAL for in-memory
     }
-    this.db.exec(`PRAGMA wal_checkpoint(${mode})`);
+
+    // Use parameterized approach to prevent SQL injection even if type system is bypassed
+    const PRAGMA_STATEMENTS = {
+      "PASSIVE": "PRAGMA wal_checkpoint(PASSIVE)",
+      "TRUNCATE": "PRAGMA wal_checkpoint(TRUNCATE)",
+      "FULL": "PRAGMA wal_checkpoint(FULL)",
+      "RESTART": "PRAGMA wal_checkpoint(RESTART)"
+    } as const;
+
+    this.db.exec(PRAGMA_STATEMENTS[mode]);
   }
 
   /**

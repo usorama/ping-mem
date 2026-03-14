@@ -111,7 +111,7 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
   if (adminRateLimitMap.size >= MAX_RATE_LIMIT_ENTRIES) {
     const sortedEntries = Array.from(adminRateLimitMap.entries())
       .sort(([, a], [, b]) => a.resetAt - b.resetAt);
-    const toEvict = sortedEntries.slice(0, Math.max(1, sortedEntries.length - MAX_RATE_LIMIT_ENTRIES + 1000));
+    const toEvict = sortedEntries.slice(0, Math.max(1, sortedEntries.length - MAX_RATE_LIMIT_ENTRIES + 1));
     for (const [key] of toEvict) {
       adminRateLimitMap.delete(key);
     }
@@ -133,7 +133,7 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
   if (authFailureMap.size >= MAX_AUTH_FAILURE_ENTRIES) {
     const sortedEntries = Array.from(authFailureMap.entries())
       .sort(([, a], [, b]) => a.lastSeen - b.lastSeen);
-    const toEvict = sortedEntries.slice(0, Math.max(1, sortedEntries.length - MAX_AUTH_FAILURE_ENTRIES + 500));
+    const toEvict = sortedEntries.slice(0, Math.max(1, sortedEntries.length - MAX_AUTH_FAILURE_ENTRIES + 1));
     for (const [key] of toEvict) {
       authFailureMap.delete(key);
     }
@@ -219,6 +219,8 @@ export function sanitizeAdminError(message: string): string {
   const capped = message.slice(0, 4096);
   return (
     capped
+      // Remove control characters to prevent log injection attacks
+      .replace(/[\r\n\t\x00-\x1F\x7F]/g, "")
       // OpenAI, Anthropic (sk-ant-...), OpenRouter (sk-or-...), DeepSeek, etc.
       .replace(/\bsk-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // Gemini / Google AI Studio
