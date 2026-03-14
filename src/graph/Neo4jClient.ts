@@ -219,6 +219,18 @@ export class Neo4jClient {
       return;
     }
 
+    // Close stale driver before creating a new one (e.g., after circuit breaker opens
+    // and sets connected=false while driver is still live). Without this, connect()
+    // would create a second driver, leaking the old connection pool.
+    if (this.driver !== null) {
+      try {
+        await this.driver.close();
+      } catch {
+        // Ignore close errors on a stale driver
+      }
+      this.driver = null;
+    }
+
     try {
       const driverConfig: Record<string, unknown> = {
         maxConnectionPoolSize: this.config.maxConnectionPoolSize,
