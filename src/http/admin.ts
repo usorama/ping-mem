@@ -124,7 +124,10 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
   for (const [key, record] of authFailureMap) {
     const expiredLockout = record.lockedUntil > 0 && now > record.lockedUntil && record.count === 0;
     const stalePartial = record.lockedUntil === 0 && record.count > 0 && (now - record.lastSeen) > AUTH_FAILURE_STALE_MS;
-    if (expiredLockout || stalePartial) {
+    // After a lockout expires, recordAuthFailure() resets both count and lockedUntil to 0.
+    // Neither expiredLockout nor stalePartial matches that state — evict explicitly.
+    const normalizedIdle = record.lockedUntil === 0 && record.count === 0;
+    if (expiredLockout || stalePartial || normalizedIdle) {
       authFailureMap.delete(key);
     }
   }
@@ -1078,10 +1081,11 @@ function renderAdminPage(nonce: string): string {
           apiFetch("/api/admin/projects", {
             method: "DELETE",
             body: JSON.stringify({ projectDir: project.projectDir }),
-          }).then((result: unknown) => {
+          }).then((result) => {
             // Surface partial-cleanup warnings (HTTP 207) to the operator before refreshing.
-            const data = (result as { data?: { warnings?: string[] } } | null)?.data;
-            const warns = data?.warnings;
+            const warns = result && result.data && Array.isArray(result.data.warnings)
+              ? result.data.warnings
+              : null;
             if (Array.isArray(warns) && warns.length > 0 && statusNote) {
               const warnEl = document.createElement("span");
               warnEl.className = "error";

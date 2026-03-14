@@ -256,8 +256,6 @@ export class HealthMonitor {
     this.qualityTickRunning = true;
 
     try {
-      let probeSucceeded = false;
-
       // SQLite integrity check (expensive — only runs in quality tick, not fast tick)
       try {
         const integrityOk = this.deps.eventStore.getIntegrityOk();
@@ -268,7 +266,6 @@ export class HealthMonitor {
         // Clear any prior integrity failure alert on successful check
         this.activeAlerts.delete("sqlite:integrity_check_failed");
         this.lastAlerts.delete("sqlite:integrity_check_failed");
-        probeSucceeded = true;
       } catch (error) {
         log.warn("SQLite integrity check failed", { error: error instanceof Error ? error.message : String(error) });
         this.alert("critical", "sqlite:integrity_check_failed", "sqlite",
@@ -300,7 +297,6 @@ export class HealthMonitor {
           // Clear any prior quality probe failure alert on success
           this.activeAlerts.delete("neo4j:quality_probe_failed");
           this.lastAlerts.delete("neo4j:quality_probe_failed");
-          probeSucceeded = true;
         } catch (error) {
           log.warn("Neo4j quality tick failed", { error: error instanceof Error ? error.message : String(error) });
           this.alert("warning", "neo4j:quality_probe_failed", "neo4j",
@@ -311,7 +307,7 @@ export class HealthMonitor {
       if (this.stopping) return;
 
       const qdrantClient = this.deps.services.qdrantClient;
-      if (qdrantClient && (qdrantClient.isConnected() || qdrantClient.getCircuitState() === "half-open")) {
+      if (qdrantClient && qdrantClient.getCircuitState() !== "open") {
         try {
           const stats = await qdrantClient.getStats();
           const pointCount = stats.totalVectors;
@@ -341,7 +337,6 @@ export class HealthMonitor {
           // Clear any prior quality probe failure alert on success
           this.activeAlerts.delete("qdrant:quality_probe_failed");
           this.lastAlerts.delete("qdrant:quality_probe_failed");
-          probeSucceeded = true;
         } catch (error) {
           log.warn("Qdrant quality tick failed", { error: error instanceof Error ? error.message : String(error) });
           this.alert("warning", "qdrant:quality_probe_failed", "qdrant",
@@ -429,9 +424,4 @@ export class HealthMonitor {
     }
     log.warn(`WARNING ${message}`, { key, source });
   }
-
-  /**
-   * Get current WAL size in bytes for transaction safety verification
-   * @private
-   */
 }

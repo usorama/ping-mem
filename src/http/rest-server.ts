@@ -362,7 +362,10 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/session/start", async (c) => {
       try {
-        const parseResult = SessionStartSchema.safeParse(await c.req.json());
+        let _reqBody0: unknown;
+        try { _reqBody0 = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+        const parseResult = SessionStartSchema.safeParse(_reqBody0);
         if (!parseResult.success) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -458,7 +461,10 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/context", async (c) => {
       try {
-        const parseResult = ContextSaveSchema.safeParse(await c.req.json());
+        let _reqBody1: unknown;
+        try { _reqBody1 = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+        const parseResult = ContextSaveSchema.safeParse(_reqBody1);
         if (!parseResult.success) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -567,7 +573,9 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/diagnostics/ingest", async (c) => {
       try {
-        const rawBody = await c.req.json();
+        let rawBody: unknown;
+        try { rawBody = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
 
         // Validate request body with Zod schema
         const parseResult = diagnosticsIngestBaseSchema.safeParse(rawBody);
@@ -704,7 +712,10 @@ export class RESTPingMemServer {
           );
         }
 
-        const parseResult = CodebaseIngestSchema.safeParse(await c.req.json());
+        let _reqBody2: unknown;
+        try { _reqBody2 = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+        const parseResult = CodebaseIngestSchema.safeParse(_reqBody2);
         if (!parseResult.success) {
           return c.json(
             { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -768,7 +779,10 @@ export class RESTPingMemServer {
             503
           );
         }
-        const parseResult = CodebaseVerifySchema.safeParse(await c.req.json());
+        let _reqBody3: unknown;
+        try { _reqBody3 = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+        const parseResult = CodebaseVerifySchema.safeParse(_reqBody3);
         if (!parseResult.success) {
           return c.json(
             { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -924,7 +938,10 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/diagnostics/diff", async (c) => {
       try {
-        const parseResult = DiagnosticsDiffSchema.safeParse(await c.req.json());
+        let _reqBody4: unknown;
+        try { _reqBody4 = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+        const parseResult = DiagnosticsDiffSchema.safeParse(_reqBody4);
         if (!parseResult.success) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -972,7 +989,10 @@ export class RESTPingMemServer {
         if (!analysisId || analysisId.length > 500) {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid analysisId" }, 400);
         }
-        const parseResult = DiagnosticsSummarizeSchema.safeParse(await c.req.json());
+        let _reqBody5: unknown;
+        try { _reqBody5 = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+        const parseResult = DiagnosticsSummarizeSchema.safeParse(_reqBody5);
         if (!parseResult.success) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -1211,7 +1231,10 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/checkpoint", async (c) => {
       try {
-        const parseResult = CheckpointSchema.safeParse(await c.req.json());
+        let _reqBody6: unknown;
+        try { _reqBody6 = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+        const parseResult = CheckpointSchema.safeParse(_reqBody6);
         if (!parseResult.success) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -1380,7 +1403,9 @@ export class RESTPingMemServer {
         db.prepare("DELETE FROM agent_quotas WHERE expires_at IS NOT NULL AND expires_at < $now").run({ $now: new Date().toISOString() });
 
         // Enforce max-agents limit
-        const maxAgents = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10) || 100;
+        const parsedMax = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10);
+        // Guard NaN and non-positive values: `|| 100` would not catch negative ints (truthy).
+        const maxAgents = !Number.isNaN(parsedMax) && parsedMax > 0 ? parsedMax : 100;
         const countRow = db.prepare(
           "SELECT COUNT(*) as cnt FROM agent_quotas"
         ).get() as { cnt: number };
@@ -1523,8 +1548,8 @@ export class RESTPingMemServer {
       this.sseConnectionCount++;
 
       // Track cleanup state shared between start() and cancel()
-      let sseHeartbeat: ReturnType<typeof setInterval>;
-      let sseSubscriptionId: string;
+      let sseHeartbeat: ReturnType<typeof setInterval> = 0 as unknown as ReturnType<typeof setInterval>;
+      let sseSubscriptionId = "";
       let sseReleaseConnection: (() => void) | null = null;
 
       const stream = new ReadableStream({
@@ -1846,7 +1871,11 @@ export class RESTPingMemServer {
     // details (SQL errors, file paths) from misclassified exceptions.
     const isDomainError = error instanceof Error &&
       RESTPingMemServer.DOMAIN_ERROR_NAMES.has(error.name);
-    const safeMessage = isDomainError ? rawMessage : this.getErrorName(statusCode);
+    // Sanitize domain-error messages too: strip control chars and truncate in case
+    // any domain error message ever embeds user-supplied input (path, key, etc.).
+    const safeMessage = isDomainError
+      ? rawMessage.replace(/[\x00-\x1f]/g, "?").slice(0, 200)
+      : this.getErrorName(statusCode);
 
     log.error("Error", { message: sanitizedMessage });
     return c.json(
@@ -1917,8 +1946,11 @@ export class RESTPingMemServer {
     if (this.currentSessionId) return this.currentSessionId;
     const header = c.req.header("x-session-id");
     if (!header) return null;
-    if (!RESTPingMemServer.UUID_RE.test(header)) return null;
-    return header as SessionId;
+    // Normalize to lowercase before use as Map key so e.g. uppercase UUIDs from
+    // external clients don't create duplicate MemoryManager entries.
+    const normalizedHeader = header.toLowerCase();
+    if (!RESTPingMemServer.UUID_RE.test(normalizedHeader)) return null;
+    return normalizedHeader as SessionId;
   }
 
   /**
