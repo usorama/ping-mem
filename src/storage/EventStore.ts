@@ -25,6 +25,9 @@ import { createLogger } from "../util/logger.js";
 
 const log = createLogger("EventStore");
 
+/** Module-level constant for WAL checkpoint mode validation (allocated once). */
+const VALID_WAL_MODES = new Set(["PASSIVE", "TRUNCATE", "FULL", "RESTART"] as const);
+
 // ============================================================================
 // Event Store Configuration
 // ============================================================================
@@ -90,6 +93,7 @@ interface EventRow {
   payload: string;
   caused_by: string | null;
   metadata: string;
+  agent_id: string | null;
 }
 
 /**
@@ -131,12 +135,21 @@ export interface Checkpoint {
  */
 export class EventStore {
   private db: Database;
+  /** True when backed by an in-memory SQLite database (`:memory:`). Checked by clear(). */
+  private readonly isInMemory: boolean;
+  /** Stored promise so concurrent close() callers all await the same operation */
+  private closePromise: Promise<void> | undefined;
   private config: {
     dbPath: string;
     walMode: boolean;
     foreignKeys: boolean;
     busyTimeout: number;
   };
+
+  // UUID v7 monotonic counter — RFC 9562 §5.7 requires monotonic ordering when multiple
+  // IDs are generated within the same millisecond. Counter resets on each new ms tick.
+  private uuidLastMs = -1;
+  private uuidSeq = 0;
 
   // Prepared statements
   private stmtInsertEvent: Statement;
@@ -147,15 +160,43 @@ export class EventStore {
   private stmtGetCheckpoint: Statement;
   private stmtGetCheckpointsBySession: Statement;
   private stmtListSessionStarts: Statement;
+  // Prepared statements for deleteSessions() — hoisted to avoid per-call compilation overhead
+  private stmtDeleteCheckpointItems: Statement;
+  private stmtDeleteCheckpointsBySession: Statement;
+  private stmtDeleteEventsBySession: Statement;
+  private stmtGetEventIdsBySession: Statement;
+  private stmtForeignKeyCheck: Statement;
+  // Prepared statements for checkpoint item operations — hoisted for consistent hot-path performance
+  private stmtInsertCheckpointItem: Statement;
+  private stmtGetCheckpointItems: Statement;
+  // Remaining hot-path statements — hoisted to avoid per-call SQL compilation overhead
+  private stmtGetLastEventBySession: Statement;
+  private stmtGetRecentEvents: Statement;
+  // ping() uses a hoisted statement to avoid per-call SQL compilation overhead
+  private stmtPing: Statement;
+  private stmtListSessions: Statement;
+  private stmtIsAgentActive: Statement;
+  private stmtGetEventCount: Statement;
+  private stmtGetCheckpointCount: Statement;
+  private stmtGetPageCount: Statement;
+  private stmtGetFreelistCount: Statement;
+  private stmtQuickCheck: Statement;
 
   constructor(config?: EventStoreConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config } as typeof this.config;
+    // Set at construction so clear() does not re-evaluate the path string at call time.
+    this.isInMemory = this.config.dbPath === ":memory:";
 
     // Ensure directory exists (skip for in-memory)
-    if (this.config.dbPath !== ":memory:") {
+    if (!this.isInMemory) {
       const dbDir = path.dirname(this.config.dbPath);
       if (!fs.existsSync(dbDir)) {
-        fs.mkdirSync(dbDir, { recursive: true });
+        try {
+          fs.mkdirSync(dbDir, { recursive: true });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new Error(`EventStore: cannot create database directory '${dbDir}': ${msg}`);
+        }
       }
     }
 
@@ -171,7 +212,11 @@ export class EventStore {
     if (this.config.foreignKeys) {
       this.db.exec("PRAGMA foreign_keys = ON");
     }
-    this.db.exec(`PRAGMA busy_timeout = ${this.config.busyTimeout}`);
+    const rawTimeout = Number(this.config.busyTimeout);
+    const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(rawTimeout, 60000) : 5000;
+    // Math.trunc ensures an integer string (no "5000.0") — value is already validated/clamped above
+    // so numeric injection is not possible, but integer form is canonical for PRAGMA.
+    this.db.exec(`PRAGMA busy_timeout = ${Math.trunc(timeout)}`);
 
     // Initialize schema
     this.initializeSchema();
@@ -180,10 +225,10 @@ export class EventStore {
     this.stmtInsertEvent = this.db.prepare(`
       INSERT INTO events (
         event_id, timestamp, session_id, event_type,
-        payload, caused_by, metadata
+        payload, caused_by, metadata, agent_id
       ) VALUES (
         $event_id, $timestamp, $session_id, $event_type,
-        $payload, $caused_by, $metadata
+        $payload, $caused_by, $metadata, $agent_id
       )
     `);
 
@@ -221,11 +266,66 @@ export class EventStore {
       ORDER BY timestamp DESC
     `);
 
+    // LIMIT 10000: prevents a full-table scan from loading unbounded rows into memory
+    // when findSessionIdsByProjectDir() is called during project deletion.
+    // ORDER BY timestamp ASC: stable ordering for consistent project-dir filtering results.
     this.stmtListSessionStarts = this.db.prepare(`
       SELECT session_id, metadata
       FROM events
       WHERE event_type = 'SESSION_STARTED'
+      ORDER BY timestamp ASC
+      LIMIT 10000
     `);
+
+    // Statements for deleteSessions() — compiled once to avoid per-call overhead
+    this.stmtDeleteCheckpointItems = this.db.prepare(
+      "DELETE FROM checkpoint_items WHERE checkpoint_id IN (SELECT checkpoint_id FROM checkpoints WHERE session_id = $sessionId)"
+    );
+    this.stmtDeleteCheckpointsBySession = this.db.prepare(
+      "DELETE FROM checkpoints WHERE session_id = $sessionId"
+    );
+    this.stmtDeleteEventsBySession = this.db.prepare(
+      "DELETE FROM events WHERE session_id = $sessionId"
+    );
+    this.stmtGetEventIdsBySession = this.db.prepare(
+      "SELECT event_id FROM events WHERE session_id = ?"
+    );
+    this.stmtForeignKeyCheck = this.db.prepare("PRAGMA foreign_keys");
+    this.stmtInsertCheckpointItem = this.db.prepare(
+      "INSERT INTO checkpoint_items (checkpoint_id, memory_key) VALUES (?, ?)"
+    );
+    this.stmtGetCheckpointItems = this.db.prepare(
+      "SELECT memory_key FROM checkpoint_items WHERE checkpoint_id = ?"
+    );
+    // Fetch only the latest event for a session — used by createCheckpoint() to avoid
+    // loading the full event history when all we need is the last event ID.
+    // ORDER BY event_id DESC (not timestamp): UUIDv7 event IDs encode millisecond timestamp
+    // + a 12-bit monotonic sequence counter, guaranteeing total order even for same-millisecond
+    // events. Ordering by the ISO-8601 timestamp string is non-deterministic when two events
+    // share the same millisecond.
+    this.stmtGetLastEventBySession = this.db.prepare(
+      "SELECT event_id FROM events WHERE session_id = $session_id ORDER BY event_id DESC LIMIT 1"
+    );
+    // GROUP BY + MIN(timestamp): correct way to get distinct sessions ordered by first appearance.
+    // DISTINCT + ORDER BY on a non-projected column forces a full-table scan without benefiting
+    // from the idx_events_session index. LIMIT 10000: prevent unbounded memory load.
+    this.stmtListSessions = this.db.prepare(
+      "SELECT session_id FROM events GROUP BY session_id ORDER BY MIN(timestamp) ASC LIMIT 10000"
+    );
+    // $limit is a bind parameter so we can reuse this statement for all limit values.
+    this.stmtGetRecentEvents = this.db.prepare(
+      "SELECT * FROM events ORDER BY timestamp DESC LIMIT $limit"
+    );
+    // Hoisted so ping() avoids per-call SQL compilation overhead on the hot liveness path.
+    this.stmtPing = this.db.prepare("SELECT 1");
+    this.stmtIsAgentActive = this.db.prepare(
+      "SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
+    );
+    this.stmtGetEventCount = this.db.prepare("SELECT COUNT(*) as count FROM events");
+    this.stmtGetCheckpointCount = this.db.prepare("SELECT COUNT(*) as count FROM checkpoints");
+    this.stmtGetPageCount = this.db.prepare("PRAGMA page_count");
+    this.stmtGetFreelistCount = this.db.prepare("PRAGMA freelist_count");
+    this.stmtQuickCheck = this.db.prepare("PRAGMA quick_check");
   }
 
   /**
@@ -336,17 +436,21 @@ export class EventStore {
         "ALTER TABLE events ADD COLUMN agent_id TEXT"
       );
     } else {
-      // Record migration as applied if column already exists (e.g., from manual ALTER)
+      // Record migration as applied if column already exists (e.g., from manual ALTER).
+      // Wrapped in a transaction (same as runMigration) so a crash between check and insert
+      // does not leave migrations table in an inconsistent state.
       const existing = this.db
         .prepare("SELECT migration_id FROM migrations WHERE migration_id = $id")
         .get({ $id: "v2_agent_id_column" }) as { migration_id: string } | undefined;
       if (!existing) {
-        this.db.prepare(
-          "INSERT INTO migrations (migration_id, applied_at) VALUES ($id, $applied_at)"
-        ).run({
-          $id: "v2_agent_id_column",
-          $applied_at: new Date().toISOString(),
-        });
+        this.db.transaction(() => {
+          this.db.prepare(
+            "INSERT INTO migrations (migration_id, applied_at) VALUES ($id, $applied_at)"
+          ).run({
+            $id: "v2_agent_id_column",
+            $applied_at: new Date().toISOString(),
+          });
+        })();
       }
     }
 
@@ -383,27 +487,47 @@ export class EventStore {
   }
 
   /**
-   * Generate UUID v7 (time-sortable)
+   * Generate UUID v7 (time-sortable) with RFC 9562 §5.7 monotonic counter.
+   *
+   * Within the same millisecond tick the 12-bit sequence field increments so that
+   * IDs remain sortable even when multiple are generated in rapid succession.
+   * The sequence resets to 0 on each new millisecond tick.
    */
   private generateUUID(): string {
-    const timestamp = Date.now();
-    const timestampHex = timestamp.toString(16).padStart(12, "0");
+    let timestamp = Date.now();
 
-    const randomBytes = crypto.randomBytes(10);
+    if (timestamp === this.uuidLastMs) {
+      this.uuidSeq++;
+      // If sequence overflows 12 bits, advance the timestamp by 1 ms to guarantee uniqueness.
+      if (this.uuidSeq > 0xfff) {
+        timestamp++;
+        this.uuidLastMs = timestamp;
+        this.uuidSeq = 0;
+      }
+    } else {
+      this.uuidLastMs = timestamp;
+      this.uuidSeq = 0;
+    }
+
+    const timestampHex = timestamp.toString(16).padStart(12, "0");
+    const seqHex = this.uuidSeq.toString(16).padStart(3, "0");
+
+    const randomBytes = crypto.randomBytes(8);
     const randomHex = randomBytes.toString("hex");
 
-    // UUID v7 format: tttttttt-tttt-7xxx-yxxx-xxxxxxxxxxxx
+    // UUID v7 format: tttttttt-tttt-7sss-yxxx-xxxxxxxxxxxx
+    // Where sss = 12-bit monotonic sequence for sub-ms ordering
     const uuid =
       timestampHex.slice(0, 8) +
       "-" +
       timestampHex.slice(8, 12) +
       "-7" +
-      randomHex.slice(0, 3) +
+      seqHex +
       "-" +
-      ((parseInt(randomHex.slice(3, 4), 16) & 0x3) | 0x8).toString(16) +
-      randomHex.slice(4, 7) +
+      ((parseInt(randomHex.slice(0, 1), 16) & 0x3) | 0x8).toString(16) +
+      randomHex.slice(1, 4) +
       "-" +
-      randomHex.slice(7, 19);
+      randomHex.slice(4, 16);
 
     return uuid;
   }
@@ -420,6 +544,7 @@ export class EventStore {
       $payload: JSON.stringify(event.payload),
       $caused_by: event.causedBy ?? null,
       $metadata: JSON.stringify(event.metadata),
+      $agent_id: event.agent_id ?? null,
     };
   }
 
@@ -427,16 +552,31 @@ export class EventStore {
    * Convert database row to event
    */
   private rowToEvent(row: EventRow): Event {
+    let payload: unknown;
+    let metadata: unknown;
+    try {
+      payload = JSON.parse(row.payload);
+    } catch {
+      throw new Error(`EventStore: corrupted payload JSON for event ${row.event_id}`);
+    }
+    try {
+      metadata = JSON.parse(row.metadata);
+    } catch {
+      throw new Error(`EventStore: corrupted metadata JSON for event ${row.event_id}`);
+    }
     const event: Event = {
       eventId: row.event_id,
       timestamp: new Date(row.timestamp),
       sessionId: row.session_id,
       eventType: row.event_type as EventType,
-      payload: JSON.parse(row.payload),
-      metadata: JSON.parse(row.metadata),
+      payload: payload as Event["payload"],
+      metadata: metadata as Event["metadata"],
     };
     if (row.caused_by !== null) {
       event.causedBy = row.caused_by;
+    }
+    if (row.agent_id !== null && row.agent_id !== undefined) {
+      event.agent_id = row.agent_id;
     }
     return event;
   }
@@ -465,7 +605,12 @@ export class EventStore {
    */
   async append(event: Event): Promise<void> {
     const row = this.eventToRow(event);
-    this.stmtInsertEvent.run(row);
+    try {
+      this.stmtInsertEvent.run(row);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`EventStore: failed to append event ${event.eventId}: ${msg}`);
+    }
   }
 
   /**
@@ -478,7 +623,12 @@ export class EventStore {
         this.stmtInsertEvent.run(row);
       }
     });
-    insertMany();
+    try {
+      insertMany();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`EventStore: failed to append batch of ${events.length} events: ${msg}`);
+    }
   }
 
   /**
@@ -564,20 +714,39 @@ export class EventStore {
     // Use individual parameterized deletes instead of IN clause interpolation
     // This prevents SQL injection even if sessionIds contains malicious values
     const deleteMany = this.db.transaction(() => {
-      const stmtCheckpointItems = this.db.prepare(
-        "DELETE FROM checkpoint_items WHERE checkpoint_id IN (SELECT checkpoint_id FROM checkpoints WHERE session_id = $sessionId)"
-      );
-      const stmtCheckpoint = this.db.prepare(
-        "DELETE FROM checkpoints WHERE session_id = $sessionId"
-      );
-      const stmtEvent = this.db.prepare(
-        "DELETE FROM events WHERE session_id = $sessionId"
-      );
+      // Verify foreign key constraints are enabled before deletion
+      const fkCheck = this.stmtForeignKeyCheck.get() as { foreign_keys: number } | undefined;
+      if (!fkCheck || fkCheck.foreign_keys !== 1) {
+        throw new Error("Foreign key constraints must be enabled for safe session deletion");
+      }
+
+      // Collect event IDs before deletion for the post-delete integrity check.
+      const eventIds: string[] = [];
+      for (const sessionId of sessionIds) {
+        const rows = this.stmtGetEventIdsBySession.all(sessionId) as Array<{ event_id: string }>;
+        for (const row of rows) { eventIds.push(row.event_id); }
+      }
 
       for (const sessionId of sessionIds) {
-        stmtCheckpointItems.run({ $sessionId: sessionId });
-        stmtCheckpoint.run({ $sessionId: sessionId });
-        stmtEvent.run({ $sessionId: sessionId });
+        this.stmtDeleteCheckpointItems.run({ $sessionId: sessionId });
+        this.stmtDeleteCheckpointsBySession.run({ $sessionId: sessionId });
+        this.stmtDeleteEventsBySession.run({ $sessionId: sessionId });
+      }
+
+      // Safety-net orphan check: by design, last_event_id only references same-session
+      // events, so this check should always return 0 after correctly deleting both
+      // checkpoints and events for the target sessions. It guards against future schema
+      // changes that might introduce cross-session checkpoint references.
+      if (eventIds.length > 0) {
+        const placeholders = eventIds.map((_, i) => `$e${i}`).join(", ");
+        const params: Record<string, string> = {};
+        eventIds.forEach((id, i) => { params[`$e${i}`] = id; });
+        const orphans = (this.db.prepare(
+          `SELECT COUNT(*) as orphans FROM checkpoints WHERE last_event_id IN (${placeholders})`
+        ).get(params) as { orphans: number }).orphans;
+        if (orphans > 0) {
+          throw new Error(`Session deletion created ${orphans} orphaned checkpoint references`);
+        }
       }
     });
     deleteMany();
@@ -605,14 +774,10 @@ export class EventStore {
     description?: string,
     memoryKeys?: string[]
   ): Promise<Checkpoint> {
-    // Get latest event for this session
-    const events = await this.getBySession(sessionId);
-    if (events.length === 0) {
-      throw new Error(`No events found for session: ${sessionId}`);
-    }
-
-    const lastEvent = events[events.length - 1];
-    if (!lastEvent) {
+    // Fetch only the latest event ID — avoids loading the full event history into memory
+    // (getBySession() has no LIMIT and would materialize every event for a long-lived session).
+    const lastRow = this.stmtGetLastEventBySession.get({ $session_id: sessionId }) as { event_id: string } | undefined;
+    if (!lastRow) {
       throw new Error(`No events found for session: ${sessionId}`);
     }
 
@@ -620,7 +785,7 @@ export class EventStore {
       checkpointId: this.generateUUID(),
       sessionId,
       timestamp: new Date(),
-      lastEventId: lastEvent.eventId,
+      lastEventId: lastRow.event_id,
       memoryCount,
     };
     if (description !== undefined) {
@@ -640,11 +805,8 @@ export class EventStore {
 
       // Insert checkpoint items if provided
       if (memoryKeys && memoryKeys.length > 0) {
-        const insertItemStmt = this.db.prepare(
-          "INSERT INTO checkpoint_items (checkpoint_id, memory_key) VALUES (?, ?)"
-        );
         for (const memoryKey of memoryKeys) {
-          insertItemStmt.run(checkpoint.checkpointId, memoryKey);
+          this.stmtInsertCheckpointItem.run(checkpoint.checkpointId, memoryKey);
         }
       }
     });
@@ -675,10 +837,7 @@ export class EventStore {
    * Get memory keys associated with a checkpoint
    */
   async getCheckpointItems(checkpointId: string): Promise<string[]> {
-    const stmt = this.db.prepare(
-      "SELECT memory_key FROM checkpoint_items WHERE checkpoint_id = ?"
-    );
-    const rows = stmt.all(checkpointId) as Array<{ memory_key: string }>;
+    const rows = this.stmtGetCheckpointItems.all(checkpointId) as Array<{ memory_key: string }>;
     return rows.map((row) => row.memory_key);
   }
 
@@ -688,10 +847,9 @@ export class EventStore {
    * Get the most recent events across all sessions, ordered by timestamp DESC.
    */
   getRecentEvents(limit: number = 20): Event[] {
-    const stmt = this.db.prepare(
-      "SELECT * FROM events ORDER BY timestamp DESC LIMIT $limit"
-    );
-    const rows = stmt.all({ $limit: limit }) as EventRow[];
+    // Clamp limit to prevent loading the entire events table into memory on a bad caller.
+    const safeLimit = Math.min(Math.max(limit, 1), 1000);
+    const rows = this.stmtGetRecentEvents.all({ $limit: safeLimit }) as EventRow[];
     return rows.map((row) => this.rowToEvent(row));
   }
 
@@ -701,10 +859,7 @@ export class EventStore {
    * List all unique session IDs in the event store
    */
   async listSessions(): Promise<SessionId[]> {
-    const stmt = this.db.prepare(
-      "SELECT DISTINCT session_id FROM events ORDER BY timestamp ASC"
-    );
-    const rows = stmt.all() as Array<{ session_id: string }>;
+    const rows = this.stmtListSessions.all() as Array<{ session_id: string }>;
     return rows.map((row) => row.session_id);
   }
 
@@ -713,7 +868,7 @@ export class EventStore {
    */
   async ping(): Promise<boolean> {
     try {
-      this.db.prepare("SELECT 1").get();
+      this.stmtPing.get();
       return true;
     } catch (error) {
       log.warn("ping failed", { error: error instanceof Error ? error.message : String(error) });
@@ -725,17 +880,30 @@ export class EventStore {
    * Get database statistics
    */
   getStats(): { eventCount: number; checkpointCount: number; dbSize: number } {
-    const eventCount = (
-      this.db.prepare("SELECT COUNT(*) as count FROM events").get() as { count: number }
-    ).count;
-    const checkpointCount = (
-      this.db.prepare("SELECT COUNT(*) as count FROM checkpoints").get() as { count: number }
-    ).count;
+    // Wrap count queries individually: a lock or transient corruption on one table
+    // should not prevent reporting stats for the other table.
+    let eventCount = 0;
+    try {
+      eventCount = (this.stmtGetEventCount.get() as { count: number }).count;
+    } catch {
+      // Transient SQLite error — return 0 rather than crashing the health monitor caller.
+    }
+    let checkpointCount = 0;
+    try {
+      checkpointCount = (this.stmtGetCheckpointCount.get() as { count: number }).count;
+    } catch {
+      // Transient SQLite error — return 0 rather than crashing.
+    }
 
     let dbSize = 0;
     if (this.config.dbPath !== ":memory:") {
-      const stats = fs.statSync(this.config.dbPath);
-      dbSize = stats.size;
+      try {
+        const stats = fs.statSync(this.config.dbPath);
+        dbSize = stats.size;
+      } catch {
+        // File transiently inaccessible (e.g., being rotated or on a slow mount).
+        // Return 0 rather than propagating — callers (health monitor) should not crash.
+      }
     }
 
     return { eventCount, checkpointCount, dbSize };
@@ -756,19 +924,114 @@ export class EventStore {
   }
 
   /**
-   * Close database connection
+   * Get WAL file size in bytes. Returns 0 for in-memory DBs or when WAL file absent.
    */
-  async close(): Promise<void> {
-    this.db.close();
+  getWalSizeBytes(): number {
+    if (this.config.dbPath === ":memory:") {
+      return 0;
+    }
+    try {
+      return fs.statSync(`${this.config.dbPath}-wal`).size;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        log.warn("Cannot read WAL file", { path: `${this.config.dbPath}-wal`, code });
+      }
+      return 0;
+    }
   }
 
   /**
-   * Clear all data (for testing only)
+   * Get ratio of free pages to total pages (fragmentation indicator).
+   */
+  getFreelistRatio(): number {
+    const pageCountRow = this.stmtGetPageCount.get() as { page_count?: number } | undefined;
+    const freelistRow = this.stmtGetFreelistCount.get() as { freelist_count?: number } | undefined;
+    const pageCount = pageCountRow?.page_count ?? 0;
+    const freelistCount = freelistRow?.freelist_count ?? 0;
+    if (pageCount <= 0) {
+      return 0;
+    }
+    return freelistCount / pageCount;
+  }
+
+  /**
+   * Run PRAGMA quick_check; returns 1 if ok, 0 if corrupted.
+   * Note: SQLite `PRAGMA quick_check` always returns exactly one row containing the
+   * string "ok" for a healthy database. Any other value (or a missing row) means
+   * corruption. This method uses `.get()` which returns only the first row, which is
+   * always the only row for this PRAGMA — so no records are silently discarded.
+   */
+  getIntegrityOk(): number {
+    const row = this.stmtQuickCheck.get() as { quick_check?: string } | undefined;
+    return row?.quick_check === "ok" ? 1 : 0;
+  }
+
+  /**
+   * Execute a WAL checkpoint. Mode: PASSIVE (default) never blocks writers.
+   */
+  walCheckpoint(mode: "PASSIVE" | "TRUNCATE" | "FULL" | "RESTART" = "PASSIVE"): void {
+    // Runtime allowlist guards against injection if called outside TypeScript type system
+    if (!VALID_WAL_MODES.has(mode)) {
+      throw new Error(`Invalid WAL checkpoint mode: ${mode}`);
+    }
+    if (this.config.dbPath === ":memory:") {
+      return; // no WAL for in-memory
+    }
+
+    // Use parameterized approach to prevent SQL injection even if type system is bypassed
+    const PRAGMA_STATEMENTS = {
+      "PASSIVE": "PRAGMA wal_checkpoint(PASSIVE)",
+      "TRUNCATE": "PRAGMA wal_checkpoint(TRUNCATE)",
+      "FULL": "PRAGMA wal_checkpoint(FULL)",
+      "RESTART": "PRAGMA wal_checkpoint(RESTART)"
+    } as const;
+
+    this.db.exec(PRAGMA_STATEMENTS[mode]);
+  }
+
+  /**
+   * Close database connection.
+   *
+   * Idempotent and safe to call concurrently: all callers receive the same
+   * Promise so db.close() executes exactly once even if two async callers race.
+   */
+  async close(): Promise<void> {
+    if (!this.closePromise) {
+      // Assignment is synchronous — any concurrent caller that reaches here before
+      // the microtask runs will find closePromise already set and return the same promise.
+      this.closePromise = Promise.resolve().then(() => {
+        this.db.close();
+      }).catch((err: unknown) => {
+        // Clear the stuck promise so a retry is possible after a failed close attempt.
+        this.closePromise = undefined;
+        throw err;
+      });
+    }
+    return this.closePromise;
+  }
+
+  /**
+   * Check if an agent is registered and not expired.
+   */
+  isAgentActive(agentId: string): boolean {
+    const row = this.stmtIsAgentActive.get({ $agent_id: agentId, $now: new Date().toISOString() });
+    return row !== null && row !== undefined;
+  }
+
+  /**
+   * Clear all data (for testing only — in-memory databases only)
    */
   clear(): void {
+    if (!this.isInMemory) {
+      throw new Error("EventStore.clear() is only permitted on in-memory databases");
+    }
     this.db.exec("DELETE FROM checkpoint_items");
     this.db.exec("DELETE FROM checkpoints");
     this.db.exec("DELETE FROM events");
+    // Clear agent and lock tables to prevent test isolation leaks between test cases.
+    this.db.exec("DELETE FROM agent_quotas");
+    this.db.exec("DELETE FROM write_locks");
   }
 }
 

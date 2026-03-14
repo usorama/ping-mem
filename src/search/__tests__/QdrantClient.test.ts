@@ -316,8 +316,11 @@ describe("QdrantClientWrapper - Unit Tests", () => {
     });
 
     it("should return false when health check fails", async () => {
-      mockGetCollections.mockResolvedValue({ collections: [] }); // For connect
-      mockGetCollection.mockRejectedValue(new Error("Server error")); // For health check
+      // connect() calls getCollections() twice: once via healthCheck, once via createCollectionIfNotExists
+      mockGetCollections.mockResolvedValueOnce({ collections: [] }); // healthCheck inside connect
+      mockGetCollections.mockResolvedValueOnce({ collections: [] }); // createCollectionIfNotExists
+      // Third call (explicit healthCheck) should fail
+      mockGetCollections.mockRejectedValueOnce(new Error("Server error"));
 
       const client = new QdrantClientWrapper(testConfig);
       await client.connect();

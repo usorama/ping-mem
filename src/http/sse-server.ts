@@ -61,6 +61,8 @@ export class SSEPingMemServer {
       ingestionService: config.ingestionService,
       diagnosticsStore: config.diagnosticsStore,
       diagnosticsDbPath: config.diagnosticsDbPath,
+      eventStore: config.eventStore,
+      qdrantClient: config.qdrantClient,
     });
 
     // Initialize MCP server

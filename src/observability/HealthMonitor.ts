@@ -1,5 +1,5 @@
 import type { RuntimeServices } from "../config/runtime.js";
-import { probeSystemHealth, getIntegrityOk, type HealthSnapshot } from "./health-probes.js";
+import { probeSystemHealth, sanitizeHealthError, type HealthSnapshot } from "./health-probes.js";
 import type { EventStore } from "../storage/EventStore.js";
 import { createLogger } from "../util/logger.js";
 
@@ -15,7 +15,6 @@ interface ProbeMetric {
 
 interface ProbeResult {
   source: ProbeSource;
-  status: "healthy" | "degraded" | "unhealthy";
   metrics: ProbeMetric[];
 }
 
@@ -23,7 +22,6 @@ interface ThresholdRule {
   metric: string;
   warnAbove?: number;
   critAbove?: number;
-  warnBelow?: number;
   critBelow?: number;
 }
 
@@ -56,7 +54,8 @@ const THRESHOLDS: Record<ProbeSource, ThresholdRule[]> = {
     { metric: "orphan_node_count", warnAbove: 50, critAbove: 500 },
   ],
   qdrant: [
-    { metric: "point_count_drift_pct", warnAbove: 5, critAbove: 15 },
+    // warnAbove matches the ratchet threshold so normal growth (<=15%) never triggers spurious alerts
+    { metric: "point_count_drift_pct", warnAbove: 15, critAbove: 30 },
   ],
 };
 
@@ -108,6 +107,13 @@ export class HealthMonitor {
 
     this.stopping = false;
     this.consecutiveTickFailures = 0;
+    // Clear stale alert state from a previous run so a restart does not immediately
+    // escalate on leftover alerts or suppress new ones within the dedup window.
+    this.activeAlerts.clear();
+    this.lastAlerts.clear();
+    // Reset Qdrant baseline so a stop/restart cycle does not compare the new run's
+    // point count against a stale pre-stop baseline, causing spurious drift alerts.
+    this.baselineQdrantCount = null;
 
     this.fastTimer = setInterval(() => {
       this.tick().catch((err) => {
@@ -130,7 +136,7 @@ export class HealthMonitor {
     log.info("Started");
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopping = true;
     if (this.fastTimer) {
       clearInterval(this.fastTimer);
@@ -140,16 +146,31 @@ export class HealthMonitor {
       clearInterval(this.qualityTimer);
       this.qualityTimer = null;
     }
+    // Quiesce: wait for any in-flight ticks to complete.
+    // Each network probe (Neo4j, Qdrant) has a per-probe timeout of 8s (see health-probes.ts),
+    // so a quality tick running both probes can take up to ~18s. Allow 25s total.
+    const deadline = Date.now() + 25_000;
+    while ((this.tickRunning || this.qualityTickRunning) && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 50));
+    }
+    if (this.tickRunning || this.qualityTickRunning) {
+      log.warn("stop() deadline exceeded: in-flight ticks did not complete", {
+        tickRunning: this.tickRunning,
+        qualityTickRunning: this.qualityTickRunning,
+      });
+    }
   }
 
   getStatus(): HealthMonitorStatus {
     return {
-      running: this.fastTimer !== null && this.qualityTimer !== null,
+      // running is true as soon as start() sets the timers, before the first tick resolves.
+      // Callers can distinguish "just started" from "has data" by checking lastSnapshot !== null.
+      running: !this.stopping && this.fastTimer !== null && this.qualityTimer !== null,
       lastSnapshot: this.lastSnapshot,
       lastFastTickAt: this.lastFastTickAt,
       lastQualityTickAt: this.lastQualityTickAt,
       activeAlerts: Array.from(this.activeAlerts.values()).sort((a, b) =>
-        a.timestamp < b.timestamp ? 1 : -1
+        b.timestamp.localeCompare(a.timestamp)
       ),
     };
   }
@@ -162,6 +183,7 @@ export class HealthMonitor {
       try {
         const snapshot = await probeSystemHealth({
           eventStore: this.deps.eventStore,
+          ...(this.deps.services.neo4jClient ? { neo4jClient: this.deps.services.neo4jClient } : {}),
           ...(this.deps.services.graphManager ? { graphManager: this.deps.services.graphManager } : {}),
           ...(this.deps.services.qdrantClient ? { qdrantClient: this.deps.services.qdrantClient } : {}),
           ...(this.deps.diagnosticsStore ? { diagnosticsStore: this.deps.diagnosticsStore } : {}),
@@ -171,16 +193,17 @@ export class HealthMonitor {
         this.lastFastTickAt = new Date().toISOString();
         this.consecutiveTickFailures = 0;
         this.activeAlerts.delete("monitor:tick_failure");
+        this.lastAlerts.delete("monitor:tick_failure");
 
         const sqliteMetrics = snapshot.components.sqlite.metrics;
         if (sqliteMetrics) {
+          // integrity_ok is excluded from the fast tick: skipIntegrityCheck=true always returns 1,
+          // so there's nothing meaningful to threshold-check here. It runs in qualityTick only.
           this.checkThresholds({
             source: "sqlite",
-            status: this.componentToProbeStatus(snapshot.components.sqlite.status),
             metrics: [
               { name: "wal_size_bytes", value: sqliteMetrics.wal_size_bytes ?? 0, unit: "bytes" },
               { name: "freelist_ratio", value: sqliteMetrics.freelist_ratio ?? 0, unit: "ratio" },
-              { name: "integrity_ok", value: sqliteMetrics.integrity_ok ?? 0, unit: "boolean" },
             ],
           });
         }
@@ -212,14 +235,22 @@ export class HealthMonitor {
 
       if (this.stopping) return;
 
-      // WAL checkpoint in separate try-catch so probe data is preserved even if checkpoint fails
+      // WAL checkpoint in separate try-catch so probe data is preserved even if checkpoint fails.
+      // Note: checkpoint only runs when the probe succeeded (consecutiveTickFailures path exits
+      // early above). A WAL file that is large while probes are failing will not be checkpointed
+      // until probes recover — this is intentional: we do not want to checkpoint a potentially
+      // degraded database while health status is unknown.
       try {
         const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
         if (walSize > 50_000_000) {
-          // PASSIVE mode never blocks writers (unlike TRUNCATE which waits for all readers)
-          this.deps.eventStore.getDatabase().exec("PRAGMA wal_checkpoint(PASSIVE)");
-          log.info("SQLite WAL checkpoint completed", { walSizeBytes: walSize });
+          // PASSIVE mode never blocks writers - SQLite WAL checkpoint is atomic
+          this.deps.eventStore.walCheckpoint("PASSIVE");
         }
+        // Clear prior failure alert whenever the WAL probe block succeeds — even when
+        // walSize dropped below the checkpoint threshold (e.g., after VACUUM). Without
+        // this, the alert would stay active indefinitely after the condition resolves.
+        this.activeAlerts.delete("sqlite:wal_checkpoint_failed");
+        this.lastAlerts.delete("sqlite:wal_checkpoint_failed");
       } catch (error) {
         const lastWalSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
         log.error("WAL checkpoint failed — WAL may grow unbounded", {
@@ -239,97 +270,111 @@ export class HealthMonitor {
     this.qualityTickRunning = true;
 
     try {
-      let probeSucceeded = false;
-
       // SQLite integrity check (expensive — only runs in quality tick, not fast tick)
       try {
-        const integrityOk = getIntegrityOk(this.deps.eventStore);
+        const integrityOk = this.deps.eventStore.getIntegrityOk();
         this.checkThresholds({
           source: "sqlite",
-          status: integrityOk === 1 ? "healthy" : "unhealthy",
           metrics: [{ name: "integrity_ok", value: integrityOk, unit: "boolean" }],
         });
-        probeSucceeded = true;
+        // Clear any prior integrity failure alert on successful check
+        this.activeAlerts.delete("sqlite:integrity_check_failed");
+        this.lastAlerts.delete("sqlite:integrity_check_failed");
       } catch (error) {
         log.warn("SQLite integrity check failed", { error: error instanceof Error ? error.message : String(error) });
         this.alert("critical", "sqlite:integrity_check_failed", "sqlite",
-          `SQLite integrity check failed: ${error instanceof Error ? error.message : "unknown"}`);
+          `SQLite integrity check failed: ${sanitizeHealthError(error)}`);
       }
 
       if (this.stopping) return;
 
-      if (this.deps.services.neo4jClient && this.deps.services.neo4jClient.isConnected()) {
+      const neo4jClient = this.deps.services.neo4jClient;
+      if (neo4jClient && neo4jClient.isConnected() && neo4jClient.getCircuitState() !== "open") {
         try {
-          const nullRows = await this.deps.services.neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.nullProperties);
-          const nullNodeCount = nullRows.reduce((sum, row) => sum + Number(row.cnt), 0);
+          const nullRows = await neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.nullProperties);
+          const nullNodeCount = nullRows.reduce((sum, row) => {
+            const val = Number(row.cnt);
+            return sum + (Number.isFinite(val) ? val : 0);
+          }, 0);
 
-          const orphanRows = await this.deps.services.neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.orphanNodes);
-          const orphanNodeCount = Number(orphanRows[0]?.cnt ?? 0);
+          const orphanRows = await neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.orphanNodes);
+          // orphanRows[0]?.cnt ?? 0: orphanNodes is a single-aggregate Cypher query that always
+          // returns exactly one row with a COUNT value. If executeQuery returns empty (e.g., a
+          // Neo4j schema change removed expected labels), nullish-coalesce to 0 — treating
+          // "no rows" as "no orphans" is safe because an empty result from a COUNT query is a
+          // schema anomaly, not active data corruption.
+          const rawOrphan = Number(orphanRows[0]?.cnt ?? 0);
+          const orphanNodeCount = Number.isFinite(rawOrphan) ? rawOrphan : 0;
 
           this.checkThresholds({
             source: "neo4j",
-            status: "healthy",
             metrics: [
               { name: "null_node_count", value: nullNodeCount, unit: "count" },
               { name: "orphan_node_count", value: orphanNodeCount, unit: "count" },
             ],
           });
-          probeSucceeded = true;
+          // Clear any prior quality probe failure alert on success
+          this.activeAlerts.delete("neo4j:quality_probe_failed");
+          this.lastAlerts.delete("neo4j:quality_probe_failed");
         } catch (error) {
           log.warn("Neo4j quality tick failed", { error: error instanceof Error ? error.message : String(error) });
           this.alert("warning", "neo4j:quality_probe_failed", "neo4j",
-            `Quality probe failed: ${error instanceof Error ? error.message : "unknown"}`);
+            `Quality probe failed: ${sanitizeHealthError(error)}`);
         }
       }
 
       if (this.stopping) return;
 
-      if (this.deps.services.qdrantClient && this.deps.services.qdrantClient.isConnected()) {
+      const qdrantClient = this.deps.services.qdrantClient;
+      if (qdrantClient && qdrantClient.getCircuitState() !== "open") {
         try {
-          const stats = await this.deps.services.qdrantClient.getStats();
+          const stats = await qdrantClient.getStats();
           const pointCount = stats.totalVectors;
 
           if (this.baselineQdrantCount === null) {
-            // Skip drift check on first tick — just establish the baseline
+            // First tick: establish baseline, skip drift check
             this.baselineQdrantCount = pointCount;
+          } else if (this.baselineQdrantCount === 0 && pointCount > 0) {
+            // Bootstrap: first ingest happened since baseline was set at 0 — treat as normal growth
+            this.baselineQdrantCount = pointCount;
+            log.info("Qdrant baseline bootstrapped after first ingest", { pointCount });
           } else {
-            const baseline = this.baselineQdrantCount === 0 ? 1 : this.baselineQdrantCount;
-            const driftPct = Math.abs(pointCount - this.baselineQdrantCount) / baseline * 100;
+            const driftPct = this.baselineQdrantCount === 0
+              ? 0
+              : Math.abs(pointCount - this.baselineQdrantCount) / this.baselineQdrantCount * 100;
 
-            // Update baseline when drift is within acceptable range to track normal growth
-            if (driftPct <= 5) {
-              this.baselineQdrantCount = pointCount;
-            }
             this.checkThresholds({
               source: "qdrant",
-              status: "healthy",
               metrics: [{ name: "point_count_drift_pct", value: driftPct, unit: "percent" }],
             });
+
+            // Only ratchet baseline when drift is below the warn threshold.
+            // If the baseline were always ratcheted (even on alert), a slow continuous
+            // data-loss event (e.g. 5 % per tick) would never accumulate: each tick's
+            // baseline would reset to the new lower value before the next comparison.
+            // By preserving the baseline while drift is high, cumulative loss is detected.
+            const qdrantDriftRule = THRESHOLDS.qdrant.find(r => r.metric === "point_count_drift_pct");
+            const qdrantWarnPct = qdrantDriftRule?.warnAbove ?? Infinity;
+            if (driftPct < qdrantWarnPct) {
+              this.baselineQdrantCount = pointCount;
+            }
           }
-          probeSucceeded = true;
+          // Clear any prior quality probe failure alert on success
+          this.activeAlerts.delete("qdrant:quality_probe_failed");
+          this.lastAlerts.delete("qdrant:quality_probe_failed");
         } catch (error) {
           log.warn("Qdrant quality tick failed", { error: error instanceof Error ? error.message : String(error) });
           this.alert("warning", "qdrant:quality_probe_failed", "qdrant",
-            `Quality probe failed: ${error instanceof Error ? error.message : "unknown"}`);
+            `Quality probe failed: ${sanitizeHealthError(error)}`);
         }
       }
 
-      if (probeSucceeded) {
-        this.lastQualityTickAt = new Date().toISOString();
-      }
+      // Update lastQualityTickAt whenever at least one probe ran (not only on success)
+      // so SQLite-only deployments (where neo4j/qdrant are null) still show tick activity.
+      this.lastQualityTickAt = new Date().toISOString();
     } finally {
       this.qualityTickRunning = false;
     }
-  }
-
-  private componentToProbeStatus(status: HealthSnapshot["components"]["sqlite"]["status"]): "healthy" | "degraded" | "unhealthy" {
-    if (status === "healthy") {
-      return "healthy";
-    }
-    if (status === "degraded") {
-      return "degraded";
-    }
-    return "unhealthy";
   }
 
   private checkThresholds(result: ProbeResult): void {
@@ -348,8 +393,6 @@ export class HealthMonitor {
         this.alert("warning", key, result.source, `${metric.name}=${metric.value} exceeds ${rule.warnAbove}`);
       } else if (rule.critBelow !== undefined && metric.value < rule.critBelow) {
         this.alert("critical", key, result.source, `${metric.name}=${metric.value} below ${rule.critBelow}`);
-      } else if (rule.warnBelow !== undefined && metric.value < rule.warnBelow) {
-        this.alert("warning", key, result.source, `${metric.name}=${metric.value} below ${rule.warnBelow}`);
       } else {
         this.activeAlerts.delete(key);
         // Clear dedup timestamp so the alert can re-fire if the condition recurs
@@ -360,15 +403,31 @@ export class HealthMonitor {
 
   private alert(severity: AlertSeverity, key: string, source: ProbeSource, message: string): void {
     const now = Date.now();
+    // Sanitize at creation time so all consumers receive clean messages without
+    // relying on per-consumer sanitization at the serialization boundary.
+    // Strip control characters that could cause log injection if alert messages
+    // ever include error strings from external systems.
+    // Strip C0 (0x00-0x1F), DEL (0x7F), C1 (0x80-0x9F) control characters, and
+    // Unicode BiDi/invisible formatting characters:
+    //   U+202A-U+202E: LRE, RLE, PDF, LRO, RLO — bidi embedding/override controls
+    //   U+2066-U+2069: LRI, RLI, FSI, PDI — bidi isolation controls
+    //   U+061C: Arabic Letter Mark — invisible bidi direction control
+    //   U+FEFF: BOM / Zero-Width No-Break Space — can cause display issues in some browsers
+    // C1 characters are interpreted as ANSI escape sequences by many terminal emulators.
+    // BiDi/invisible controls can reorder or corrupt displayed text in dashboards.
+    const safeMessage = message.replace(/[\x00-\x1f\x7f-\x9f\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 500);
     const previous = this.lastAlerts.get(key) ?? 0;
 
-    // Allow severity escalation (warn→critical) to bypass dedup window
+    // Allow severity escalation (warn→critical) and de-escalation (critical→warn) to bypass dedup window
     const existingAlert = this.activeAlerts.get(key);
     const isSeverityEscalation = existingAlert !== undefined
       && existingAlert.severity === "warning"
       && severity === "critical";
+    const isSeverityDeescalation = existingAlert !== undefined
+      && existingAlert.severity === "critical"
+      && severity === "warning";
 
-    if (!isSeverityEscalation && now - previous < this.dedupWindowMs) {
+    if (!isSeverityEscalation && !isSeverityDeescalation && now - previous < this.dedupWindowMs) {
       return;
     }
 
@@ -377,25 +436,33 @@ export class HealthMonitor {
       key,
       severity,
       source,
-      message,
+      message: safeMessage,
       timestamp: new Date(now).toISOString(),
     };
     this.activeAlerts.set(key, alert);
 
-    // Evict oldest alerts if map exceeds cap
+    // Evict oldest alerts until map is within cap.
+    // Sort once outside the loop (O(N log N)) rather than re-sorting on each iteration
+    // (which would be O(N² log N) under a burst scenario where many alerts arrive at once).
     if (this.activeAlerts.size > HealthMonitor.MAX_ALERTS) {
-      const oldest = Array.from(this.activeAlerts.entries())
-        .sort(([, a], [, b]) => (a.timestamp < b.timestamp ? -1 : 1))[0];
-      if (oldest) {
-        this.activeAlerts.delete(oldest[0]);
-        this.lastAlerts.delete(oldest[0]);
+      const sorted = Array.from(this.activeAlerts.entries())
+        .sort(([, a], [, b]) => a.timestamp.localeCompare(b.timestamp));
+      let idx = 0;
+      while (this.activeAlerts.size > HealthMonitor.MAX_ALERTS && idx < sorted.length) {
+        const entry = sorted[idx++];
+        if (!entry) break;
+        this.activeAlerts.delete(entry[0]);
+        // Removing from lastAlerts intentionally resets the 15-minute dedup window for the
+        // evicted key: if the same condition recurs, the alert fires immediately rather than
+        // being suppressed until the original dedup window expires.
+        this.lastAlerts.delete(entry[0]);
       }
     }
 
     if (severity === "critical") {
-      log.error(`CRITICAL ${message}`, { key, source });
+      log.error(`CRITICAL ${safeMessage}`, { key, source });
       return;
     }
-    log.warn(`WARNING ${message}`, { key, source });
+    log.warn(`WARNING ${safeMessage}`, { key, source });
   }
 }

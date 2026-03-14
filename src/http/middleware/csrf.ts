@@ -28,18 +28,35 @@ export function generateCsrfToken(): string {
  */
 export function csrfProtection() {
   return createMiddleware(async (c: Context, next: Next) => {
-    // Skip CSRF for API key authenticated requests (non-browser clients)
+    // Skip CSRF for API-key-authenticated requests (non-browser clients).
+    // Safety rationale: this middleware is scoped to /ui/* routes only. Cross-origin
+    // requests with custom headers (X-API-Key, Authorization) are blocked by CORS
+    // preflight, so a browser-based attacker cannot inject a junk header to bypass CSRF.
+    // Same-origin XSS would bypass CSRF anyway (attacker can read the token).
     if (c.req.header("x-api-key") || c.req.header("authorization")?.startsWith("Bearer ")) {
       return next();
     }
 
     if (SAFE_METHODS.has(c.req.method)) {
-      // Set CSRF token cookie on safe methods
-      const token = generateCsrfToken();
+      // Double-submit CSRF pattern: reuse existing token if present to avoid race conditions
+      // with concurrent GET requests invalidating each other's tokens.
+      const cookieHeader = c.req.header("cookie") ?? "";
+      const existing = cookieHeader
+        .split(";")
+        .map((s) => s.trim())
+        .find((s) => s.startsWith(`${CSRF_COOKIE}=`))
+        ?.substring(`${CSRF_COOKIE}=`.length);
+      const token = existing ?? generateCsrfToken();
       c.set("csrfToken", token);
-      // Double-submit CSRF pattern: cookie must be JS-readable (no HttpOnly) so client
-      // can read it and include it in the X-CSRF-Token request header for validation.
-      c.header("Set-Cookie", `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict; Secure`);
+      // Cookie must be JS-readable (no HttpOnly) so client can read it and include it in
+      // the X-CSRF-Token request header for validation.
+      // Detect HTTPS: direct TLS, reverse proxy (X-Forwarded-Proto), or explicit production env
+      const isSecure = c.req.url.startsWith("https://")
+        || c.req.header("x-forwarded-proto") === "https"
+        || process.env.NODE_ENV === "production"
+        || process.env.PING_MEM_BEHIND_PROXY === "true";
+      const secureFlag = isSecure ? "; Secure" : "";
+      c.header("Set-Cookie", `${CSRF_COOKIE}=${token}; Path=/; SameSite=Strict${secureFlag}`);
       return next();
     }
 

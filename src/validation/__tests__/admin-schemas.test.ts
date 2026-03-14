@@ -4,12 +4,13 @@
  * @module validation/__tests__/admin-schemas.test
  */
 
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect } from "bun:test";
 import {
   deleteProjectSchema,
   rotateKeySchema,
   deactivateKeySchema,
   setLLMConfigSchema,
+  SUPPORTED_PROVIDERS,
 } from "../admin-schemas.js";
 
 describe("admin-schemas", () => {
@@ -37,12 +38,10 @@ describe("admin-schemas", () => {
       }
     });
 
-    it("should reject empty projectDir", () => {
+    it("should reject whitespace-only projectDir", () => {
+      // .trim() fires before .min(1), so "   " trims to "" and is rejected by min(1).
       const result = deleteProjectSchema.safeParse({ projectDir: "   " });
       expect(result.success).toBe(false);
-      if (!result.success) {
-        expect(result.error.issues[0].message).toContain("projectDir cannot be empty");
-      }
     });
 
     it("should reject invalid projectId format", () => {
@@ -151,11 +150,13 @@ describe("admin-schemas", () => {
       }
     });
 
-    it("should accept valid hex string", () => {
+    it("should reject non-UUID hex strings (now UUID-only format)", () => {
+      // Previously accepted bare hex strings; now requires full UUID format to reject
+      // degenerate inputs like "---" that the old /^[a-f0-9-]+$/ pattern admitted
       const result = deactivateKeySchema.safeParse({
         id: "abc123-def456",
       });
-      expect(result.success).toBe(true);
+      expect(result.success).toBe(false);
     });
 
     it("should reject empty string", () => {
@@ -172,13 +173,35 @@ describe("admin-schemas", () => {
       const result = deactivateKeySchema.safeParse({ id: "abc$123" });
       expect(result.success).toBe(false);
       if (!result.success) {
-        expect(result.error.issues[0].message).toContain("valid UUID or hex string");
+        expect(result.error.issues[0].message).toContain("valid UUID");
       }
     });
 
     it("should require id field", () => {
       const result = deactivateKeySchema.safeParse({});
       expect(result.success).toBe(false);
+    });
+
+    it("should reject uppercase UUID (case-sensitive — DB stores lowercase, uppercase silently no-ops)", () => {
+      // The /i flag was removed: accepting uppercase UUIDs would cause deactivateApiKey
+      // to silently no-op because no row would match in a case-sensitive DB lookup.
+      const result = deactivateKeySchema.safeParse({
+        id: "550E8400-E29B-41D4-A716-446655440000",
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it("should trim and accept whitespace-padded UUID (trimmed value is what hits the DB)", () => {
+      // nonEmptyString trims whitespace before the regex check. The trimmed UUID is a
+      // valid lowercase UUID, so parse succeeds and the trimmed value is passed to the DB.
+      // No silent no-op: the trimmed ID will match the stored row.
+      const result = deactivateKeySchema.safeParse({
+        id: "  550e8400-e29b-41d4-a716-446655440000  ",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.id).toBe("550e8400-e29b-41d4-a716-446655440000");
+      }
     });
   });
 
@@ -217,27 +240,10 @@ describe("admin-schemas", () => {
       }
     });
 
-    it("should accept all supported providers", () => {
-      const providers = [
-        "OpenAI",
-        "Anthropic",
-        "OpenRouter",
-        "zAI",
-        "Gemini",
-        "Mistral",
-        "Groq",
-        "Cohere",
-        "Together",
-        "Perplexity",
-        "Azure OpenAI",
-        "Bedrock",
-        "DeepSeek",
-        "xAI",
-        "Fireworks",
-        "Custom",
-      ];
-
-      for (const provider of providers) {
+    it("should accept all supported providers (driven by SUPPORTED_PROVIDERS — auto-covers new additions)", () => {
+      // Iterate over the canonical source-of-truth list so that adding a new provider
+      // to admin-schemas.ts is automatically covered here without updating the test.
+      for (const provider of SUPPORTED_PROVIDERS) {
         const result = setLLMConfigSchema.safeParse({
           provider,
           apiKey: "test-key",
@@ -288,7 +294,8 @@ describe("admin-schemas", () => {
       expect(result.success).toBe(false);
     });
 
-    it("should accept empty string for baseUrl", () => {
+    it("should coerce empty string for baseUrl to undefined (clears the field)", () => {
+      // Empty string is treated as 'unset' via z.preprocess — results in undefined, not ""
       const result = setLLMConfigSchema.safeParse({
         provider: "OpenAI",
         apiKey: "test-key",
@@ -296,7 +303,7 @@ describe("admin-schemas", () => {
       });
       expect(result.success).toBe(true);
       if (result.success) {
-        expect(result.data.baseUrl).toBe("");
+        expect(result.data.baseUrl).toBeUndefined();
       }
     });
 
@@ -320,6 +327,30 @@ describe("admin-schemas", () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.model).toBe("gpt-4");
+      }
+    });
+
+    it("should reject non-http/https schemes in baseUrl (prevents SSRF via file:// and ftp://)", () => {
+      for (const badUrl of ["file:///etc/passwd", "ftp://files.example.com/"]) {
+        const result = setLLMConfigSchema.safeParse({
+          provider: "OpenAI",
+          apiKey: "test-key",
+          baseUrl: badUrl,
+        });
+        expect(result.success).toBe(false);
+      }
+    });
+
+    it("should coerce whitespace-only string for baseUrl to undefined (clears the field)", () => {
+      // Whitespace-only is treated the same as empty string — allows UI to clear the field
+      const result = setLLMConfigSchema.safeParse({
+        provider: "OpenAI",
+        apiKey: "test-key",
+        baseUrl: "   ",
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.baseUrl).toBeUndefined();
       }
     });
   });

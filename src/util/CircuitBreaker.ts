@@ -26,6 +26,12 @@ function isTransient(err: unknown): boolean {
     return false;
   }
 
+  // AbortError is thrown by TimeoutStrategy.Aggressive when the timeout fires.
+  // Treat it as transient so it retries rather than opening the breaker immediately.
+  if (err.name === "AbortError") {
+    return true;
+  }
+
   const errnoCode = (err as NodeJS.ErrnoException).code;
   if (errnoCode === "ECONNREFUSED" || errnoCode === "ETIMEDOUT" || errnoCode === "ECONNRESET") {
     return true;
@@ -63,7 +69,8 @@ export function createServicePolicy(opts: {
   const policy = wrap(retryPolicy, breaker, timeoutPolicy);
 
   let currentState: ServiceState = "closed";
-  const handlers: Array<(state: ServiceState) => void> = [];
+  // Use a Set to prevent duplicate handler registrations (common with re-initialization).
+  const handlers: Set<(state: ServiceState) => void> = new Set();
 
   const notifyHandlers = (state: ServiceState) => {
     for (const handler of handlers) {
@@ -78,19 +85,22 @@ export function createServicePolicy(opts: {
     }
   };
 
+
+  const updateStateAndNotify = (newState: ServiceState) => {
+    currentState = newState;
+    notifyHandlers(newState);
+  };
+
   breaker.onBreak(() => {
-    currentState = "open";
-    notifyHandlers("open");
+    updateStateAndNotify("open");
   });
 
   breaker.onHalfOpen(() => {
-    currentState = "half-open";
-    notifyHandlers("half-open");
+    updateStateAndNotify("half-open");
   });
 
   breaker.onReset(() => {
-    currentState = "closed";
-    notifyHandlers("closed");
+    updateStateAndNotify("closed");
   });
 
   return {
@@ -100,7 +110,7 @@ export function createServicePolicy(opts: {
       return currentState;
     },
     onStateChange: (handler: (state: ServiceState) => void) => {
-      handlers.push(handler);
+      handlers.add(handler);
     },
   };
 }

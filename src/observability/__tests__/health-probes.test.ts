@@ -87,6 +87,42 @@ describe("health-probes", () => {
   });
 });
 
+describe("graphManager fallback probe", () => {
+  let eventStore: EventStore;
+
+  beforeEach(() => {
+    eventStore = new EventStore({ dbPath: ":memory:" });
+  });
+
+  afterEach(async () => {
+    await eventStore.close();
+  });
+
+  test("reports healthy when getEntity resolves (entity not found = null)", async () => {
+    const graphManager = { getEntity: async (_id: string) => null } as never;
+    const snapshot = await probeSystemHealth({ eventStore, graphManager });
+    expect(snapshot.components.neo4j.status).toBe("healthy");
+    expect(snapshot.components.neo4j.latencyMs).toBeDefined();
+  });
+
+  test("reports healthy when getEntity throws with 'not found'", async () => {
+    const graphManager = {
+      getEntity: async (_id: string) => { throw new Error("entity not found"); },
+    } as never;
+    const snapshot = await probeSystemHealth({ eventStore, graphManager });
+    expect(snapshot.components.neo4j.status).toBe("healthy");
+  });
+
+  test("reports degraded when getEntity throws with unexpected error", async () => {
+    const graphManager = {
+      getEntity: async (_id: string) => { throw new Error("connection refused to neo4j"); },
+    } as never;
+    const snapshot = await probeSystemHealth({ eventStore, graphManager });
+    expect(snapshot.components.neo4j.status).toBe("unhealthy");
+    expect(snapshot.status).toBe("degraded");
+  });
+});
+
 describe("sanitizeHealthError", () => {
   test("sanitizes ECONNREFUSED errors", () => {
     expect(sanitizeHealthError(new Error("connect ECONNREFUSED 127.0.0.1:7687"))).toBe("connection refused");
@@ -118,9 +154,25 @@ describe("sanitizeHealthError", () => {
     expect(sanitizeHealthError(new Error("SSL_ERROR_SYSCALL"))).toBe("TLS/certificate error");
   });
 
-  test("returns generic message for unknown errors", () => {
-    expect(sanitizeHealthError(new Error("something weird happened"))).toBe("service unavailable");
-    expect(sanitizeHealthError("string error")).toBe("service unavailable");
+  test("returns partial message for unknown errors (first 64 chars for diagnostics)", () => {
+    // Fallback includes the first 64 sanitized chars so authenticated callers get some context.
+    expect(sanitizeHealthError(new Error("something weird happened"))).toBe("something weird happened");
+    expect(sanitizeHealthError("string error")).toBe("string error");
+    // Very long unknown errors are capped at 64 chars.
+    const longMsg = "x".repeat(100);
+    expect(sanitizeHealthError(new Error(longMsg))).toBe("x".repeat(64));
+    // Empty/blank falls back to generic string.
+    expect(sanitizeHealthError(new Error(""))).toBe("service unavailable");
+  });
+
+  test("truncation boundary: exactly 64 chars passes through unchanged", () => {
+    const exactly64 = "a".repeat(64);
+    expect(sanitizeHealthError(new Error(exactly64))).toBe(exactly64);
+  });
+
+  test("truncation boundary: 65-char message is capped at 64", () => {
+    const msg65 = "b".repeat(65);
+    expect(sanitizeHealthError(new Error(msg65))).toBe("b".repeat(64));
   });
 
   test("is case-insensitive", () => {

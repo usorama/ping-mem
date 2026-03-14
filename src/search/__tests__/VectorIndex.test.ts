@@ -7,7 +7,7 @@
  * @module search/__tests__/VectorIndex.test
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   VectorIndex,
   VectorIndexError,
@@ -62,10 +62,10 @@ class MockStatement implements VectorStatement {
       this.storage.set(memoryId, {
         memory_id: memoryId,
         session_id: sessionId,
-        content: content,
-        category: category,
+        content,
+        category,
         indexed_at: indexedAt,
-        metadata: metadata,
+        metadata,
         embedding: embedding,
       });
       return { changes: 1 };
@@ -147,6 +147,7 @@ class MockStatement implements VectorStatement {
 
       return Array.from(this.storage.values())
         .filter((row) => row.session_id === sessionId)
+        .sort((a, b) => b.indexed_at.localeCompare(a.indexed_at))
         .slice(0, limit);
     }
 
@@ -202,15 +203,6 @@ class MockVec0Database implements VectorDatabase {
     this.dbState.closed = true;
   }
 
-  // Test helper to check if database is closed
-  isClosed(): boolean {
-    return this.dbState.closed;
-  }
-
-  // Test helper to get storage size
-  getStorageSize(): number {
-    return this.storage.size;
-  }
 }
 
 // ============================================================================
@@ -288,7 +280,6 @@ describe("VectorIndex", () => {
   let vectorIndex: VectorIndex;
 
   beforeEach(() => {
-    vi.clearAllMocks();
     vectorIndex = createTestVectorIndex();
   });
 
@@ -319,7 +310,7 @@ describe("VectorIndex", () => {
       await customIndex.close();
     });
 
-    it("should use injected database", () => {
+    it("should use injected database", async () => {
       const mockDb = new MockVec0Database();
       const index = new VectorIndex({
         dbPath: ":memory:",
@@ -328,7 +319,7 @@ describe("VectorIndex", () => {
 
       // The database should be used without throwing
       expect(index).toBeInstanceOf(VectorIndex);
-      index.close();
+      await index.close();
     });
   });
 
@@ -531,6 +522,7 @@ describe("VectorIndex", () => {
         threshold: 0.5,
       });
 
+      expect(results.length).toBeGreaterThan(0);
       results.forEach((result) => {
         expect(["similar-1", "similar-2"]).toContain(result.memoryId);
       });
@@ -597,6 +589,25 @@ describe("VectorIndex", () => {
 
       // Should throw VectorIndexError, not raw database error
       await expect(vectorIndex.storeVector(embedding)).rejects.toThrow(VectorIndexError);
+    });
+
+    it("should reject operations after close with INDEX_CLOSED error", async () => {
+      await vectorIndex.close();
+
+      // All public methods should throw VectorIndexError with INDEX_CLOSED code
+      await expect(vectorIndex.getStats()).rejects.toThrow("VectorIndex has been closed");
+      await expect(vectorIndex.getVector("mem-001")).rejects.toThrow("VectorIndex has been closed");
+      await expect(vectorIndex.listVectors("session-001")).rejects.toThrow("VectorIndex has been closed");
+      await expect(vectorIndex.deleteVector("mem-001")).rejects.toThrow("VectorIndex has been closed");
+      await expect(
+        vectorIndex.semanticSearch(new Float32Array(768).fill(0.1))
+      ).rejects.toThrow("VectorIndex has been closed");
+    });
+
+    it("double close should be idempotent (no error)", async () => {
+      await vectorIndex.close();
+      // Second close should not throw
+      await expect(vectorIndex.close()).resolves.toBeUndefined();
     });
   });
 

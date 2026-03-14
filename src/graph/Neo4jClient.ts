@@ -1,5 +1,5 @@
 /**
- * Neo4j Client Wrapper for Graphiti Integration
+ * Neo4j Client Wrapper for ping-mem Temporal Graph
  *
  * Provides a type-safe, connection-pooled Neo4j client for ping-mem's
  * graph-based memory storage and retrieval operations.
@@ -67,7 +67,8 @@ export class Neo4jQueryError extends Neo4jClientError {
   ) {
     super(message, code, cause);
     this.name = "Neo4jQueryError";
-    this.query = query;
+    // Truncate the stored query to limit log exposure of internal graph schema.
+    this.query = query.slice(0, 500);
     this.paramKeys = params ? Object.keys(params) : undefined;
     Object.setPrototypeOf(this, Neo4jQueryError.prototype);
   }
@@ -149,7 +150,6 @@ const DEFAULT_TX_RETRY_TIME = 30000;
 export class Neo4jClient {
   private driver: Driver | null = null;
   private readonly config: ResolvedConfig;
-  private connected = false;
   private readonly servicePolicy: ServicePolicy;
   private readonly writePolicy: ServicePolicy;
 
@@ -183,18 +183,29 @@ export class Neo4jClient {
       timeoutMs: 15_000,
     });
 
-    const onCircuitChange = (state: "closed" | "open" | "half-open") => {
-      this.connected = state !== "open" && this.driver !== null;
+    // Read/write circuits: log only — do not mutate connected or driver.
+    // isConnected() tracks driver liveness; circuit state is exposed via getCircuitState().
+    // Keeping connected decoupled from circuit state lets operations reach servicePolicy.execute()
+    // so the half-open probe can fire and self-recovery works without manual reconnect.
+    this.servicePolicy.onStateChange((state) => {
       if (state === "open") {
-        log.error("Circuit OPEN — Neo4j operations will fail fast", { state });
+        log.error("Read circuit OPEN — Neo4j operations will fail fast", { state });
       } else if (state === "half-open") {
-        log.info("Circuit half-open — attempting recovery", { state });
+        log.info("Read circuit half-open — attempting recovery", { state });
       } else {
-        log.info("Circuit recovered", { state });
+        log.info("Read circuit recovered", { state });
       }
-    };
-    this.servicePolicy.onStateChange(onCircuitChange);
-    this.writePolicy.onStateChange(onCircuitChange);
+    });
+    // Write circuit: log only, do not affect connected flag (reads may still work)
+    this.writePolicy.onStateChange((state) => {
+      if (state === "open") {
+        log.error("Write circuit OPEN — Neo4j write operations will fail fast", { state });
+      } else if (state === "half-open") {
+        log.info("Write circuit half-open — attempting write recovery", { state });
+      } else {
+        log.info("Write circuit recovered", { state });
+      }
+    });
   }
 
   /**
@@ -203,8 +214,29 @@ export class Neo4jClient {
    * @throws {Neo4jConnectionError} If connection fails
    */
   async connect(): Promise<void> {
-    if (this.connected && this.driver !== null) {
+    // Return early if a live driver already exists — circuit state does not affect
+    // driver liveness, so checking driver !== null is sufficient.
+    if (this.driver !== null) {
       return;
+    }
+
+    // Validate URI scheme to prevent SSRF credential exfiltration: the driver sends
+    // credentials during the handshake, so an attacker-controlled URI would receive them.
+    const ALLOWED_NEO4J_SCHEMES = new Set([
+      "bolt:", "bolt+s:", "bolt+ssc:",
+      "neo4j:", "neo4j+s:", "neo4j+ssc:",
+    ]);
+    let uriScheme: string;
+    try {
+      uriScheme = new URL(this.config.uri).protocol;
+    } catch {
+      // Do not include the raw URI in the error — it may contain embedded credentials.
+      throw new Neo4jConnectionError("NEO4J_URI is not a valid URL");
+    }
+    if (!ALLOWED_NEO4J_SCHEMES.has(uriScheme)) {
+      throw new Neo4jConnectionError(
+        `NEO4J_URI scheme '${uriScheme}' is not allowed. Use bolt:// or neo4j://`
+      );
     }
 
     try {
@@ -227,10 +259,8 @@ export class Neo4jClient {
 
       // Verify connectivity
       await this.driver.verifyConnectivity();
-      this.connected = true;
     } catch (error) {
       this.driver = null;
-      this.connected = false;
 
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -240,7 +270,7 @@ export class Neo4jClient {
           : undefined;
 
       throw new Neo4jConnectionError(
-        `Failed to connect to Neo4j: ${errorMessage}`,
+        "Failed to connect to Neo4j — check NEO4J_URI and credentials",
         errorCode,
         error instanceof Error ? error : undefined
       );
@@ -252,9 +282,13 @@ export class Neo4jClient {
    */
   async disconnect(): Promise<void> {
     if (this.driver !== null) {
-      await this.driver.close();
-      this.driver = null;
-      this.connected = false;
+      try {
+        await this.driver.close();
+      } finally {
+        // Clear the driver reference regardless of close() outcome so
+        // isConnected() accurately reflects that the client is no longer active.
+        this.driver = null;
+      }
     }
   }
 
@@ -262,7 +296,19 @@ export class Neo4jClient {
    * Check if client is connected to Neo4j
    */
   isConnected(): boolean {
-    return this.connected && this.driver !== null;
+    // Driver liveness is the source of truth; circuit state is separate (see getCircuitState()).
+    return this.driver !== null;
+  }
+
+  getCircuitState(): "closed" | "open" | "half-open" {
+    // Report the worse of read and write circuits so callers see a unified view.
+    if (this.servicePolicy.state === "open" || this.writePolicy.state === "open") {
+      return "open";
+    }
+    if (this.servicePolicy.state === "half-open" || this.writePolicy.state === "half-open") {
+      return "half-open";
+    }
+    return "closed";
   }
 
   getCircuitState(): "closed" | "open" | "half-open" {
@@ -345,11 +391,18 @@ export class Neo4jClient {
   }
 
   /**
-   * Execute a write query and return result summary
+   * Execute a write query (CREATE / MERGE / SET / DELETE) and return the result.
    *
    * @param cypher - Cypher query string
    * @param params - Query parameters
-   * @returns First record from result or query summary info
+   * @returns If the query produces records, returns the **first** record as `T`.
+   *   Records after the first are silently discarded — if the query uses RETURN
+   *   on multiple rows, use `executeQuery` instead.
+   *   If the query produces no records (e.g., a pure DELETE), returns a summary
+   *   object with `{ nodesCreated, nodesDeleted, relationshipsCreated,
+   *   relationshipsDeleted, propertiesSet }` cast as `unknown as T`.
+   *   Callers that need to distinguish between the two cases should check the
+   *   shape of the returned value or use `executeQuery` for read operations.
    * @throws {Neo4jQueryError} If query execution fails
    *
    * @example
@@ -458,7 +511,8 @@ export class Neo4jClient {
    * @returns true if connected and responsive
    */
   async ping(): Promise<boolean> {
-    if (!this.isConnected()) {
+    // No driver: cannot probe.
+    if (this.driver === null) {
       return false;
     }
 
@@ -466,9 +520,8 @@ export class Neo4jClient {
       await this.executeQuery("RETURN 1 as ping");
       return true;
     } catch (error) {
-      log.warn("Neo4j ping failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      const msg = error instanceof Error ? error.message : String(error);
+      log.warn("Neo4j ping failed", { error: msg });
       return false;
     }
   }
@@ -591,9 +644,10 @@ export function createNeo4jClientFromEnv(): Neo4jClient {
 
   const database = process.env["NEO4J_DATABASE"] ?? DEFAULT_DATABASE;
   const maxPoolSizeStr = process.env["NEO4J_MAX_POOL_SIZE"];
-  const maxConnectionPoolSize = maxPoolSizeStr
-    ? parseInt(maxPoolSizeStr, 10)
-    : DEFAULT_MAX_POOL_SIZE;
+  const parsedPoolSize = maxPoolSizeStr ? parseInt(maxPoolSizeStr, 10) : NaN;
+  // Guard NaN (non-numeric env var) and non-positive values — fall back to default.
+  const maxConnectionPoolSize =
+    !Number.isNaN(parsedPoolSize) && parsedPoolSize > 0 ? parsedPoolSize : DEFAULT_MAX_POOL_SIZE;
 
   return new Neo4jClient({
     uri,

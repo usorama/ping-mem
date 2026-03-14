@@ -176,15 +176,20 @@ export class QdrantClientWrapper {
     });
 
     this.servicePolicy.onStateChange((state) => {
-      if (state === "open") {
-        this.connected = false;
-      } else if (!this.usingFallback) {
-        this.connected = this.client !== null;
-      }
       if (state === "closed") {
+        // Fully recovered: mark as connected only when circuit closes
+        if (!this.usingFallback) {
+          this.connected = this.client !== null;
+        }
         log.info("Circuit recovered", { state });
+      } else if (state === "open") {
+        // Circuit tripped: mark as disconnected
+        this.connected = false;
+        log.warn("Circuit OPEN — Qdrant operations will fail fast", { state });
       } else {
-        log.warn("Circuit state changed", { state });
+        // half-open: a single probe request will be allowed through, but we
+        // don't declare ourselves connected until the probe succeeds (circuit closes)
+        log.info("Circuit half-open — attempting recovery", { state });
       }
     });
   }
@@ -281,13 +286,21 @@ export class QdrantClientWrapper {
    * @returns true if server is healthy
    */
   async healthCheck(): Promise<boolean> {
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
+      return false;
+    }
+    // Fail fast when circuit is fully open; allow probe through when half-open
+    // so the circuit breaker can self-recover via a successful health check.
+    if (this.servicePolicy.state === "open") {
       return false;
     }
 
     try {
-      // Check specific collection rather than listing all (avoids leaking other collection names)
-      await this.client.getCollection(this.config.collectionName);
+      // Route through servicePolicy.execute() so success/failure updates circuit state.
+      // getCollections() is lightweight and succeeds whenever the server is reachable,
+      // even before the specific collection has been created (avoids false-unhealthy at startup).
+      await this.servicePolicy.execute(() => client.getCollections());
       return true;
     } catch (error) {
       log.warn("healthCheck failed", {
@@ -301,27 +314,30 @@ export class QdrantClientWrapper {
    * Create collection if it doesn't exist
    */
   async createCollectionIfNotExists(): Promise<void> {
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
     }
 
     try {
-      // Check if collection exists
-      const collections = await this.client.getCollections();
-      const exists = collections.collections.some(
-        (c) => c.name === this.config.collectionName
-      );
+      // Route through servicePolicy.execute() so the circuit breaker counts this probe
+      await this.servicePolicy.execute(async () => {
+        const collections = await client.getCollections();
+        const exists = collections.collections.some(
+          (c) => c.name === this.config.collectionName
+        );
 
-      if (!exists) {
-        await this.client.createCollection(this.config.collectionName, {
-          vectors: {
-            size: this.config.vectorDimensions,
-            distance: this.config.distanceMetric,
-          },
-        });
-      }
+        if (!exists) {
+          await client.createCollection(this.config.collectionName, {
+            vectors: {
+              size: this.config.vectorDimensions,
+              distance: this.config.distanceMetric,
+            },
+          });
+        }
+      });
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -340,7 +356,13 @@ export class QdrantClientWrapper {
    * @param vectorData - Vector embedding with metadata
    */
   async storeVector(vectorData: VectorEmbedding): Promise<void> {
-    if (!this.connected) {
+    // State invariant: usingFallback is set to true inside connect() when the
+    // initial Qdrant connection fails. While usingFallback is true the data path
+    // routes to the in-memory fallback, so the half-open guard below is only
+    // reached when usingFallback is false (i.e., Qdrant connected successfully).
+    // The circuit-breaker self-heals exclusively through healthCheck() and
+    // createCollectionIfNotExists() which always route through servicePolicy.execute().
+    if (!this.connected && this.servicePolicy.state !== "half-open") {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -351,7 +373,8 @@ export class QdrantClientWrapper {
       return this.fallbackIndex.storeVector(vectorData);
     }
 
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -359,7 +382,7 @@ export class QdrantClientWrapper {
 
     try {
       await this.servicePolicy.execute(() =>
-        this.client!.upsert(this.config.collectionName, {
+        client.upsert(this.config.collectionName, {
           wait: true,
           points: [
             {
@@ -404,7 +427,7 @@ export class QdrantClientWrapper {
       category?: string;
     } = {}
   ): Promise<VectorSearchResult[]> {
-    if (!this.connected) {
+    if (!this.connected && this.servicePolicy.state !== "half-open") {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -415,7 +438,8 @@ export class QdrantClientWrapper {
       return this.fallbackIndex.semanticSearch(queryEmbedding, options);
     }
 
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -460,7 +484,7 @@ export class QdrantClientWrapper {
       }
 
       const results = await this.servicePolicy.execute(() =>
-        this.client!.search(this.config.collectionName, searchParams)
+        client.search(this.config.collectionName, searchParams)
       );
 
       return results.map((result) => {
@@ -509,7 +533,7 @@ export class QdrantClientWrapper {
    * @returns true if deleted, false if not found
    */
   async deleteVector(memoryId: MemoryId): Promise<boolean> {
-    if (!this.connected) {
+    if (!this.connected && this.servicePolicy.state !== "half-open") {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -520,7 +544,8 @@ export class QdrantClientWrapper {
       return this.fallbackIndex.deleteVector(memoryId);
     }
 
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -528,7 +553,7 @@ export class QdrantClientWrapper {
 
     try {
       await this.servicePolicy.execute(() =>
-        this.client!.delete(this.config.collectionName, {
+        client.delete(this.config.collectionName, {
           wait: true,
           points: [memoryId],
         })
@@ -559,7 +584,7 @@ export class QdrantClientWrapper {
     collectionName: string;
     usingFallback: boolean;
   }> {
-    if (!this.connected) {
+    if (!this.connected && this.servicePolicy.state !== "half-open") {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -576,7 +601,8 @@ export class QdrantClientWrapper {
       };
     }
 
-    if (!this.client) {
+    const client = this.client;
+    if (!client) {
       throw new QdrantConnectionError(
         "Not connected to Qdrant. Call connect() first."
       );
@@ -584,7 +610,7 @@ export class QdrantClientWrapper {
 
     try {
       const collectionInfo = await this.servicePolicy.execute(() =>
-        this.client!.getCollection(this.config.collectionName)
+        client.getCollection(this.config.collectionName)
       );
 
       return {

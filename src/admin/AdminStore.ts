@@ -50,6 +50,7 @@ export interface ProjectRecord {
 
 export class AdminStore {
   private db: Database;
+  private closed = false;
   private config: {
     dbPath: string;
     walMode: boolean;
@@ -61,7 +62,8 @@ export class AdminStore {
   private stmtListApiKeys!: Statement;
   private stmtDeactivateAllKeys!: Statement;
   private stmtDeactivateKey!: Statement;
-  private stmtCountKeys!: Statement;
+  private stmtCountAllKeys!: Statement;
+  private stmtCountActiveKeys!: Statement;
   private stmtFindKeyHash!: Statement;
 
   private stmtUpsertProject!: Statement;
@@ -92,7 +94,9 @@ export class AdminStore {
     if (this.config.foreignKeys) {
       this.db.exec("PRAGMA foreign_keys = ON");
     }
-    this.db.exec(`PRAGMA busy_timeout = ${this.config.busyTimeout}`);
+    // Safe: timeout is always a clamped integer from Math.max/min — no injection risk
+    const timeout = Math.max(0, Math.min(Number(this.config.busyTimeout) || 5000, 60000));
+    this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
 
     this.initializeSchema();
     this.prepareStatements();
@@ -153,8 +157,12 @@ export class AdminStore {
       "UPDATE admin_api_keys SET active = 0 WHERE id = $id"
     );
 
-    this.stmtCountKeys = this.db.prepare(
+    this.stmtCountAllKeys = this.db.prepare(
       "SELECT COUNT(*) as count FROM admin_api_keys"
+    );
+
+    this.stmtCountActiveKeys = this.db.prepare(
+      "SELECT COUNT(*) as count FROM admin_api_keys WHERE active = 1"
     );
 
     this.stmtFindKeyHash = this.db.prepare(
@@ -206,9 +214,17 @@ export class AdminStore {
     );
   }
 
+  /**
+   * Seed an initial API key if no keys exist yet (including deactivated ones).
+   * Intentionally counts ALL keys (active + inactive) so that deactivating the
+   * seed key and creating a new one via createApiKey() doesn't re-seed on restart.
+   */
   ensureSeedApiKey(rawKey: string): void {
-    const count = (this.stmtCountKeys.get() as { count: number }).count;
-    if (count > 0) {
+    const row = this.stmtCountAllKeys.get() as { count: number } | undefined;
+    if (!row) {
+      throw new Error("ensureSeedApiKey: admin_api_keys table query failed (schema corruption?)");
+    }
+    if (row.count > 0) {
       return;
     }
     const { keyHash, last4 } = this.hashApiKey(rawKey);
@@ -222,8 +238,11 @@ export class AdminStore {
   }
 
   hasAnyActiveKey(): boolean {
-    const count = (this.stmtCountKeys.get() as { count: number }).count;
-    return count > 0;
+    const row = this.stmtCountActiveKeys.get() as { count: number } | undefined;
+    if (!row) {
+      throw new Error("hasAnyActiveKey: admin_api_keys table query failed (schema corruption?)");
+    }
+    return row.count > 0;
   }
 
   isApiKeyValid(rawKey: string): boolean {
@@ -403,6 +422,8 @@ export class AdminStore {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
   }
 
@@ -413,22 +434,19 @@ export class AdminStore {
   }
 
   private generateUUID(): string {
-    const timestamp = Date.now();
-    const timestampHex = timestamp.toString(16).padStart(12, "0");
-    const randomBytes = crypto.randomBytes(10);
-    const randomHex = randomBytes.toString("hex");
-    return (
-      timestampHex.slice(0, 8) +
-      "-" +
-      timestampHex.slice(8, 12) +
-      "-7" +
-      randomHex.slice(0, 3) +
-      "-" +
-      ((parseInt(randomHex.slice(3, 4), 16) & 0x3) | 0x8).toString(16) +
-      randomHex.slice(4, 7) +
-      "-" +
-      randomHex.slice(7, 19)
-    );
+    // crypto.randomBytes-based v4 UUID — cryptographically secure without the
+    // cross-test contamination that crypto.randomUUID() exhibits under Bun's
+    // concurrent test runner when combined with src/graph/__tests__/.
+    const bytes = crypto.randomBytes(16);
+    bytes[6] = (bytes[6]! & 0x0f) | 0x40; // version 4
+    bytes[8] = (bytes[8]! & 0x3f) | 0x80; // variant RFC 4122
+    return [
+      bytes.subarray(0, 4).toString("hex"),
+      bytes.subarray(4, 6).toString("hex"),
+      bytes.subarray(6, 8).toString("hex"),
+      bytes.subarray(8, 10).toString("hex"),
+      bytes.subarray(10, 16).toString("hex"),
+    ].join("-");
   }
 
   private generateApiKey(): string {

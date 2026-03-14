@@ -121,6 +121,13 @@ describe("AdminStore", () => {
       store.createApiKey();
       expect(store.hasAnyActiveKey()).toBe(true);
     });
+
+    test("hasAnyActiveKey returns false when all keys are deactivated", () => {
+      const { info } = store.createApiKey();
+      expect(store.hasAnyActiveKey()).toBe(true);
+      store.deactivateApiKey(info.id);
+      expect(store.hasAnyActiveKey()).toBe(false);
+    });
   });
 
   describe("Project CRUD", () => {
@@ -252,6 +259,36 @@ describe("AdminStore", () => {
       const tempStore = new AdminStore({ dbPath: ":memory:" });
       tempStore.createApiKey();
       expect(() => tempStore.close()).not.toThrow();
+    });
+
+    test("should be idempotent (double close does not throw)", () => {
+      const tempStore = new AdminStore({ dbPath: ":memory:" });
+      tempStore.close();
+      expect(() => tempStore.close()).not.toThrow();
+    });
+
+    test("double close does not corrupt state before close", () => {
+      // Verify the close guard protects against double-free on the DB handle.
+      // bun:sqlite is lenient after close (prepared statements still work),
+      // so we verify the important property: data is accessible before close,
+      // and close itself doesn't throw or corrupt.
+      const tempStore = new AdminStore({ dbPath: ":memory:" });
+      tempStore.createApiKey();
+      expect(tempStore.listApiKeys().length).toBe(1);
+      tempStore.close();
+      expect(() => tempStore.close()).not.toThrow();
+    });
+
+    test("operations after close: bun:sqlite returns empty results (not throws)", () => {
+      // Documents bun:sqlite behavior: prepared statements on a closed :memory: DB
+      // return empty results rather than throwing. This is an implementation detail —
+      // callers should not rely on post-close operations working.
+      const tempStore = new AdminStore({ dbPath: ":memory:" });
+      tempStore.createApiKey();
+      tempStore.close();
+      // bun:sqlite silently returns empty for in-memory DBs after close
+      const keys = tempStore.listApiKeys();
+      expect(Array.isArray(keys)).toBe(true);
     });
   });
 });

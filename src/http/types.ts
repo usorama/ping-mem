@@ -15,6 +15,7 @@ import type { AdminStore } from "../admin/AdminStore.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import type { GraphManager } from "../graph/GraphManager.js";
 import type { HealthMonitor } from "../observability/HealthMonitor.js";
+import type { EventStore } from "../storage/EventStore.js";
 
 // ============================================================================
 // HTTP Server Types
@@ -59,6 +60,8 @@ export interface HTTPServerConfig {
   graphManager?: GraphManager | undefined;
   /** HealthMonitor for observability status endpoint (optional) */
   healthMonitor?: HealthMonitor | undefined;
+  /** Shared EventStore to avoid duplicate SQLite connections (optional) */
+  eventStore?: EventStore | undefined;
 }
 
 // Re-export PingMemServerConfig for convenience

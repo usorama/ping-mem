@@ -102,6 +102,8 @@ export interface PingMemServerConfig {
   causalDiscoveryAgent?: CausalDiscoveryAgent | undefined;
   /** Optional QdrantClientWrapper for health checks */
   qdrantClient?: QdrantClientWrapper | undefined;
+  /** Optional pre-created EventStore to share with the health monitor (avoids dual SQLite connections) */
+  eventStore?: import("../storage/EventStore.js").EventStore | undefined;
 }
 
 // ============================================================================
@@ -136,6 +138,8 @@ export class PingMemServer {
   private diagnosticsStore: DiagnosticsStore | null = null;
   private modules: ToolModule[] = [];
   private state: SessionState;
+  private readonly ownsEventStore: boolean;
+  private readonly ownsDiagnosticsStore: boolean;
 
   constructor(config: PingMemServerConfig = {}) {
     const resolved = {
@@ -144,8 +148,9 @@ export class PingMemServer {
       vectorDimensions: config.vectorDimensions ?? 768,
     };
 
-    // Initialize core components
-    this.eventStore = new EventStore({ dbPath: resolved.dbPath });
+    // Initialize core components — use shared EventStore if provided (avoids dual SQLite connections)
+    this.ownsEventStore = config.eventStore === undefined;
+    this.eventStore = config.eventStore ?? new EventStore({ dbPath: resolved.dbPath });
     this.sessionManager = new SessionManager({
       eventStore: this.eventStore,
     });
@@ -170,6 +175,7 @@ export class PingMemServer {
     const llmEntityExtractor = config.llmEntityExtractor ?? null;
 
     // Initialize diagnostics
+    this.ownsDiagnosticsStore = config.diagnosticsStore === undefined;
     this.diagnosticsStore =
       config.diagnosticsStore ??
       new DiagnosticsStore(
@@ -272,7 +278,7 @@ export class PingMemServer {
   ): Promise<Record<string, unknown>> {
     for (const mod of this.modules) {
       if (mod.tools.some(t => t.name === name)) {
-        const result = mod.handle(name, args);
+        const result = await mod.handle(name, args);
         if (result !== undefined) {
           return result;
         }
@@ -324,15 +330,18 @@ export class PingMemServer {
       await this.vectorIndex.close();
     }
 
-    // Close event store
-    await this.eventStore.close();
+    // Close session manager before event store — session operations depend on event store
+    await this.sessionManager.close();
 
-    if (this.diagnosticsStore) {
-      this.diagnosticsStore.close();
+    // Close event store only if we own it (not injected externally — caller closes it)
+    if (this.ownsEventStore) {
+      await this.eventStore.close();
     }
 
-    // Close session manager
-    await this.sessionManager.close();
+    // Close diagnostics store only if we own it
+    if (this.ownsDiagnosticsStore && this.diagnosticsStore) {
+      this.diagnosticsStore.close();
+    }
   }
 }
 

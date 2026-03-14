@@ -4,7 +4,7 @@
  * @module storage/__tests__/EventStore.test
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { EventStore, createInMemoryEventStore } from "../EventStore.js";
 import type { Event } from "../EventStore.js";
 
@@ -20,16 +20,16 @@ describe("EventStore", () => {
   });
 
   describe("Database Initialization", () => {
-    it("should create an in-memory database", async () => {
+    test("should create an in-memory database", async () => {
       expect(store.getDbPath()).toBe(":memory:");
     });
 
-    it("should pass health check", async () => {
+    test("should pass health check", async () => {
       const healthy = await store.ping();
       expect(healthy).toBe(true);
     });
 
-    it("should initialize with zero events and checkpoints", () => {
+    test("should initialize with zero events and checkpoints", () => {
       const stats = store.getStats();
       expect(stats.eventCount).toBe(0);
       expect(stats.checkpointCount).toBe(0);
@@ -38,7 +38,7 @@ describe("EventStore", () => {
   });
 
   describe("Event Creation", () => {
-    it("should create SESSION_STARTED event", async () => {
+    test("should create SESSION_STARTED event", async () => {
       const sessionId = "test-session-1";
       const event = await store.createEvent(
         sessionId,
@@ -56,7 +56,7 @@ describe("EventStore", () => {
       expect(event.timestamp).toBeInstanceOf(Date);
     });
 
-    it("should create MEMORY_SAVED event", async () => {
+    test("should create MEMORY_SAVED event", async () => {
       const sessionId = "test-session-2";
       const event = await store.createEvent(
         sessionId,
@@ -73,7 +73,7 @@ describe("EventStore", () => {
       expect(event.eventType).toBe("MEMORY_SAVED");
     });
 
-    it("should generate unique event IDs", async () => {
+    test("should generate unique event IDs", async () => {
       const sessionId = "test-session-3";
       const event1 = await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "S1" });
       const event2 = await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "S2" });
@@ -83,7 +83,7 @@ describe("EventStore", () => {
   });
 
   describe("Event Retrieval", () => {
-    it("should retrieve event by ID", async () => {
+    test("should retrieve event by ID", async () => {
       const sessionId = "test-session-4";
       const created = await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Test" });
 
@@ -93,12 +93,12 @@ describe("EventStore", () => {
       expect(retrieved?.sessionId).toBe(sessionId);
     });
 
-    it("should return null for non-existent event ID", async () => {
+    test("should return null for non-existent event ID", async () => {
       const retrieved = await store.getById("non-existent-id");
       expect(retrieved).toBeNull();
     });
 
-    it("should retrieve all events for a session", async () => {
+    test("should retrieve all events for a session", async () => {
       const sessionId = "test-session-5";
       await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Test" });
       await store.createEvent(sessionId, "MEMORY_SAVED", { memoryId: "m1", key: "k1", sessionId, operation: "save" });
@@ -111,7 +111,7 @@ describe("EventStore", () => {
       expect(events[2]?.eventType).toBe("SESSION_ENDED");
     });
 
-    it("should retrieve events by time range", async () => {
+    test("should retrieve events by time range", async () => {
       const sessionId = "test-session-6";
       const start = new Date();
       await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Test" });
@@ -123,13 +123,15 @@ describe("EventStore", () => {
 
       const end = new Date();
 
-      const events = await store.getBySession(sessionId); // Use getBySession since time range is not reliable in mock
-      expect(events.length).toBeGreaterThanOrEqual(1);
+      const events = await store.getByTimeRange(start, end);
+      expect(events.length).toBeGreaterThanOrEqual(2);
+      expect(events.some((e) => e.eventType === "SESSION_STARTED")).toBe(true);
+      expect(events.some((e) => e.eventType === "MEMORY_SAVED")).toBe(true);
     });
   });
 
   describe("Batch Operations", () => {
-    it("should append multiple events atomically", async () => {
+    test("should append multiple events atomically", async () => {
       const sessionId = "test-session-7";
       const events: Event[] = [
         {
@@ -158,7 +160,7 @@ describe("EventStore", () => {
   });
 
   describe("Checkpoints", () => {
-    it("should create checkpoint for session", async () => {
+    test("should create checkpoint for session", async () => {
       const sessionId = "test-session-8";
       await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Test" });
       await store.createEvent(sessionId, "MEMORY_SAVED", { memoryId: "m1", key: "k1", sessionId, operation: "save" });
@@ -171,7 +173,7 @@ describe("EventStore", () => {
       expect(checkpoint.description).toBe("Test checkpoint");
     });
 
-    it("should retrieve checkpoint by ID", async () => {
+    test("should retrieve checkpoint by ID", async () => {
       const sessionId = "test-session-9";
       await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Test" });
       const created = await store.createCheckpoint(sessionId, 5);
@@ -181,7 +183,7 @@ describe("EventStore", () => {
       expect(retrieved?.checkpointId).toBe(created.checkpointId);
     });
 
-    it("should retrieve all checkpoints for session", async () => {
+    test("should retrieve all checkpoints for session", async () => {
       const sessionId = "test-session-10";
       await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Test" });
       await store.createCheckpoint(sessionId, 5, "Checkpoint 1");
@@ -198,13 +200,13 @@ describe("EventStore", () => {
       expect(checkpoints.some(c => c.description === "Checkpoint 2")).toBe(true);
     });
 
-    it("should throw error when creating checkpoint with no events", async () => {
+    test("should throw error when creating checkpoint with no events", async () => {
       await expect(store.createCheckpoint("non-existent-session", 0)).rejects.toThrow();
     });
   });
 
   describe("Statistics", () => {
-    it("should track event count", async () => {
+    test("should track event count", async () => {
       const sessionId = "test-session-11";
       await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Test" });
       await store.createEvent(sessionId, "MEMORY_SAVED", { memoryId: "m1", key: "k1", sessionId, operation: "save" });
@@ -213,7 +215,7 @@ describe("EventStore", () => {
       expect(stats.eventCount).toBe(2);
     });
 
-    it("should track checkpoint count", async () => {
+    test("should track checkpoint count", async () => {
       const sessionId = "test-session-12";
       await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Test" });
       await store.createCheckpoint(sessionId, 0);
@@ -225,7 +227,7 @@ describe("EventStore", () => {
   });
 
   describe("Clear", () => {
-    it("should clear all data", async () => {
+    test("should clear all data", async () => {
       const sessionId = "test-session-13";
       await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Test" });
       await store.createCheckpoint(sessionId, 0);
@@ -235,6 +237,83 @@ describe("EventStore", () => {
       const stats = store.getStats();
       expect(stats.eventCount).toBe(0);
       expect(stats.checkpointCount).toBe(0);
+    });
+  });
+
+  describe("Storage Introspection Methods", () => {
+    test("getWalSizeBytes returns 0 for in-memory store", () => {
+      expect(store.getWalSizeBytes()).toBe(0);
+    });
+
+    test("getFreelistRatio returns a number in [0, 1]", () => {
+      const ratio = store.getFreelistRatio();
+      expect(typeof ratio).toBe("number");
+      expect(ratio).toBeGreaterThanOrEqual(0);
+      expect(ratio).toBeLessThanOrEqual(1);
+    });
+
+    test("getFreelistRatio returns a non-negative value for an empty store", () => {
+      // In-memory DB with no data may have a very small freelist ratio; it should never throw
+      const ratio = store.getFreelistRatio();
+      expect(ratio).toBeGreaterThanOrEqual(0);
+    });
+
+    test("getIntegrityOk returns 1 for a healthy in-memory store", () => {
+      expect(store.getIntegrityOk()).toBe(1);
+    });
+
+    test("walCheckpoint is a no-op for in-memory store", () => {
+      // Should not throw for :memory: databases
+      expect(() => store.walCheckpoint("PASSIVE")).not.toThrow();
+      expect(() => store.walCheckpoint("TRUNCATE")).not.toThrow();
+      expect(() => store.walCheckpoint("FULL")).not.toThrow();
+      expect(() => store.walCheckpoint("RESTART")).not.toThrow();
+    });
+
+    test("walCheckpoint rejects invalid mode", () => {
+      // @ts-expect-error — intentionally testing invalid runtime value
+      expect(() => store.walCheckpoint("INVALID")).toThrow("Invalid WAL checkpoint mode");
+    });
+  });
+
+  describe("isAgentActive", () => {
+    test("returns false for unknown agentId", () => {
+      expect(store.isAgentActive("unknown-agent")).toBe(false);
+    });
+
+    test("returns true for a registered agent with no expiry", () => {
+      const db = store.getDatabase();
+      const now = new Date().toISOString();
+      db.prepare(
+        `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
+         VALUES ($agent_id, 'worker', 0, 86400000, NULL, 0, 0, 10485760, 10000, $now, $now, '{}')`
+      ).run({ $agent_id: "agent-active", $now: now });
+
+      expect(store.isAgentActive("agent-active")).toBe(true);
+    });
+
+    test("returns true for a registered agent with future expiry", () => {
+      const db = store.getDatabase();
+      const now = new Date().toISOString();
+      const future = new Date(Date.now() + 60_000).toISOString();
+      db.prepare(
+        `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
+         VALUES ($agent_id, 'worker', 0, 60000, $expires_at, 0, 0, 10485760, 10000, $now, $now, '{}')`
+      ).run({ $agent_id: "agent-future", $expires_at: future, $now: now });
+
+      expect(store.isAgentActive("agent-future")).toBe(true);
+    });
+
+    test("returns false for an expired agent", () => {
+      const db = store.getDatabase();
+      const now = new Date().toISOString();
+      const past = new Date(Date.now() - 60_000).toISOString();
+      db.prepare(
+        `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
+         VALUES ($agent_id, 'worker', 0, 60000, $expires_at, 0, 0, 10485760, 10000, $now, $now, '{}')`
+      ).run({ $agent_id: "agent-expired", $expires_at: past, $now: now });
+
+      expect(store.isAgentActive("agent-expired")).toBe(false);
     });
   });
 });
