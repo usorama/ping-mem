@@ -223,7 +223,7 @@ export class RESTPingMemServer {
         "*",
         cors({
           origin: configuredOrigins,
-          allowMethods: corsConfig?.methods ?? ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+          allowMethods: corsConfig?.methods ?? ["GET", "POST", "OPTIONS"],
           allowHeaders: corsConfig?.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID", "Authorization"],
           credentials: true,
         })
@@ -349,7 +349,7 @@ export class RESTPingMemServer {
           components: Object.fromEntries(
             Object.entries(snapshot.components).map(([key, comp]) => [
               key,
-              comp.error ? { ...comp, error: comp.error.replace(/[\r\n\t\x00-\x1F\x7F]/g, "") } : comp,
+              comp.error ? { ...comp, error: comp.error.replace(/[\r\n\t\x00-\x1F\x7F\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "") } : comp,
             ])
           ),
         };
@@ -363,7 +363,7 @@ export class RESTPingMemServer {
           activeAlerts: monitorStatus.activeAlerts.map((alert) => ({
             ...alert,
             message: alert.message
-              .replace(/[\r\n\t\x00-\x1F\x7F]/g, "")
+              .replace(/[\r\n\t\x00-\x1F\x7F\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "")
               .replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, "[redacted]"),
           })),
         } : null;
@@ -2282,10 +2282,9 @@ export class RESTPingMemServer {
     if (this.pubsub) {
       this.pubsub.destroy();
     }
-    // Stop HealthMonitor to halt tick timers
-    if (this.healthMonitor) {
-      await this.healthMonitor.stop();
-    }
+    // HealthMonitor is stopped by the caller (server.ts shutdown) before stop() is invoked,
+    // since server.ts owns the healthMonitor lifecycle. Do not call stop() again here to
+    // avoid ownership confusion and redundant quiesce loops.
     // Close SessionManager to clear checkpoint timers (must precede EventStore close)
     await this.sessionManager.close();
     // Clear cached memory managers (do NOT call manager.close() — they share this.vectorIndex

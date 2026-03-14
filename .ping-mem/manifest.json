@@ -1,7 +1,7 @@
 {
   "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
   "rootPath": "/projects/ping-mem",
-  "treeHash": "bedd44a2d310e5fd91626147a63aaa215e8e31752769a62ddc9409975e64abf4",
+  "treeHash": "da22e4ee8763f23080dd0d50ad04fdbc20a39e13c4685567bcd0853aceee7ad8",
   "files": [
     {
       "path": ".ai/implementation-reviews/wave-review-enhancements.md",
@@ -45,7 +45,7 @@
     },
     {
       "path": ".ping-mem/manifest.json",
-      "sha256": "5bb99c2bf4032bb186bd6f86ffd9423098d81065a5f5f7110890c1c0b7bb0f10",
+      "sha256": "a826477908e6392dabca9ee4ea5613cfa441f2720edea9e32475d0ccac1ef1ee",
       "bytes": 57401
     },
     {
@@ -825,8 +825,8 @@
     },
     {
       "path": "src/http/admin.ts",
-      "sha256": "52a62a12f0c15ff9a20d888419a75df6b84d8e55c71387725876b9a6cb442afe",
-      "bytes": 55329
+      "sha256": "2192d0d329cb9591c948a7acc99174f0eb50a892e3a06512f7669e20d00f3463",
+      "bytes": 55174
     },
     {
       "path": "src/http/index.ts",
@@ -855,8 +855,8 @@
     },
     {
       "path": "src/http/rest-server.ts",
-      "sha256": "0fbf317f40d6c2f79bb544a22f69a549f328a18c039f9e0174dc5abef1c0685a",
-      "bytes": 93059
+      "sha256": "063983101afc943cb96aad9b21154dd1f473eb94d7f5aeae7b51dcafcfbd836e",
+      "bytes": 94004
     },
     {
       "path": "src/http/server.ts",
@@ -1335,8 +1335,8 @@
     },
     {
       "path": "src/observability/__tests__/health-probes.test.ts",
-      "sha256": "20b234c2acc579dfe8c63116349272121596fc97be5a4025d51f5e909b78275d",
-      "bytes": 5933
+      "sha256": "0967da50d9410715f474974979073f1ec38a31952a0e908ae5b7ba303796096c",
+      "bytes": 7684
     },
     {
       "path": "src/observability/health-probes.ts",
@@ -1525,8 +1525,8 @@
     },
     {
       "path": "src/storage/EventStore.ts",
-      "sha256": "5c8230595cc5f16eaaf99b2fd1d3915e1dbcd2934e0cf1892bad3876f6b9a0d0",
-      "bytes": 34638
+      "sha256": "15609d44c1971c30a83995e8bdc503967f2d45fe153e5f20e88ae54d51c3de4a",
+      "bytes": 35415
     },
     {
       "path": "src/storage/WriteLockManager.ts",
@@ -1689,6 +1689,6 @@
       "bytes": 849
     }
   ],
-  "generatedAt": "2026-03-14T15:25:48.888Z",
+  "generatedAt": "2026-03-14T15:38:08.596Z",
   "schemaVersion": 1
 }

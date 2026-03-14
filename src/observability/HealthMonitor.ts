@@ -245,9 +245,12 @@ export class HealthMonitor {
         if (walSize > 50_000_000) {
           // PASSIVE mode never blocks writers - SQLite WAL checkpoint is atomic
           this.deps.eventStore.walCheckpoint("PASSIVE");
-          this.activeAlerts.delete("sqlite:wal_checkpoint_failed");
-          this.lastAlerts.delete("sqlite:wal_checkpoint_failed");
         }
+        // Clear prior failure alert whenever the WAL probe block succeeds — even when
+        // walSize dropped below the checkpoint threshold (e.g., after VACUUM). Without
+        // this, the alert would stay active indefinitely after the condition resolves.
+        this.activeAlerts.delete("sqlite:wal_checkpoint_failed");
+        this.lastAlerts.delete("sqlite:wal_checkpoint_failed");
       } catch (error) {
         const lastWalSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
         log.error("WAL checkpoint failed — WAL may grow unbounded", {

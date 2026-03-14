@@ -62,8 +62,9 @@ export function sanitizeHealthError(error: unknown): string {
   } else {
     raw = String(error);
   }
-  // Strip control characters before keyword matching (log injection defence).
-  const msg = raw.replace(/[\r\n\t\x00-\x1F\x7F]/g, "");
+  // Strip control characters and BiDi/invisible formatting chars before keyword matching
+  // (log injection defence). Matches HealthMonitor.alert() regex for consistency.
+  const msg = raw.replace(/[\r\n\t\x00-\x1F\x7F\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "");
   const lower = msg.toLowerCase();
   if (lower.includes("econnrefused")) return "connection refused";
   if (lower.includes("enotfound") || lower.includes("eai_again")) return "hostname not found";
@@ -87,9 +88,10 @@ function roundMs(value: number): number {
 
 function toErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  // Strip control characters (log injection defence) and truncate to prevent CPU spikes
-  // from abnormally large error payloads (e.g., Neo4j responses with embedded stack traces).
-  return raw.replace(/[\r\n\t\x00-\x1F\x7F]/g, "").slice(0, 512);
+  // Strip control characters and BiDi/invisible formatting chars (log injection defence)
+  // and truncate to prevent CPU spikes from large error payloads.
+  // Matches HealthMonitor.alert() regex for consistency.
+  return raw.replace(/[\r\n\t\x00-\x1F\x7F\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 512);
 }
 
 /** Hard per-probe deadline: prevents a hanging TCP connection (e.g., silent network partition)
@@ -97,15 +99,18 @@ function toErrorMessage(error: unknown): string {
 const PROBE_TIMEOUT_MS = 8_000;
 
 function withProbeTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`${label} probe timed out after ${PROBE_TIMEOUT_MS}ms`)),
-        PROBE_TIMEOUT_MS
-      )
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} probe timed out after ${PROBE_TIMEOUT_MS}ms`)),
+      PROBE_TIMEOUT_MS
+    );
+  });
+  // Clear the timer when the primary promise settles to prevent leaked timers
+  // from keeping the event loop alive (matters in tests and CLI tools).
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== null) clearTimeout(timer);
+  });
 }
 
 export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSnapshot> {
