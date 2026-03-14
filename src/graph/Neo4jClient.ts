@@ -67,7 +67,8 @@ export class Neo4jQueryError extends Neo4jClientError {
   ) {
     super(message, code, cause);
     this.name = "Neo4jQueryError";
-    this.query = query;
+    // Truncate the stored query to limit log exposure of internal graph schema.
+    this.query = query.slice(0, 500);
     this.paramKeys = params ? Object.keys(params) : undefined;
     Object.setPrototypeOf(this, Neo4jQueryError.prototype);
   }
@@ -281,8 +282,13 @@ export class Neo4jClient {
    */
   async disconnect(): Promise<void> {
     if (this.driver !== null) {
-      await this.driver.close();
-      this.driver = null;
+      try {
+        await this.driver.close();
+      } finally {
+        // Clear the driver reference regardless of close() outcome so
+        // isConnected() accurately reflects that the client is no longer active.
+        this.driver = null;
+      }
     }
   }
 
@@ -385,7 +391,9 @@ export class Neo4jClient {
    *
    * @param cypher - Cypher query string
    * @param params - Query parameters
-   * @returns If the query produces records, returns the first record as `T`.
+   * @returns If the query produces records, returns the **first** record as `T`.
+   *   Records after the first are silently discarded — if the query uses RETURN
+   *   on multiple rows, use `executeQuery` instead.
    *   If the query produces no records (e.g., a pure DELETE), returns a summary
    *   object with `{ nodesCreated, nodesDeleted, relationshipsCreated,
    *   relationshipsDeleted, propertiesSet }` cast as `unknown as T`.

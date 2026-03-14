@@ -9,6 +9,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
+import * as crypto from "node:crypto";
 import { timingSafeStringEqual } from "../util/auth-utils.js";
 import { Hono, type Context } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -58,7 +59,7 @@ const MAX_MEMORY_MANAGERS = 200;
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
-import { probeSystemHealth, sanitizeHealthError } from "../observability/health-probes.js";
+import { probeSystemHealth } from "../observability/health-probes.js";
 import type { HealthMonitor } from "../observability/HealthMonitor.js";
 import {
   SessionStartSchema,
@@ -229,7 +230,7 @@ export class RESTPingMemServer {
       c.header("Cross-Origin-Opener-Policy", "same-origin");
       c.header("Cross-Origin-Resource-Policy", "same-origin");
       if (process.env["PING_MEM_BEHIND_PROXY"] === "true") {
-        c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+        c.header("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
       }
     });
 
@@ -1175,8 +1176,8 @@ export class RESTPingMemServer {
 
         if (c.req.query("category")) {
           const rawCategory = c.req.query("category")!;
-          if (rawCategory.length > 200) {
-            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "category exceeds maximum length" }, 400);
+          if (!RESTPingMemServer.VALID_CATEGORIES.has(rawCategory)) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid category: must be task, decision, progress, note, error, or warning" }, 400);
           }
           queryParams.category = rawCategory as MemoryCategory;
         }
@@ -1185,7 +1186,8 @@ export class RESTPingMemServer {
           if (rawChannel.length > 200) {
             return c.json<RESTErrorResponse>({ error: "Bad Request", message: "channel exceeds maximum length" }, 400);
           }
-          queryParams.channel = rawChannel;
+          // Strip SQLite LIKE wildcards to prevent logic-bypass in downstream LIKE expressions.
+          queryParams.channel = rawChannel.replace(/[%_]/g, "");
         }
         if (c.req.query("priority")) {
           const rawPriority = c.req.query("priority")!;
@@ -1285,9 +1287,10 @@ export class RESTPingMemServer {
           ? this.sessionManager.getSession(this.currentSessionId)
           : null;
 
+        const eventStats = this.eventStore.getStats();
         const stats = {
           eventStore: {
-            totalEvents: 0, // EventStore doesn't expose getEventCount publicly
+            totalEvents: eventStats.eventCount,
           },
           sessions: (() => {
             const allSessions = this.sessionManager.listSessions();
@@ -1520,6 +1523,16 @@ export class RESTPingMemServer {
     // ============================================================================
 
     this.app.get("/api/v1/events/stream", async (c) => {
+      // SSE responses are returned via raw ReadableStream which bypasses the global auth middleware
+      // pipeline on some runtimes. Apply an explicit auth gate here so the stream is never
+      // accessible without credentials when auth is configured.
+      const authRequired = this.config.apiKeyManager
+        ? true
+        : Boolean(this.config.apiKey);
+      if (authRequired && !this.validateApiKey(this.extractApiKey(c))) {
+        return c.json<RESTErrorResponse>({ error: "Unauthorized", message: "Valid API key required" }, 401);
+      }
+
       const channel = c.req.query("channel");
       const category = c.req.query("category");
       const agentId = c.req.query("agentId");
@@ -1758,14 +1771,22 @@ export class RESTPingMemServer {
         return c.text("Forbidden", 403);
       }
 
+      // Block source map files — they expose original source code to unauthenticated clients
+      if (filePath.endsWith(".map")) {
+        return c.text("Not Found", 404);
+      }
+
       try {
         const file = Bun.file(canonicalPath);
         if (!(await file.exists())) {
           return c.text("Not Found", 404);
         }
         const contentType = getContentType(filePath);
+        // HTML files must not be cached: they may contain per-request CSP nonces and
+        // sensitive rendered data. Other static assets (JS, CSS, images) are safely cacheable.
+        const cacheControl = filePath.endsWith(".html") ? "no-store" : "public, max-age=3600";
         return new Response(file, {
-          headers: { "Content-Type": contentType, "Cache-Control": "public, max-age=3600" },
+          headers: { "Content-Type": contentType, "Cache-Control": cacheControl },
         });
       } catch (err) {
         log.error("Error serving static file", { filePath: safeFilePath, error: err instanceof Error ? err.message : String(err) });
@@ -1809,11 +1830,18 @@ export class RESTPingMemServer {
     return timingSafeStringEqual(apiKey, this.config.apiKey);
   }
 
-  /** UUID format regex for validating X-Session-ID header values */
-  private static readonly UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /**
+   * UUID format regex for validating X-Session-ID header values.
+   * Enforces RFC 4122 version nibble (4 or 7) and variant nibble (8/9/a/b).
+   * Input is normalized to lowercase before testing so no /i flag is needed.
+   */
+  private static readonly UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[47][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
   /** Valid priority values for query parameter validation */
   private static readonly VALID_PRIORITIES = new Set(["high", "normal", "low"]);
+
+  /** Valid memory category values for query parameter validation */
+  private static readonly VALID_CATEGORIES = new Set(["task", "decision", "progress", "note", "error", "warning"]);
 
   /** Valid code types for codebase search */
   private static readonly VALID_CODE_TYPES = new Set(["code", "comment", "docstring"]);
@@ -2002,7 +2030,12 @@ export class RESTPingMemServer {
     const manager = new MemoryManager(config);
     await manager.hydrate();
 
-    // Evict oldest entries if map exceeds cap to prevent unbounded memory growth
+    // Evict oldest entries if map exceeds cap to prevent unbounded memory growth.
+    // Map iteration order is insertion order (V8/Bun), so .keys().next().value gives
+    // the insertion-oldest entry — an approximation of LRU that is correct unless a
+    // session was evicted and re-hydrated (which would re-insert it at the tail).
+    // True LRU would require a doubly-linked list; this approximation is sufficient
+    // for the expected workload of a few active sessions at a time.
     if (this.memoryManagers.size >= MAX_MEMORY_MANAGERS) {
       const oldest = this.memoryManagers.keys().next().value;
       if (oldest) this.memoryManagers.delete(oldest);
@@ -2055,8 +2088,19 @@ export class RESTPingMemServer {
       body,
     });
 
-    // Process request through Hono
-    const webResponse = await this.app.fetch(webRequest);
+    // Process request through Hono — wrap in try/catch so a synchronous throw from
+    // a middleware (e.g., unhandled non-async error) does not crash the Node.js
+    // 'request' event handler and leave the connection hanging.
+    let webResponse: Response;
+    try {
+      webResponse = await this.app.fetch(webRequest);
+    } catch (err) {
+      log.error("Hono fetch threw unexpectedly", { error: err instanceof Error ? err.message : String(err) });
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ error: "Internal Server Error", message: "Unexpected server error" }));
+      return;
+    }
 
     // Convert Web Standard Response to Node.js HTTP Response
     res.statusCode = webResponse.status;

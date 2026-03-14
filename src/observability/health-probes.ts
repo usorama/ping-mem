@@ -7,6 +7,16 @@ import { createLogger } from "../util/logger.js";
 
 const log = createLogger("health-probes");
 
+/**
+ * Sentinel entity key used by the graphManager Neo4j liveness probe.
+ * Querying a non-existent entity is safe (no side effects) and exercises the
+ * full Neo4j read path. The "not found" response is the expected healthy signal.
+ */
+const NEO4J_PING_SENTINEL = "__ping__";
+
+/** Error message substrings that indicate "entity not found" — healthy signal for the liveness probe */
+const NEO4J_NOT_FOUND_PATTERNS = ["not found", "no records"] as const;
+
 export type ProbeStatus = "healthy" | "degraded" | "unhealthy" | "not_configured";
 
 export interface HealthComponent {
@@ -38,7 +48,20 @@ export interface HealthProbeDeps {
 }
 
 export function sanitizeHealthError(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
+  // Extract message: check Error.message first, then structured error objects
+  // (e.g., Neo4j/Qdrant may return plain objects with .message or .error),
+  // then fall back to String() as last resort.
+  let raw: string;
+  if (error instanceof Error) {
+    raw = error.message;
+  } else if (error !== null && typeof error === "object") {
+    const obj = error as Record<string, unknown>;
+    raw = typeof obj["message"] === "string" ? obj["message"]
+        : typeof obj["error"] === "string" ? obj["error"]
+        : String(error);
+  } else {
+    raw = String(error);
+  }
   // Strip control characters before keyword matching (log injection defence).
   const msg = raw.replace(/[\r\n\t\x00-\x1F\x7F]/g, "");
   const lower = msg.toLowerCase();
@@ -128,8 +151,8 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
     // Fallback: graphManager without direct neo4jClient access
     const gmStart = performance.now();
     try {
-      // Use a known-safe operation: listing empty set
-      await deps.graphManager.getEntity("__ping__");
+      // Use a known-safe operation: querying a non-existent entity
+      await deps.graphManager.getEntity(NEO4J_PING_SENTINEL);
       neo4j = {
         status: "healthy",
         configured: true,
@@ -137,8 +160,10 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
       };
     } catch (error) {
       const msg = toErrorMessage(error);
-      // Entity-not-found is expected; any other error = unhealthy
-      const isNotFound = msg.toLowerCase().includes("not found") || msg.toLowerCase().includes("no records");
+      // Entity-not-found is the expected healthy response; any other error = unhealthy.
+      // Pattern list is defined in NEO4J_NOT_FOUND_PATTERNS to avoid fragile inline strings.
+      const lowerMsg = msg.toLowerCase();
+      const isNotFound = NEO4J_NOT_FOUND_PATTERNS.some((p) => lowerMsg.includes(p));
       if (isNotFound) {
         neo4j = {
           status: "healthy",

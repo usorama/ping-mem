@@ -158,6 +158,8 @@ export class HealthMonitor {
 
   getStatus(): HealthMonitorStatus {
     return {
+      // running is true as soon as start() sets the timers, before the first tick resolves.
+      // Callers can distinguish "just started" from "has data" by checking lastSnapshot !== null.
       running: !this.stopping && this.fastTimer !== null && this.qualityTimer !== null,
       lastSnapshot: this.lastSnapshot,
       lastFastTickAt: this.lastFastTickAt,
@@ -228,7 +230,11 @@ export class HealthMonitor {
 
       if (this.stopping) return;
 
-      // WAL checkpoint in separate try-catch so probe data is preserved even if checkpoint fails
+      // WAL checkpoint in separate try-catch so probe data is preserved even if checkpoint fails.
+      // Note: checkpoint only runs when the probe succeeded (consecutiveTickFailures path exits
+      // early above). A WAL file that is large while probes are failing will not be checkpointed
+      // until probes recover — this is intentional: we do not want to checkpoint a potentially
+      // degraded database while health status is unknown.
       try {
         const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
         if (walSize > 50_000_000) {
@@ -284,6 +290,10 @@ export class HealthMonitor {
           }, 0);
 
           const orphanRows = await neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.orphanNodes);
+          // orphanRows[0]?.cnt ?? 0: the UNION ALL query always returns one aggregation row;
+          // if executeQuery returns an empty array (e.g., Neo4j schema change removed expected
+          // labels), nullish-coalesce to 0 — treating "no rows" as "no orphans" is safe here
+          // because an empty result from a COUNT UNION is a schema anomaly, not active corruption.
           const rawOrphan = Number(orphanRows[0]?.cnt ?? 0);
           const orphanNodeCount = Number.isFinite(rawOrphan) ? rawOrphan : 0;
 
@@ -378,6 +388,11 @@ export class HealthMonitor {
 
   private alert(severity: AlertSeverity, key: string, source: ProbeSource, message: string): void {
     const now = Date.now();
+    // Sanitize at creation time so all consumers receive clean messages without
+    // relying on per-consumer sanitization at the serialization boundary.
+    // Strip control characters that could cause log injection if alert messages
+    // ever include error strings from external systems.
+    const safeMessage = message.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 500);
     const previous = this.lastAlerts.get(key) ?? 0;
 
     // Allow severity escalation (warn→critical) and de-escalation (critical→warn) to bypass dedup window
@@ -398,7 +413,7 @@ export class HealthMonitor {
       key,
       severity,
       source,
-      message,
+      message: safeMessage,
       timestamp: new Date(now).toISOString(),
     };
     this.activeAlerts.set(key, alert);
@@ -414,6 +429,9 @@ export class HealthMonitor {
         const entry = sorted[idx++];
         if (!entry) break;
         this.activeAlerts.delete(entry[0]);
+        // Removing from lastAlerts intentionally resets the 15-minute dedup window for the
+        // evicted key: if the same condition recurs, the alert fires immediately rather than
+        // being suppressed until the original dedup window expires.
         this.lastAlerts.delete(entry[0]);
       }
     }

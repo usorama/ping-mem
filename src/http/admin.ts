@@ -73,7 +73,17 @@ function getRemoteIp(req: IncomingMessage): string {
       // applies here because attacker-controlled XFF may reach this code before proxy validation.
       // Allow only IP-valid characters: hex digits (for IPv6), dots (IPv4), colons (IPv6),
       // brackets (IPv6 literal), hyphens. Explicitly avoids \w which includes underscores.
-      if (firstIp) return firstIp.replace(/[^a-fA-F0-9\.\:\[\]\-]/g, "?").slice(0, 64);
+      if (firstIp) {
+        const sanitized = firstIp.replace(/[^a-fA-F0-9\.\:\[\]\-]/g, "?").slice(0, 64);
+        // Validate that the sanitized result is a recognizable IPv4 or IPv6 address.
+        // If it contains replacement '?' chars it was not a valid IP — fall through to
+        // socket address to prevent crafted XFF values from colliding with legitimate
+        // IP keys in the rate-limit and auth-failure maps.
+        const isValidIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(sanitized);
+        const isValidIpv6 = /^[0-9a-fA-F:]+$/.test(sanitized) && sanitized.includes(":");
+        const isValidBracketedIpv6 = /^\[[0-9a-fA-F:]+\]$/.test(sanitized);
+        if (isValidIpv4 || isValidIpv6 || isValidBracketedIpv6) return sanitized;
+      }
     }
   }
   return req.socket?.remoteAddress ?? "unknown";
@@ -394,11 +404,17 @@ export async function handleAdminRequest(
       }
       // No origin AND no referer: allow — server-to-server / CLI callers omit browser headers;
       // X-API-Key is the primary auth layer for those callers.
-      // KNOWN LIMITATION: a browser that omits both headers (e.g., via a privacy proxy that
-      // strips Referer, or a direct <form> POST without JavaScript) also passes this check.
-      // Full CSRF elimination would require a Double-Submit Cookie or Synchronizer Token.
-      // The current design accepts this residual risk because X-API-Key is a high-entropy
-      // secret that must be explicitly obtained and configured by the caller.
+      //
+      // CSRF ANALYSIS: X-API-Key is a non-simple, non-CORS-safelisted custom header. Browsers
+      // cannot include custom headers in cross-origin requests without a CORS preflight, and
+      // this server does not emit CORS Access-Control-Allow-Origin headers for admin routes.
+      // Therefore a browser-based CSRF attack cannot forge a valid X-API-Key header —
+      // the custom header itself acts as a synchronizer token for browser clients.
+      //
+      // KNOWN LIMITATION: a server-side attacker who already possesses the API key can issue
+      // cross-origin requests from a non-browser context (curl, etc.) regardless of this check.
+      // That represents credential compromise, not CSRF — the admin key must be treated as
+      // a high-entropy secret and must never be embedded in HTML, JS, or logged anywhere.
     }
     try {
       await handleAdminApi(req, res, deps, pathName);
@@ -685,15 +701,24 @@ function respondJson(res: ServerResponse, status: number, payload: unknown): voi
     body = JSON.stringify({ error: "Internal Server Error", message: "Response serialization failed" });
     status = 500;
   }
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "X-Content-Type-Options": "nosniff",
-    // Unconditional no-store: admin responses contain sensitive data (key lists, project IDs,
-    // LLM config) and must never be cached by intermediary proxies or the browser.
-    "Cache-Control": "no-store",
-    "Content-Length": String(Buffer.byteLength(body, "utf8")),
-  });
-  res.end(body);
+  try {
+    res.writeHead(status, {
+      "Content-Type": "application/json",
+      "X-Content-Type-Options": "nosniff",
+      // Unconditional no-store: admin responses contain sensitive data (key lists, project IDs,
+      // LLM config) and must never be cached by intermediary proxies or the browser.
+      "Cache-Control": "no-store",
+      "Content-Length": String(Buffer.byteLength(body, "utf8")),
+    });
+    res.end(body);
+  } catch (err) {
+    // Client disconnected before response could be written — log and discard.
+    // Do NOT call respondJson() again from here to avoid a recursive throw loop.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("write after end") && !msg.includes("socket hang up")) {
+      log.warn("respondJson: failed to write response", { status, error: msg });
+    }
+  }
 }
 
 async function resolveProjectId(projectDir: string, adminStore: AdminStore): Promise<string | null> {

@@ -152,6 +152,12 @@ export class EventStore {
   private stmtGetCheckpoint: Statement;
   private stmtGetCheckpointsBySession: Statement;
   private stmtListSessionStarts: Statement;
+  // Prepared statements for deleteSessions() — hoisted to avoid per-call compilation overhead
+  private stmtDeleteCheckpointItems: Statement;
+  private stmtDeleteCheckpointsBySession: Statement;
+  private stmtDeleteEventsBySession: Statement;
+  private stmtOrphanCheck: Statement;
+  private stmtForeignKeyCheck: Statement;
 
   constructor(config?: EventStoreConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config } as typeof this.config;
@@ -181,7 +187,8 @@ export class EventStore {
     if (this.config.foreignKeys) {
       this.db.exec("PRAGMA foreign_keys = ON");
     }
-    const timeout = Math.max(0, Math.min(Number(this.config.busyTimeout) || 5000, 60000));
+    const rawTimeout = Number(this.config.busyTimeout);
+    const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.min(rawTimeout, 60000) : 5000;
     this.db.exec(`PRAGMA busy_timeout = ${timeout}`);
 
     // Initialize schema
@@ -237,6 +244,21 @@ export class EventStore {
       FROM events
       WHERE event_type = 'SESSION_STARTED'
     `);
+
+    // Statements for deleteSessions() — compiled once to avoid per-call overhead
+    this.stmtDeleteCheckpointItems = this.db.prepare(
+      "DELETE FROM checkpoint_items WHERE checkpoint_id IN (SELECT checkpoint_id FROM checkpoints WHERE session_id = $sessionId)"
+    );
+    this.stmtDeleteCheckpointsBySession = this.db.prepare(
+      "DELETE FROM checkpoints WHERE session_id = $sessionId"
+    );
+    this.stmtDeleteEventsBySession = this.db.prepare(
+      "DELETE FROM events WHERE session_id = $sessionId"
+    );
+    this.stmtOrphanCheck = this.db.prepare(
+      "SELECT COUNT(*) as orphans FROM checkpoints WHERE last_event_id NOT IN (SELECT event_id FROM events)"
+    );
+    this.stmtForeignKeyCheck = this.db.prepare("PRAGMA foreign_keys");
   }
 
   /**
@@ -488,7 +510,12 @@ export class EventStore {
    */
   async append(event: Event): Promise<void> {
     const row = this.eventToRow(event);
-    this.stmtInsertEvent.run(row);
+    try {
+      this.stmtInsertEvent.run(row);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`EventStore: failed to append event ${event.eventId}: ${msg}`);
+    }
   }
 
   /**
@@ -501,7 +528,12 @@ export class EventStore {
         this.stmtInsertEvent.run(row);
       }
     });
-    insertMany();
+    try {
+      insertMany();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`EventStore: failed to append batch of ${events.length} events: ${msg}`);
+    }
   }
 
   /**
@@ -587,37 +619,24 @@ export class EventStore {
     // Use individual parameterized deletes instead of IN clause interpolation
     // This prevents SQL injection even if sessionIds contains malicious values
     const deleteMany = this.db.transaction(() => {
-      const stmtCheckpointItems = this.db.prepare(
-        "DELETE FROM checkpoint_items WHERE checkpoint_id IN (SELECT checkpoint_id FROM checkpoints WHERE session_id = $sessionId)"
-      );
-      const stmtCheckpoint = this.db.prepare(
-        "DELETE FROM checkpoints WHERE session_id = $sessionId"
-      );
-      const stmtEvent = this.db.prepare(
-        "DELETE FROM events WHERE session_id = $sessionId"
-      );
-
       // Verify foreign key constraints are enabled before deletion
-      const fkCheck = this.db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number } | undefined;
+      const fkCheck = this.stmtForeignKeyCheck.get() as { foreign_keys: number } | undefined;
       if (!fkCheck || fkCheck.foreign_keys !== 1) {
         throw new Error("Foreign key constraints must be enabled for safe session deletion");
       }
 
       // Count pre-existing orphans before deletion so the post-check is scoped to
       // only orphans *created by this operation* (avoids false positives from prior bugs).
-      const stmtOrphans = this.db.prepare(
-        "SELECT COUNT(*) as orphans FROM checkpoints WHERE last_event_id NOT IN (SELECT event_id FROM events)"
-      );
-      const preOrphans = (stmtOrphans.get() as { orphans: number }).orphans;
+      const preOrphans = (this.stmtOrphanCheck.get() as { orphans: number }).orphans;
 
       for (const sessionId of sessionIds) {
-        stmtCheckpointItems.run({ $sessionId: sessionId });
-        stmtCheckpoint.run({ $sessionId: sessionId });
-        stmtEvent.run({ $sessionId: sessionId });
+        this.stmtDeleteCheckpointItems.run({ $sessionId: sessionId });
+        this.stmtDeleteCheckpointsBySession.run({ $sessionId: sessionId });
+        this.stmtDeleteEventsBySession.run({ $sessionId: sessionId });
       }
 
       // Verify referential integrity: only fail if THIS deletion created new orphans.
-      const postOrphans = (stmtOrphans.get() as { orphans: number }).orphans;
+      const postOrphans = (this.stmtOrphanCheck.get() as { orphans: number }).orphans;
       if (postOrphans > preOrphans) {
         throw new Error(`Session deletion created ${postOrphans - preOrphans} orphaned checkpoint references`);
       }
@@ -730,10 +749,12 @@ export class EventStore {
    * Get the most recent events across all sessions, ordered by timestamp DESC.
    */
   getRecentEvents(limit: number = 20): Event[] {
+    // Clamp limit to prevent loading the entire events table into memory on a bad caller.
+    const safeLimit = Math.min(Math.max(limit, 1), 1000);
     const stmt = this.db.prepare(
       "SELECT * FROM events ORDER BY timestamp DESC LIMIT $limit"
     );
-    const rows = stmt.all({ $limit: limit }) as EventRow[];
+    const rows = stmt.all({ $limit: safeLimit }) as EventRow[];
     return rows.map((row) => this.rowToEvent(row));
   }
 
@@ -767,12 +788,24 @@ export class EventStore {
    * Get database statistics
    */
   getStats(): { eventCount: number; checkpointCount: number; dbSize: number } {
-    const eventCount = (
-      this.db.prepare("SELECT COUNT(*) as count FROM events").get() as { count: number }
-    ).count;
-    const checkpointCount = (
-      this.db.prepare("SELECT COUNT(*) as count FROM checkpoints").get() as { count: number }
-    ).count;
+    // Wrap count queries individually: a lock or transient corruption on one table
+    // should not prevent reporting stats for the other table.
+    let eventCount = 0;
+    try {
+      eventCount = (
+        this.db.prepare("SELECT COUNT(*) as count FROM events").get() as { count: number }
+      ).count;
+    } catch {
+      // Transient SQLite error — return 0 rather than crashing the health monitor caller.
+    }
+    let checkpointCount = 0;
+    try {
+      checkpointCount = (
+        this.db.prepare("SELECT COUNT(*) as count FROM checkpoints").get() as { count: number }
+      ).count;
+    } catch {
+      // Transient SQLite error — return 0 rather than crashing.
+    }
 
     let dbSize = 0;
     if (this.config.dbPath !== ":memory:") {
@@ -836,6 +869,10 @@ export class EventStore {
 
   /**
    * Run PRAGMA quick_check; returns 1 if ok, 0 if corrupted.
+   * Note: SQLite `PRAGMA quick_check` always returns exactly one row containing the
+   * string "ok" for a healthy database. Any other value (or a missing row) means
+   * corruption. This method uses `.get()` which returns only the first row, which is
+   * always the only row for this PRAGMA — so no records are silently discarded.
    */
   getIntegrityOk(): number {
     const row = this.db.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
