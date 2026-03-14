@@ -93,6 +93,7 @@ interface EventRow {
   payload: string;
   caused_by: string | null;
   metadata: string;
+  agent_id: string | null;
 }
 
 /**
@@ -134,6 +135,8 @@ export interface Checkpoint {
  */
 export class EventStore {
   private db: Database;
+  /** True when backed by an in-memory SQLite database (`:memory:`). Checked by clear(). */
+  private readonly isInMemory: boolean;
   /** Stored promise so concurrent close() callers all await the same operation */
   private closePromise: Promise<void> | undefined;
   private config: {
@@ -169,9 +172,11 @@ export class EventStore {
 
   constructor(config?: EventStoreConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config } as typeof this.config;
+    // Set at construction so clear() does not re-evaluate the path string at call time.
+    this.isInMemory = this.config.dbPath === ":memory:";
 
     // Ensure directory exists (skip for in-memory)
-    if (this.config.dbPath !== ":memory:") {
+    if (!this.isInMemory) {
       const dbDir = path.dirname(this.config.dbPath);
       if (!fs.existsSync(dbDir)) {
         try {
@@ -206,10 +211,10 @@ export class EventStore {
     this.stmtInsertEvent = this.db.prepare(`
       INSERT INTO events (
         event_id, timestamp, session_id, event_type,
-        payload, caused_by, metadata
+        payload, caused_by, metadata, agent_id
       ) VALUES (
         $event_id, $timestamp, $session_id, $event_type,
-        $payload, $caused_by, $metadata
+        $payload, $caused_by, $metadata, $agent_id
       )
     `);
 
@@ -247,10 +252,13 @@ export class EventStore {
       ORDER BY timestamp DESC
     `);
 
+    // LIMIT 10000: prevents a full-table scan from loading unbounded rows into memory
+    // when findSessionIdsByProjectDir() is called during project deletion.
     this.stmtListSessionStarts = this.db.prepare(`
       SELECT session_id, metadata
       FROM events
       WHERE event_type = 'SESSION_STARTED'
+      LIMIT 10000
     `);
 
     // Statements for deleteSessions() — compiled once to avoid per-call overhead
@@ -487,6 +495,7 @@ export class EventStore {
       $payload: JSON.stringify(event.payload),
       $caused_by: event.causedBy ?? null,
       $metadata: JSON.stringify(event.metadata),
+      $agent_id: event.agent_id ?? null,
     };
   }
 
@@ -516,6 +525,9 @@ export class EventStore {
     };
     if (row.caused_by !== null) {
       event.causedBy = row.caused_by;
+    }
+    if (row.agent_id !== null && row.agent_id !== undefined) {
+      event.agent_id = row.agent_id;
     }
     return event;
   }
@@ -965,12 +977,15 @@ export class EventStore {
    * Clear all data (for testing only — in-memory databases only)
    */
   clear(): void {
-    if (this.config.dbPath !== ":memory:") {
+    if (!this.isInMemory) {
       throw new Error("EventStore.clear() is only permitted on in-memory databases");
     }
     this.db.exec("DELETE FROM checkpoint_items");
     this.db.exec("DELETE FROM checkpoints");
     this.db.exec("DELETE FROM events");
+    // Clear agent and lock tables to prevent test isolation leaks between test cases.
+    this.db.exec("DELETE FROM agent_quotas");
+    this.db.exec("DELETE FROM write_locks");
   }
 }
 

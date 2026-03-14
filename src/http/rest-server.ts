@@ -172,6 +172,18 @@ export class RESTPingMemServer {
       this.healthMonitor = config.healthMonitor;
     }
 
+    // Validate PING_MEM_STATIC_DIR at startup — catch misconfigurations early so
+    // operators see a warning in logs rather than silent 404s on all static requests.
+    const staticDirEnv = process.env.PING_MEM_STATIC_DIR;
+    if (staticDirEnv !== undefined) {
+      const safeStaticDirLog = staticDirEnv.replace(/[\x00-\x1f]/g, "?").slice(0, 200);
+      if (staticDirEnv.includes("\0") || !path.isAbsolute(staticDirEnv)) {
+        log.warn("PING_MEM_STATIC_DIR is not a valid absolute path — falling back to src/static", { value: safeStaticDirLog });
+      } else if (!fs.existsSync(staticDirEnv)) {
+        log.warn("PING_MEM_STATIC_DIR directory does not exist — static file requests will return 404", { value: safeStaticDirLog });
+      }
+    }
+
     // Initialize Hono app
     this.app = new Hono<AppEnv>();
 
@@ -190,7 +202,13 @@ export class RESTPingMemServer {
     // When no origins are configured, the cors middleware is not installed so the
     // browser's same-origin policy applies naturally (no ACAO header = denied).
     const envOrigin = process.env.PING_MEM_CORS_ORIGIN;
-    const defaultOrigin = envOrigin ? envOrigin.split(",").map(s => s.trim()) : [];
+    const rawOrigins = envOrigin ? envOrigin.split(",").map(s => s.trim()) : [];
+    // Reject wildcard '*' — permissive CORS disables CSRF protection for all API routes.
+    const wildcardCount = rawOrigins.filter(o => o === "*").length;
+    if (wildcardCount > 0) {
+      log.warn("PING_MEM_CORS_ORIGIN contains wildcard '*' — ignored. Specify explicit origins.");
+    }
+    const defaultOrigin = rawOrigins.filter(o => o !== "*" && o.length > 0);
     const corsConfig = this.config.cors;
     const configuredOrigins = corsConfig?.origin ?? defaultOrigin;
     const hasSpecificOrigins =
@@ -237,11 +255,10 @@ export class RESTPingMemServer {
     // API Key authentication (if configured)
     // Auth is required only when: (apiKeyManager has seed key) OR (explicit apiKey is set non-empty)
     // Supports both X-API-Key header and Authorization: Bearer <token> header
-    const authRequired = this.config.apiKeyManager
-      ? this.config.apiKeyManager.hasSeedKey()
-      : (this.config.apiKey && this.config.apiKey.trim().length > 0);
-
-    if (authRequired) {
+    // Note: X-API-Key is a non-simple, non-CORS-safelisted custom header that browsers cannot
+    // include in cross-origin requests without CORS preflight. This acts as CSRF protection for
+    // all /api/v1/* POST/DELETE endpoints without requiring an additional synchronizer token.
+    if (this.isAuthRequired()) {
       const authMiddleware = async (c: Parameters<Parameters<typeof this.app.use>[1]>[0], next: () => Promise<void>) => {
         const apiKey = this.extractApiKey(c as unknown as Context<AppEnv>);
         const isValid = this.validateApiKey(apiKey);
@@ -279,12 +296,9 @@ export class RESTPingMemServer {
   private setupRoutes(): void {
     // Health check — per-component status
     this.app.get("/health", async (c) => {
-      // Auth is required for health check only when keys are configured
-      const authRequired = this.config.apiKeyManager
-        ? this.config.apiKeyManager.hasSeedKey()
-        : (this.config.apiKey && this.config.apiKey.trim().length > 0);
-
-      if (authRequired) {
+      // Auth is required for health check only when keys are configured.
+      // Uses isAuthRequired() — same policy as the global middleware.
+      if (this.isAuthRequired()) {
         if (!this.validateApiKey(this.extractApiKey(c))) {
           return c.json(
             { error: "Unauthorized", message: "Invalid API key" },
@@ -925,7 +939,7 @@ export class RESTPingMemServer {
     this.app.get("/api/v1/diagnostics/findings/:analysisId", async (c) => {
       try {
         const analysisId = c.req.param("analysisId");
-        if (!analysisId || analysisId.length > 500) {
+        if (!analysisId || !RESTPingMemServer.ANALYSIS_ID_RE.test(analysisId)) {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid analysisId" }, 400);
         }
         const findings = this.diagnosticsStore.listFindings(analysisId);
@@ -963,7 +977,7 @@ export class RESTPingMemServer {
     this.app.get("/api/v1/diagnostics/summary/:analysisId", async (c) => {
       try {
         const analysisId = c.req.param("analysisId");
-        if (!analysisId || analysisId.length > 500) {
+        if (!analysisId || !RESTPingMemServer.ANALYSIS_ID_RE.test(analysisId)) {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid analysisId" }, 400);
         }
         const findings = this.diagnosticsStore.listFindings(analysisId);
@@ -987,7 +1001,7 @@ export class RESTPingMemServer {
     this.app.post("/api/v1/diagnostics/summarize/:analysisId", async (c) => {
       try {
         const analysisId = c.req.param("analysisId");
-        if (!analysisId || analysisId.length > 500) {
+        if (!analysisId || !RESTPingMemServer.ANALYSIS_ID_RE.test(analysisId)) {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid analysisId" }, 400);
         }
         let _reqBody5: unknown;
@@ -1170,9 +1184,11 @@ export class RESTPingMemServer {
 
         const memoryManager = await this.getMemoryManager(sessionId);
 
-        // Build query params — map query text to keyPattern for wildcard matching
-        // (MemoryQuery has no `query` field; `keyPattern` does the text-based search)
-        const queryParams: Record<string, unknown> = { keyPattern: `*${query}*` };
+        // Build query params — map query text to keyPattern for wildcard matching.
+        // Strip glob metacharacters from user input before wrapping in wildcards so
+        // a query of '*' matches keys containing the text '*', not all keys.
+        const safeQuery = query.replace(/[*?[\]\\]/g, "");
+        const queryParams: Record<string, unknown> = { keyPattern: `*${safeQuery}*` };
 
         if (c.req.query("category")) {
           const rawCategory = c.req.query("category")!;
@@ -1470,7 +1486,7 @@ export class RESTPingMemServer {
           ).get({ $agent_id: validatedAgentId }) as Record<string, unknown> | undefined;
 
           if (!row) {
-            return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${validatedAgentId}' not found` }, 404);
+            return c.json<RESTErrorResponse>({ error: "Not Found", message: "Agent not found" }, 404);
           }
           return c.json<RESTSuccessResponse<Record<string, unknown>>>({ data: row });
         }
@@ -1507,7 +1523,7 @@ export class RESTPingMemServer {
         const { lockResult, quotaResult } = deleteResult;
 
         if (quotaResult.changes === 0) {
-          return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${agentId}' not found` }, 404);
+          return c.json<RESTErrorResponse>({ error: "Not Found", message: "Agent not found" }, 404);
         }
 
         return c.json<RESTSuccessResponse<Record<string, unknown>>>({
@@ -1526,10 +1542,8 @@ export class RESTPingMemServer {
       // SSE responses are returned via raw ReadableStream which bypasses the global auth middleware
       // pipeline on some runtimes. Apply an explicit auth gate here so the stream is never
       // accessible without credentials when auth is configured.
-      const authRequired = this.config.apiKeyManager
-        ? true
-        : Boolean(this.config.apiKey);
-      if (authRequired && !this.validateApiKey(this.extractApiKey(c))) {
+      // Uses isAuthRequired() — same policy as the global middleware.
+      if (this.isAuthRequired() && !this.validateApiKey(this.extractApiKey(c))) {
         return c.json<RESTErrorResponse>({ error: "Unauthorized", message: "Valid API key required" }, 401);
       }
 
@@ -1552,13 +1566,15 @@ export class RESTPingMemServer {
         }
       }
 
-      if (this.sseConnectionCount >= RESTPingMemServer.MAX_SSE_CONNECTIONS) {
+      // Increment first, then check to prevent TOCTOU race under concurrent SSE requests.
+      const sseCount = ++this.sseConnectionCount;
+      if (sseCount > RESTPingMemServer.MAX_SSE_CONNECTIONS) {
+        this.sseConnectionCount--;
         return c.json<RESTErrorResponse>(
           { error: "Service Unavailable", message: "Too many SSE connections" },
           503
         );
       }
-      this.sseConnectionCount++;
 
       // Track cleanup state shared between start() and cancel()
       let sseHeartbeat: ReturnType<typeof setInterval> = 0 as unknown as ReturnType<typeof setInterval>;
@@ -1640,7 +1656,9 @@ export class RESTPingMemServer {
       return new Response(stream, {
         headers: {
           "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
+          // no-store prevents caches from retaining per-user event stream data;
+          // no-cache additionally prevents conditional caching on reconnect.
+          "Cache-Control": "no-store, no-cache",
           "Connection": "keep-alive",
           "X-Accel-Buffering": "no",
           "X-Content-Type-Options": "nosniff",
@@ -1650,6 +1668,11 @@ export class RESTPingMemServer {
           "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
           "Cross-Origin-Opener-Policy": "same-origin",
           "Cross-Origin-Resource-Policy": "same-origin",
+          // HSTS: only set when behind a TLS-terminating reverse proxy to match
+          // the main middleware policy applied to all other response paths.
+          ...(process.env.PING_MEM_BEHIND_PROXY === "true"
+            ? { "Strict-Transport-Security": "max-age=63072000; includeSubDomains" }
+            : {}),
         },
       });
     });
@@ -1818,6 +1841,17 @@ export class RESTPingMemServer {
   }
 
   /**
+   * Single source of truth for whether auth is required on this server instance.
+   * Used by the global middleware, the /health handler, and the SSE handler so
+   * all three stay in sync when auth configuration changes.
+   */
+  private isAuthRequired(): boolean {
+    return this.config.apiKeyManager
+      ? this.config.apiKeyManager.hasSeedKey()
+      : Boolean(this.config.apiKey && this.config.apiKey.trim().length > 0);
+  }
+
+  /**
    * Validate an API key using constant-time comparison
    */
   private validateApiKey(apiKey: string | undefined): boolean {
@@ -1845,6 +1879,9 @@ export class RESTPingMemServer {
 
   /** Valid code types for codebase search */
   private static readonly VALID_CODE_TYPES = new Set(["code", "comment", "docstring"]);
+
+  /** Strict allowlist for analysisId path params — prevents log injection and SQL metacharacter injection */
+  private static readonly ANALYSIS_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 
   /**
    * Exact set of domain error names whose messages are safe to expose to clients.
@@ -1909,7 +1946,13 @@ export class RESTPingMemServer {
       ? rawMessage.replace(/[\x00-\x1f]/g, "?").slice(0, 200)
       : this.getErrorName(statusCode);
 
-    log.error("Error", { message: sanitizedMessage });
+    // 4xx are client errors — log at warn to avoid inflating server error alert volumes.
+    // 5xx are server-side problems — log at error for immediate alerting.
+    if (statusCode >= 500) {
+      log.error("Error", { statusCode, message: sanitizedMessage });
+    } else {
+      log.warn("Client error", { statusCode, message: sanitizedMessage });
+    }
     return c.json(
       { error: this.getErrorName(statusCode), message: safeMessage },
       statusCode as ContentfulStatusCode
@@ -1971,18 +2014,27 @@ export class RESTPingMemServer {
   }
 
   /**
-   * Extract session ID from current state or X-Session-ID header.
-   * Validates header value matches UUID format to prevent map pollution.
+   * Extract session ID from X-Session-ID header, falling back to the single-client
+   * currentSessionId when no header is present.
+   *
+   * Header is checked FIRST so a caller that provides X-Session-ID always gets their
+   * own session, regardless of what another concurrent caller's session/start set.
+   * Concurrent callers MUST supply X-Session-ID to avoid session confusion.
    */
   private getSessionIdFromRequest(c: Context<AppEnv>): SessionId | null {
-    if (this.currentSessionId) return this.currentSessionId;
+    // Header takes precedence — validates UUID format to prevent map pollution.
+    // Normalized to lowercase so uppercase UUIDs from external clients don't create
+    // duplicate MemoryManager entries.
     const header = c.req.header("x-session-id");
-    if (!header) return null;
-    // Normalize to lowercase before use as Map key so e.g. uppercase UUIDs from
-    // external clients don't create duplicate MemoryManager entries.
-    const normalizedHeader = header.toLowerCase();
-    if (!RESTPingMemServer.UUID_RE.test(normalizedHeader)) return null;
-    return normalizedHeader as SessionId;
+    if (header) {
+      const normalizedHeader = header.toLowerCase();
+      if (RESTPingMemServer.UUID_RE.test(normalizedHeader)) {
+        return normalizedHeader as SessionId;
+      }
+    }
+    // Single-client convenience fallback: if no header is supplied, use the session
+    // from the most recent session/start call on this server instance.
+    return this.currentSessionId;
   }
 
   /**
@@ -2038,7 +2090,11 @@ export class RESTPingMemServer {
     // for the expected workload of a few active sessions at a time.
     if (this.memoryManagers.size >= MAX_MEMORY_MANAGERS) {
       const oldest = this.memoryManagers.keys().next().value;
-      if (oldest) this.memoryManagers.delete(oldest);
+      if (oldest) {
+        // Evict from both maps together so their sizes stay bounded in tandem.
+        this.memoryManagers.delete(oldest);
+        this.managerPromises.delete(oldest);
+      }
     }
 
     this.memoryManagers.set(sessionId, manager);
@@ -2078,7 +2134,17 @@ export class RESTPingMemServer {
     // Build request body
     let body: string | null = null;
     if (req.method !== "GET" && req.method !== "HEAD") {
-      body = await this.readRequestBody(req);
+      try {
+        body = await this.readRequestBody(req);
+      } catch (bodyErr) {
+        const msg = bodyErr instanceof Error ? bodyErr.message : String(bodyErr);
+        if (msg.includes("too large")) {
+          res.writeHead(413, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: "Payload Too Large", message: "Request body exceeds limit" }));
+          return;
+        }
+        throw bodyErr;
+      }
     }
 
     // Create Web Standard Request
@@ -2227,7 +2293,8 @@ const CONTENT_TYPE_MAP: Record<string, string> = {
   webp: "image/webp",
   woff: "font/woff",
   woff2: "font/woff2",
-  map: "application/json",
+  // Note: .map (source map) files are blocked entirely by the static file handler
+  // before getContentType() is reached, so no entry for "map" is needed here.
 };
 
 function getContentType(filePath: string): string {

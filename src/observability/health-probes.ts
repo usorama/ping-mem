@@ -70,9 +70,11 @@ export function sanitizeHealthError(error: unknown): string {
   if (lower.includes("ehostunreach") || lower.includes("enetunreach")) return "host unreachable";
   if (lower.includes("etimedout") || lower.includes("timeout")) return "connection timeout";
   if (lower.includes("econnreset")) return "connection reset";
-  if (lower.includes("auth") || lower.includes("credentials") || lower.includes("unauthorized")) return "authentication failed";
-  if (lower.includes("enospc") || lower.includes("disk")) return "disk space issue";
+  // Check TLS/certificate before broad 'auth' substring: a cert error from a spoofed
+  // server whose subject DN contains 'auth' would otherwise be misclassified.
   if (lower.includes("certificate") || lower.includes("tls") || lower.includes("ssl")) return "TLS/certificate error";
+  if (lower.includes("enospc") || lower.includes("disk")) return "disk space issue";
+  if (lower.includes("auth") || lower.includes("credentials") || lower.includes("unauthorized")) return "authentication failed";
   return "service unavailable";
 }
 
@@ -81,10 +83,9 @@ function roundMs(value: number): number {
 }
 
 function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
+  const raw = error instanceof Error ? error.message : String(error);
+  // Strip control characters before passing to log calls to prevent log injection.
+  return raw.replace(/[\r\n\t\x00-\x1F\x7F]/g, "");
 }
 
 export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSnapshot> {
@@ -223,9 +224,10 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
   let diagnostics: HealthComponent | undefined;
   if (deps.diagnosticsStore) {
     try {
-      // listRuns return value intentionally discarded — we only need the call to succeed
+      // listRuns() is synchronous (returns DiagnosticRun[]).
+      // The return value is intentionally discarded — we only need the call to succeed
       // (throws on DB error) to confirm the diagnostics store is operational.
-      void deps.diagnosticsStore.listRuns({ limit: 1 });
+      deps.diagnosticsStore.listRuns({ limit: 1 });
       diagnostics = {
         status: "healthy",
         configured: true,

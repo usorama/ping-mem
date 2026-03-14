@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import * as fs from "fs/promises";
 import * as path from "path";
 import * as crypto from "node:crypto";
+import { isIPv6 as netIsIPv6 } from "node:net";
 
 import { createLogger } from "../util/logger.js";
 import { AdminStore, type LLMConfigInput } from "../admin/AdminStore.js";
@@ -81,8 +82,10 @@ function getRemoteIp(req: IncomingMessage): string {
         // IP keys in the rate-limit and auth-failure maps.
         // Strict IPv4: each octet must be 0-255 (rejects "999.0.0.1" etc.)
         const isValidIpv4 = /^((?:\d|[1-9]\d|1\d{2}|2[0-4]\d|25[0-5])\.){3}(?:\d|[1-9]\d|1\d{2}|2[0-4]\d|25[0-5])$/.test(sanitized);
-        const isValidIpv6 = /^[0-9a-fA-F:]+$/.test(sanitized) && sanitized.includes(":");
-        const isValidBracketedIpv6 = /^\[[0-9a-fA-F:]+\]$/.test(sanitized);
+        // Use Node.js net.isIPv6() for RFC 5952-compliant validation, which correctly
+        // rejects malformed strings that a permissive hex+colon regex would accept.
+        const isValidIpv6 = netIsIPv6(sanitized);
+        const isValidBracketedIpv6 = sanitized.startsWith("[") && sanitized.endsWith("]") && netIsIPv6(sanitized.slice(1, -1));
         if (isValidIpv4 || isValidIpv6 || isValidBracketedIpv6) return sanitized;
       }
     }
@@ -110,11 +113,9 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
 
   // Evict expired entries to prevent unbounded map growth under IP churn / spoofing attacks.
   // Hard caps prevent memory exhaustion during sustained attacks.
-  let evictedCount = 0;
   for (const [key, entry] of adminRateLimitMap) {
     if (now > entry.resetAt) {
       adminRateLimitMap.delete(key);
-      evictedCount++;
     }
   }
 
@@ -230,11 +231,27 @@ function clearAuthFailures(ip: string): void {
 export function sanitizeAdminError(message: string): string {
   // Cap message length before applying regex chain to prevent DoS via pathologically long
   // error strings from misbehaving LLM providers (each regex scans the entire string).
-  const capped = message.slice(0, 4096);
+  // Strip control characters first; apply fast short-circuit before the regex chain
+  // so inputs without any detectable key prefix skip the expensive scanning.
+  const capped = message.slice(0, 4096).replace(/[\r\n\t\x00-\x1F\x7F]/g, "");
+  if (
+    !capped.includes("sk-") &&
+    !capped.includes("AIza") &&
+    !capped.includes("gsk_") &&
+    !capped.includes("fw_") &&
+    !capped.includes("xai-") &&
+    !capped.includes("together_api_") &&
+    !capped.includes("tog") &&
+    !capped.includes("pplx-") &&
+    !capped.includes("AKIA") &&
+    !capped.includes("ASIA") &&
+    !capped.includes("AROA") &&
+    !capped.includes("AIDA")
+  ) {
+    return capped;
+  }
   return (
     capped
-      // Remove control characters to prevent log injection attacks
-      .replace(/[\r\n\t\x00-\x1F\x7F]/g, "")
       // OpenAI, Anthropic (sk-ant-...), OpenRouter (sk-or-...), DeepSeek, etc.
       .replace(/\bsk-[A-Za-z0-9_-]{10,}\b/g, "[REDACTED]")
       // Gemini / Google AI Studio
@@ -967,6 +984,9 @@ function renderAdminPage(nonce: string): string {
   </main>
 
   <script nonce="${nonce}">
+    // IIFE: keeps the 'state' variable closure-scoped so it is not accessible as window.state,
+    // reducing the attack surface for XSS payloads that walk the global scope.
+    (() => {
     // API key is stored in memory only (not sessionStorage) to reduce XSS exposure window.
     // Refreshing the page clears the key — a deliberate security trade-off.
     const state = {
@@ -1046,7 +1066,7 @@ function renderAdminPage(nonce: string): string {
               body: JSON.stringify({ id: key.id }),
             }).then(() => refreshKeys()).catch((err) => {
               console.error("Deactivate key failed:", err);
-              if (statusEl) statusEl.textContent = "Error: " + ((err?.message ?? "Deactivate failed") + "").replace(/[\x00-\x1f]/g, "").slice(0, 200);
+              if (statusEl) statusEl.textContent = "Error: " + ((err?.message ?? "Deactivate failed") + "").replace(/[\x00-\x1f\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 200);
             });
           });
           actionTd.appendChild(btn);
@@ -1126,7 +1146,7 @@ function renderAdminPage(nonce: string): string {
             if (statusNote) {
               const errEl = document.createElement("span");
               errEl.className = "error";
-              errEl.textContent = " Error: " + ((err?.message ?? "Delete failed") + "").replace(/[\x00-\x1f]/g, "").slice(0, 200);
+              errEl.textContent = " Error: " + ((err?.message ?? "Delete failed") + "").replace(/[\x00-\x1f\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 200);
               statusNote.appendChild(errEl);
               setTimeout(() => errEl.remove(), 5000);
             }
@@ -1181,7 +1201,7 @@ function renderAdminPage(nonce: string): string {
         statusEl.textContent = "Saved";
         llmApiKeyEl.value = "";
       } catch (err) {
-        statusEl.textContent = "Error: " + ((err?.message ?? "Save failed") + "").replace(/[\x00-\x1f]/g, "").slice(0, 200);
+        statusEl.textContent = "Error: " + ((err?.message ?? "Save failed") + "").replace(/[\x00-\x1f\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 200);
       }
     }
 
@@ -1204,6 +1224,7 @@ function renderAdminPage(nonce: string): string {
     // Data is not auto-loaded on page open: the API key must be entered via 'Save for Admin UI'
     // before any API calls can be made. The key is stored in memory only (not sessionStorage)
     // to reduce the XSS exposure window — refreshing the page clears the key.
+    })();
   </script>
 </body>
 </html>`;

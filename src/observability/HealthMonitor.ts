@@ -290,10 +290,11 @@ export class HealthMonitor {
           }, 0);
 
           const orphanRows = await neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.orphanNodes);
-          // orphanRows[0]?.cnt ?? 0: the UNION ALL query always returns one aggregation row;
-          // if executeQuery returns an empty array (e.g., Neo4j schema change removed expected
-          // labels), nullish-coalesce to 0 — treating "no rows" as "no orphans" is safe here
-          // because an empty result from a COUNT UNION is a schema anomaly, not active corruption.
+          // orphanRows[0]?.cnt ?? 0: orphanNodes is a single-aggregate Cypher query that always
+          // returns exactly one row with a COUNT value. If executeQuery returns empty (e.g., a
+          // Neo4j schema change removed expected labels), nullish-coalesce to 0 — treating
+          // "no rows" as "no orphans" is safe because an empty result from a COUNT query is a
+          // schema anomaly, not active data corruption.
           const rawOrphan = Number(orphanRows[0]?.cnt ?? 0);
           const orphanNodeCount = Number.isFinite(rawOrphan) ? rawOrphan : 0;
 
@@ -334,15 +335,21 @@ export class HealthMonitor {
               ? 0
               : Math.abs(pointCount - this.baselineQdrantCount) / this.baselineQdrantCount * 100;
 
-            // Always ratchet baseline to current count so a large legitimate ingest
-            // does not permanently lock the alert (the alert fires once per tick while
-            // drift is high, then self-clears once the baseline catches up after the
-            // next successful tick regardless of drift magnitude).
-            this.baselineQdrantCount = pointCount;
             this.checkThresholds({
               source: "qdrant",
               metrics: [{ name: "point_count_drift_pct", value: driftPct, unit: "percent" }],
             });
+
+            // Only ratchet baseline when drift is below the warn threshold.
+            // If the baseline were always ratcheted (even on alert), a slow continuous
+            // data-loss event (e.g. 5 % per tick) would never accumulate: each tick's
+            // baseline would reset to the new lower value before the next comparison.
+            // By preserving the baseline while drift is high, cumulative loss is detected.
+            const qdrantDriftRule = THRESHOLDS.qdrant.find(r => r.metric === "point_count_drift_pct");
+            const qdrantWarnPct = qdrantDriftRule?.warnAbove ?? Infinity;
+            if (driftPct < qdrantWarnPct) {
+              this.baselineQdrantCount = pointCount;
+            }
           }
           // Clear any prior quality probe failure alert on success
           this.activeAlerts.delete("qdrant:quality_probe_failed");
@@ -392,7 +399,10 @@ export class HealthMonitor {
     // relying on per-consumer sanitization at the serialization boundary.
     // Strip control characters that could cause log injection if alert messages
     // ever include error strings from external systems.
-    const safeMessage = message.replace(/[\x00-\x1f\x7f]/g, "").slice(0, 500);
+    // Strip C0 (0x00-0x1F), DEL (0x7F), and C1 (0x80-0x9F) control characters.
+    // C1 characters are valid UTF-8 but interpreted as ANSI escape sequences by many
+    // terminal emulators, enabling log injection if alert messages are forwarded to terminals.
+    const safeMessage = message.replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 500);
     const previous = this.lastAlerts.get(key) ?? 0;
 
     // Allow severity escalation (warn→critical) and de-escalation (critical→warn) to bypass dedup window
