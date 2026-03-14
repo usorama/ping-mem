@@ -1,0 +1,35 @@
+{"date":"2026-03-14T21:52:33+05:30","type":"outcome","what":"Merge feat/self-healing-health-monitor — Self-healing health monitoring system","status":"completed"}
+{"date":"2026-03-09T13:15:36+05:30","type":"outcome","what":"merge: origin/main into feat/self-healing-health-monitor","status":"completed"}
+{"date":"2026-02-06T18:55:18+05:30","type":"outcome","what":"Merge pull request #6 from usorama/feat/paro-memory-migration","status":"completed"}
+{"date":"2026-03-14T21:54:19+05:30","type":"outcome","what":"fix: resolve merge artifacts — remove duplicate getCircuitState, orphaned agentId/agentRole refs","status":"completed"}
+{"date":"2026-03-14T21:50:26+05:30","type":"outcome","what":"fix: PR Zero cycle 39 — agent re-reg upsert, C1 range, client BiDi, test cleanup, stmt hoisting","status":"completed"}
+{"date":"2026-03-14T21:44:15+05:30","type":"outcome","what":"fix: PR Zero cycle 38 — BiDi consistency, probe timer leak, WAL alert clear, CORS tighten, ownership fix","status":"completed"}
+{"date":"2026-03-14T21:08:08+05:30","type":"outcome","what":"fix: PR Zero cycle 37 — orphan scoping, agent reg txn, extractApiKey cap, empty query 400, BiDi strips, eviction fix, stmt hoisting","status":"completed"}
+{"date":"2026-03-14T20:55:48+05:30","type":"outcome","what":"fix: PR Zero cycle 36 — ORDER BY event_id, SARIF pre-parse, admin flag, tog_ regex, BiDi","status":"completed"}
+{"date":"2026-03-14T20:40:20+05:30","type":"outcome","what":"fix: PR Zero cycle 35 — hoisted stmts, session hijacking fix, probe timeouts, CSP, BiDi","status":"completed"}
+{"date":"2026-03-14T20:23:54+05:30","type":"outcome","what":"fix: PR Zero cycle 34 — session hijacking, 413, SSE hardening, IPv6, IIFE, agent_id","status":"completed"}
+{"date":"2026-03-14T20:01:51+05:30","type":"outcome","what":"fix: PR Zero cycle 33 — auth extracted, UUID monotonic, stmt hoisting, log sanitization","status":"completed"}
+{"date":"2026-03-14T19:50:05+05:30","type":"outcome","what":"fix: PR Zero cycle 32 — security hardening, error wrapping, doc fixes","status":"completed"}
+{"date":"2026-03-14T19:36:19+05:30","type":"outcome","what":"fix: PR Zero cycle 31 — knowledge JSON guards, Neo4j topology leak","status":"completed"}
+{"date":"2026-03-14T19:31:39+05:30","type":"outcome","what":"fix: PR Zero cycle 30 — TS syntax, dead code, JSON guards, auth map leak","status":"completed"}
+{"date":"2026-03-14T19:23:14+05:30","type":"outcome","what":"fix: PR Zero cycle 29 — double-sanitize, browser TS syntax, ratchet, guards","status":"completed"}
+{"date":"2026-03-14T19:14:34+05:30","type":"outcome","what":"fix: PR Zero cycle 28 — SSRF, headers, alert regression, orphan delta","status":"completed"}
+{"date":"2026-03-14T19:04:11+05:30","type":"outcome","what":"fix: PR Zero cycle 27 — circuit/transport decoupling, ping check, constraints, UI warnings","status":"completed"}
+{"date":"2026-03-14T18:53:59+05:30","type":"outcome","what":"fix: PR Zero cycle 26 — Neo4j stale driver leak on circuit-open reconnect","status":"completed"}
+{"date":"2026-03-14","session":"auto-discover","type":"decision","what":"Adopt PR Zero quality gates — all findings resolved before merge, no deferral","why":"Zero-tolerance quality standard from project inception","source":"git-history","status":"active"}
+{"date":"2026-03-07","session":"auto-discover","type":"decision","what":"Multi-agent memory orchestration v2.0.0","why":"Collaborative agents need quota-managed shared memory","source":"gh-pr-11","status":"active"}
+{"date":"2026-03-06","session":"auto-discover","type":"decision","what":"Memory Enhancement — graph search, LLM extraction, multi-model embedding, causal reasoning","why":"Core intelligence upgrade for richer memory understanding","source":"gh-pr-8","status":"active"}
+{"date":"2026-03-09","session":"auto-discover","type":"decision","what":"Smart ingestion — git-aware file discovery + streaming persistence","why":"Avoid data loss during ingestion, incremental updates via manifest","source":"gh-pr-25","status":"active"}
+{"date":"2026-03-09","session":"auto-discover","type":"decision","what":"Self-healing health monitor with shared observability probes","why":"Circuit breaker resilience for Neo4j/Qdrant/SQLite backend failures","source":"gh-pr-24","status":"active"}
+{"date":"2026-02-06","session":"auto-discover","type":"decision","what":"Memory migration & persistence (Phase 0+1)","why":"Foundation for persistent cross-session memory","source":"gh-pr-6","status":"active"}
+{"date":"2026-02-01","session":"auto-discover","type":"decision","what":"Add codebase_list_projects MCP tool with discovery","why":"Multi-project support requires project enumeration","source":"gh-pr-5","status":"active"}
+{"date":"2026-03-14","session":"auto-discover","type":"pivot","what":"From n-gram hash vectorization to BM25+TF-IDF","why":"Deterministic and reproducible semantic search quality","source":"gh-issue-28","status":"in-progress"}
+{"date":"2026-03-07","session":"auto-discover","type":"pivot","what":"From session-based memory to multi-agent memory orchestration","why":"Collaborative agents with quota management needed","source":"gh-pr-11","status":"active"}
+{"date":"2026-03-06","session":"auto-discover","type":"pivot","what":"From basic event store to causal reasoning with Neo4j graph queries","why":"Link decisions to outcomes automatically via directional search","source":"gh-pr-8","status":"active"}
+{"date":"2026-03-06","session":"auto-discover","type":"pivot","what":"From single-model embedding to multi-model with profiles and re-ranking","why":"Different content types need different embedding strategies","source":"gh-pr-8","status":"active"}
+{"date":"2026-03-14","session":"auto-discover","type":"pivot","what":"From separate MCP/REST APIs to consolidated single-port architecture","why":"Simplify deployment and reduce operational complexity","source":"gh-issue-26","status":"in-progress"}
+{"date":"2026-03-14","session":"auto-discover","type":"pivot","what":"vitest to bun:test migration","why":"17x performance improvement and ~54MB memory footprint","source":"git-history","status":"active"}
+{"date":"2026-03-08","session":"auto-discover","type":"outcome","what":"Resolved all 10 veracity audit issues (#12-#22)","why":"Critical security and correctness fixes from comprehensive audit","source":"gh-pr-23","status":"completed"}
+{"date":"2026-03-14","session":"auto-discover","type":"outcome","what":"PR #30 merged — self-healing health monitor + 39 PR Zero cycles","why":"Observability hardening with iterative quality enforcement","source":"gh-pr-30","status":"completed"}
+{"date":"2026-03-14","session":"auto-discover","type":"learning","what":"PR Zero ran 39 cycles on feat/self-healing — far exceeds ≤3 target","why":"Indicates upstream plan and execution quality gaps need addressing","domain":"quality","status":"active"}
+{"date":"2026-03-14","session":"auto-discover","type":"learning","what":"P0 security issues (#1-#4) discovered early: SQL injection, command injection, timing attack, missing validation","why":"Security review at project inception caught critical vulnerabilities","domain":"security","status":"active"}

@@ -57,8 +57,8 @@ import { MemoryPubSub } from "../pubsub/index.js";
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
-import { probeSystemHealth } from "../observability/health-probes.js";
-import type { HealthMonitor } from "../observability/HealthMonitor.js";
+import { probeSystemHealth, type HealthComponent } from "../observability/health-probes.js";
+import type { HealthMonitor, HealthAlert } from "../observability/HealthMonitor.js";
 import {
   SessionStartSchema,
   ContextSaveSchema,
@@ -73,6 +73,11 @@ import {
   KnowledgeIngestSchema,
 } from "../validation/api-schemas.js";
 import { KnowledgeStore } from "../knowledge/index.js";
+import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
+import type { QdrantClientWrapper } from "../search/QdrantClient.js";
+
+/** Maximum SARIF payload size in bytes (5 MB) */
+const MAX_SARIF_BYTES = 5 * 1024 * 1024;
 
 // ============================================================================
 // REST Server Class
@@ -109,6 +114,9 @@ export class RESTPingMemServer {
   private relevanceEngine: RelevanceEngine;
   private pubsub: MemoryPubSub;
   private knowledgeStore: KnowledgeStore;
+  private ownsEventStore: boolean;
+  private qdrantClient: QdrantClientWrapper | null = null;
+  private healthMonitor: HealthMonitor | null = null;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -333,7 +341,7 @@ export class RESTPingMemServer {
         const sanitizedSnapshot = {
           ...snapshot,
           components: Object.fromEntries(
-            Object.entries(snapshot.components).map(([key, comp]) => [
+            Object.entries(snapshot.components).map(([key, comp]: [string, HealthComponent]) => [
               key,
               comp.error ? { ...comp, error: comp.error.replace(/[\r\n\t\x00-\x1F\x7F\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "") } : comp,
             ])
@@ -346,7 +354,7 @@ export class RESTPingMemServer {
           // Alert messages are system-composed (metric names, numbers, static text) and do not
           // contain raw external error text. Apply light sanitization: strip control characters
           // (log-injection defence) and redact IPv4 addresses that may appear in metric values.
-          activeAlerts: monitorStatus.activeAlerts.map((alert) => ({
+          activeAlerts: monitorStatus.activeAlerts.map((alert: HealthAlert) => ({
             ...alert,
             message: alert.message
               .replace(/[\r\n\t\x00-\x1F\x7F\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "")
@@ -1161,8 +1169,6 @@ export class RESTPingMemServer {
 
         const memoryManager = await this.getMemoryManager(sessionId);
 
-        const memoryManager = await this.getMemoryManager(sessionId);
-
         // Build query params — map query text to keyPattern for wildcard matching.
         // Strip glob metacharacters and SQLite LIKE wildcards from user input before wrapping
         // in wildcards. % and _ are also stripped defensively in case the underlying store
@@ -1751,6 +1757,22 @@ export class RESTPingMemServer {
       graphManager: this.graphManager ?? undefined,
       qdrantClient: this.qdrantClient ?? undefined,
     });
+  }
+
+  /**
+   * Extract session ID from X-Session-ID header or fall back to currentSessionId.
+   * Validates UUID format to prevent injection attacks.
+   */
+  private getSessionIdFromRequest(c: Context<AppEnv>): SessionId | null {
+    const header = c.req.header("x-session-id");
+    if (header) {
+      const normalized = header.trim().toLowerCase();
+      if (RESTPingMemServer.UUID_RE.test(normalized)) {
+        return normalized as SessionId;
+      }
+      return null;
+    }
+    return this.currentSessionId;
   }
 
   /**

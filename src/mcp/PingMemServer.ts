@@ -213,6 +213,7 @@ export class PingMemServer {
       causalDiscoveryAgent: config.causalDiscoveryAgent ?? null,
       pubsub: new MemoryPubSub(),
       knowledgeStore: new KnowledgeStore(this.eventStore.getDatabase()),
+      qdrantClient: config.qdrantClient ?? null,
     };
 
     // Register modules

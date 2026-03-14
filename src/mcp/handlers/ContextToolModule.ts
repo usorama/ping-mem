@@ -23,6 +23,9 @@ import type {
 } from "../../types/index.js";
 import { createAgentId } from "../../types/index.js";
 import { checkEvidenceGate } from "../../validation/evidence-gates.js";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("ContextToolModule");
 
 // ============================================================================
 // Tool Schemas

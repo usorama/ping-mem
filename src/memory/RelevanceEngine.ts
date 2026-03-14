@@ -12,6 +12,9 @@
 import { Database, Statement } from "bun:sqlite";
 import { SemanticCompressor } from "./SemanticCompressor.js";
 import type { Memory } from "../types/index.js";
+import { createLogger } from "../util/logger.js";
+
+const log = createLogger("RelevanceEngine");
 
 // ============================================================================
 // Types
