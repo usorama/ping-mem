@@ -183,18 +183,17 @@ export class Neo4jClient {
       timeoutMs: 15_000,
     });
 
-    // Read circuit controls connectivity: only the read circuit affects isConnected().
-    // Write circuit failures (e.g., replication lag) should not block reads.
+    // Read/write circuits: log only — do not mutate connected or driver.
+    // isConnected() tracks driver liveness; circuit state is exposed via getCircuitState().
+    // Keeping connected decoupled from circuit state lets operations reach servicePolicy.execute()
+    // so the half-open probe can fire and self-recovery works without manual reconnect.
     this.servicePolicy.onStateChange((state) => {
-      if (state === "closed") {
-        this.connected = this.driver !== null;
-        log.info("Read circuit recovered", { state });
-      } else if (state === "open") {
-        this.connected = false;
+      if (state === "open") {
         log.error("Read circuit OPEN — Neo4j operations will fail fast", { state });
-      } else {
-        // half-open: probe request will go through; don't declare connected until circuit closes
+      } else if (state === "half-open") {
         log.info("Read circuit half-open — attempting recovery", { state });
+      } else {
+        log.info("Read circuit recovered", { state });
       }
     });
     // Write circuit: log only, do not affect connected flag (reads may still work)
@@ -215,20 +214,10 @@ export class Neo4jClient {
    * @throws {Neo4jConnectionError} If connection fails
    */
   async connect(): Promise<void> {
-    if (this.connected && this.driver !== null) {
-      return;
-    }
-
-    // Close stale driver before creating a new one (e.g., after circuit breaker opens
-    // and sets connected=false while driver is still live). Without this, connect()
-    // would create a second driver, leaking the old connection pool.
+    // Return early if a live driver already exists — circuit state does not affect
+    // driver liveness, so checking driver !== null is sufficient.
     if (this.driver !== null) {
-      try {
-        await this.driver.close();
-      } catch {
-        // Ignore close errors on a stale driver
-      }
-      this.driver = null;
+      return;
     }
 
     try {
@@ -286,11 +275,19 @@ export class Neo4jClient {
    * Check if client is connected to Neo4j
    */
   isConnected(): boolean {
-    return this.connected && this.driver !== null;
+    // Driver liveness is the source of truth; circuit state is separate (see getCircuitState()).
+    return this.driver !== null;
   }
 
   getCircuitState(): "closed" | "open" | "half-open" {
-    return this.servicePolicy.state;
+    // Report the worse of read and write circuits so callers see a unified view.
+    if (this.servicePolicy.state === "open" || this.writePolicy.state === "open") {
+      return "open";
+    }
+    if (this.servicePolicy.state === "half-open" || this.writePolicy.state === "half-open") {
+      return "half-open";
+    }
+    return "closed";
   }
 
   /**
@@ -487,8 +484,8 @@ export class Neo4jClient {
    * @returns true if connected and responsive
    */
   async ping(): Promise<boolean> {
-    // Allow probe through when circuit is half-open to enable self-recovery
-    if (!this.isConnected() && this.servicePolicy.state !== "half-open") {
+    // No driver: cannot probe.
+    if (this.driver === null) {
       return false;
     }
 

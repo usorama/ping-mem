@@ -1069,7 +1069,19 @@ function renderAdminPage(nonce: string): string {
           apiFetch("/api/admin/projects", {
             method: "DELETE",
             body: JSON.stringify({ projectDir: project.projectDir }),
-          }).then(() => refreshProjects()).catch((err) => {
+          }).then((result: unknown) => {
+            // Surface partial-cleanup warnings (HTTP 207) to the operator before refreshing.
+            const data = (result as { data?: { warnings?: string[] } } | null)?.data;
+            const warns = data?.warnings;
+            if (Array.isArray(warns) && warns.length > 0 && statusNote) {
+              const warnEl = document.createElement("span");
+              warnEl.className = "error";
+              warnEl.textContent = " Warning: " + warns.join("; ");
+              statusNote.appendChild(warnEl);
+              setTimeout(() => warnEl.remove(), 8000);
+            }
+            return refreshProjects();
+          }).catch((err) => {
             console.error("Delete project failed:", err);
             if (statusNote) {
               const errEl = document.createElement("span");

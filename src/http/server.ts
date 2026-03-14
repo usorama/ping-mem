@@ -47,6 +47,13 @@ export async function startHTTPServer(): Promise<void> {
       neo4jClient: services.neo4jClient,
       qdrantClient: services.qdrantClient,
     });
+    // Ensure Neo4j uniqueness constraints exist before accepting any ingest requests.
+    // MCP path calls this after construction; HTTP path must mirror that behaviour.
+    await ingestionService.ensureConstraints().catch((err) => {
+      log.warn("ensureConstraints failed at HTTP startup — ingestion may degrade", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   const transport = (process.env.PING_MEM_TRANSPORT as HTTPTransportType) ?? "streamable-http";

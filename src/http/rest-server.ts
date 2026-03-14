@@ -327,11 +327,11 @@ export class RESTPingMemServer {
         const sanitizedMonitor = monitorStatus ? {
           ...monitorStatus,
           lastSnapshot: monitorStatus.lastSnapshot ? sanitizedSnapshot : null,
-          // Alert messages are sanitized at source via sanitizeHealthError() in HealthMonitor.
-          // Redact any remaining IP addresses that may appear in metric-value messages.
+          // Alert messages may contain raw error text from probes (hostnames, auth details).
+          // Apply sanitizeHealthError to the dynamic portion of every alert message.
           activeAlerts: monitorStatus.activeAlerts.map((alert) => ({
             ...alert,
-            message: alert.message.replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, "[redacted]"),
+            message: sanitizeHealthError(alert.message),
           })),
         } : null;
 

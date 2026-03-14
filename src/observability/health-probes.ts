@@ -66,7 +66,10 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
   let sqlite: HealthComponent;
   try {
     const start = performance.now();
-    await deps.eventStore.ping();
+    const pingOk = await deps.eventStore.ping();
+    if (!pingOk) {
+      throw new Error("SQLite ping returned false — database may be unresponsive");
+    }
     const walSize = deps.eventStore.getWalSizeBytes();
     const freelistRatio = deps.eventStore.getFreelistRatio();
     const integrityOk = deps.skipIntegrityCheck ? 1 : deps.eventStore.getIntegrityOk();

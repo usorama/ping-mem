@@ -694,7 +694,7 @@ normChurn(F)      = (churnScore(F) - min_churn) / (max_churn - min_churn)
 // Edge case: if max === min, normalization returns 0 for all files
 
 // Composite score (weights sum to 1.0):
-blastRadiusScore(F) = round((0.30 × normFanIn(F)) + (0.40 × normTransFanIn(F)) + (0.30 × normChurn(F))) × 100
+blastRadiusScore(F) = round(((0.30 × normFanIn(F)) + (0.40 × normTransFanIn(F)) + (0.30 × normChurn(F))) × 100)
 
 // Tier assignment:
 tier = "none"     if score = 0
