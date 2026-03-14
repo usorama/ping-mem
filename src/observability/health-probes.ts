@@ -84,8 +84,25 @@ function roundMs(value: number): number {
 
 function toErrorMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  // Strip control characters before passing to log calls to prevent log injection.
-  return raw.replace(/[\r\n\t\x00-\x1F\x7F]/g, "");
+  // Strip control characters (log injection defence) and truncate to prevent CPU spikes
+  // from abnormally large error payloads (e.g., Neo4j responses with embedded stack traces).
+  return raw.replace(/[\r\n\t\x00-\x1F\x7F]/g, "").slice(0, 512);
+}
+
+/** Hard per-probe deadline: prevents a hanging TCP connection (e.g., silent network partition)
+ * from blocking the health endpoint indefinitely. Network probes only — SQLite is local. */
+const PROBE_TIMEOUT_MS = 8_000;
+
+function withProbeTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`${label} probe timed out after ${PROBE_TIMEOUT_MS}ms`)),
+        PROBE_TIMEOUT_MS
+      )
+    ),
+  ]);
 }
 
 export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSnapshot> {
@@ -128,7 +145,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
   if (deps.neo4jClient) {
     try {
       const start = performance.now();
-      const ok = await deps.neo4jClient.ping();
+      const ok = await withProbeTimeout(deps.neo4jClient.ping(), "Neo4j");
       if (!ok) {
         throw new Error("ping returned false");
       }
@@ -153,7 +170,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
     const gmStart = performance.now();
     try {
       // Use a known-safe operation: querying a non-existent entity
-      await deps.graphManager.getEntity(NEO4J_PING_SENTINEL);
+      await withProbeTimeout(deps.graphManager.getEntity(NEO4J_PING_SENTINEL), "Neo4j-graphManager");
       neo4j = {
         status: "healthy",
         configured: true,
@@ -194,7 +211,7 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
   if (deps.qdrantClient) {
     try {
       const start = performance.now();
-      const healthy = await deps.qdrantClient.healthCheck();
+      const healthy = await withProbeTimeout(deps.qdrantClient.healthCheck(), "Qdrant");
       qdrant = {
         status: healthy ? "healthy" : "unhealthy",
         configured: true,

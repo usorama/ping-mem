@@ -111,6 +111,9 @@ export class HealthMonitor {
     // escalate on leftover alerts or suppress new ones within the dedup window.
     this.activeAlerts.clear();
     this.lastAlerts.clear();
+    // Reset Qdrant baseline so a stop/restart cycle does not compare the new run's
+    // point count against a stale pre-stop baseline, causing spurious drift alerts.
+    this.baselineQdrantCount = null;
 
     this.fastTimer = setInterval(() => {
       this.tick().catch((err) => {
@@ -143,8 +146,10 @@ export class HealthMonitor {
       clearInterval(this.qualityTimer);
       this.qualityTimer = null;
     }
-    // Quiesce: wait for any in-flight ticks to complete (max 5s)
-    const deadline = Date.now() + 5_000;
+    // Quiesce: wait for any in-flight ticks to complete.
+    // Each network probe (Neo4j, Qdrant) has a per-probe timeout of 8s (see health-probes.ts),
+    // so a quality tick running both probes can take up to ~18s. Allow 25s total.
+    const deadline = Date.now() + 25_000;
     while ((this.tickRunning || this.qualityTickRunning) && Date.now() < deadline) {
       await new Promise<void>((resolve) => setTimeout(resolve, 50));
     }
@@ -399,10 +404,11 @@ export class HealthMonitor {
     // relying on per-consumer sanitization at the serialization boundary.
     // Strip control characters that could cause log injection if alert messages
     // ever include error strings from external systems.
-    // Strip C0 (0x00-0x1F), DEL (0x7F), and C1 (0x80-0x9F) control characters.
-    // C1 characters are valid UTF-8 but interpreted as ANSI escape sequences by many
-    // terminal emulators, enabling log injection if alert messages are forwarded to terminals.
-    const safeMessage = message.replace(/[\x00-\x1f\x7f-\x9f]/g, "").slice(0, 500);
+    // Strip C0 (0x00-0x1F), DEL (0x7F), C1 (0x80-0x9F) control characters, and
+    // Unicode BiDi control characters (U+202A-U+202E, U+2066-U+2069).
+    // C1 characters are interpreted as ANSI escape sequences by many terminal emulators.
+    // BiDi controls can reorder displayed text to misrepresent alert messages in dashboards.
+    const safeMessage = message.replace(/[\x00-\x1f\x7f-\x9f\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 500);
     const previous = this.lastAlerts.get(key) ?? 0;
 
     // Allow severity escalation (warn→critical) and de-escalation (critical→warn) to bypass dedup window

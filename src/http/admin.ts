@@ -241,7 +241,8 @@ export function sanitizeAdminError(message: string): string {
     !capped.includes("fw_") &&
     !capped.includes("xai-") &&
     !capped.includes("together_api_") &&
-    !capped.includes("tog") &&
+    !capped.includes("tog_") &&
+    !capped.includes("togx_") &&
     !capped.includes("pplx-") &&
     !capped.includes("AKIA") &&
     !capped.includes("ASIA") &&

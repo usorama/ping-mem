@@ -56,6 +56,9 @@ import { MemoryPubSub } from "../pubsub/index.js";
 
 /** Maximum number of cached MemoryManager instances before LRU eviction */
 const MAX_MEMORY_MANAGERS = 200;
+/** Maximum serialized SARIF payload size (5 MB). Guards against memory-amplification DoS
+ * where a large SARIF JSON is fully deserialized then re-serialized before the DB write. */
+const MAX_SARIF_BYTES = 5 * 1024 * 1024;
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
@@ -242,6 +245,11 @@ export class RESTPingMemServer {
       c.header("Referrer-Policy", "strict-origin-when-cross-origin");
       c.header(
         "Content-Security-Policy",
+        // style-src-attr 'unsafe-inline': required for the HTMX server-rendered UI which
+        // uses inline style="" attributes extensively (e.g. color, opacity, pointer-events).
+        // Migrating all inline styles to CSS classes is a significant refactor; the risk
+        // is mitigated because all user-controlled values in HTML attributes go through
+        // escapeHtml() before rendering, preventing CSS injection via style attribute values.
         `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
       );
       c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
@@ -431,22 +439,28 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/session/end", async (c) => {
       try {
-        if (!this.currentSessionId) {
+        // Prefer X-Session-ID header to avoid ending the wrong session under concurrent use.
+        // Falls back to the single-client convenience field only when no header is provided.
+        const sessionId = this.getSessionIdFromRequest(c);
+        if (!sessionId) {
           return c.json<RESTErrorResponse>(
             {
               error: "Bad Request",
-              message: "No active session",
+              message: "No active session. Provide X-Session-ID header.",
             },
             400
           );
         }
 
-        const endingSessionId = this.currentSessionId;
-        await this.sessionManager.endSession(endingSessionId);
+        await this.sessionManager.endSession(sessionId);
         // Evict cached MemoryManager for ended session to prevent unbounded map growth
-        this.memoryManagers.delete(endingSessionId);
-        this.managerPromises.delete(endingSessionId);
-        this.currentSessionId = null;
+        this.memoryManagers.delete(sessionId);
+        this.managerPromises.delete(sessionId);
+        // Clear convenience fallback only if it matches the session being ended to avoid
+        // clearing an unrelated session that was started concurrently.
+        if (this.currentSessionId === sessionId) {
+          this.currentSessionId = null;
+        }
 
         return c.json<RESTSuccessResponse<{ message: string }>>({
           data: { message: "Session ended" },
@@ -640,6 +654,11 @@ export class RESTPingMemServer {
           toolName = toolName ?? parsed.toolName;
           toolVersion = toolVersion ?? parsed.toolVersion;
           rawSarif = typeof body.sarif === "string" ? body.sarif : JSON.stringify(body.sarif);
+          // Guard against memory-amplification DoS: full JSON deserialization + re-serialization
+          // can amplify a crafted payload significantly before reaching the DB write.
+          if (rawSarif.length > MAX_SARIF_BYTES) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "SARIF payload too large (max 5 MB)" }, 400);
+          }
         } else if (Array.isArray(body.findings)) {
           // The Zod findingSchema validates structure; cast to the internal
           // FindingInput type which normalizeFindings() expects (flat fields).
@@ -1185,9 +1204,10 @@ export class RESTPingMemServer {
         const memoryManager = await this.getMemoryManager(sessionId);
 
         // Build query params — map query text to keyPattern for wildcard matching.
-        // Strip glob metacharacters from user input before wrapping in wildcards so
-        // a query of '*' matches keys containing the text '*', not all keys.
-        const safeQuery = query.replace(/[*?[\]\\]/g, "");
+        // Strip glob metacharacters and SQLite LIKE wildcards from user input before wrapping
+        // in wildcards. % and _ are also stripped defensively in case the underlying store
+        // ever uses a LIKE expression for pattern matching.
+        const safeQuery = query.replace(/[*?[\]\\%_]/g, "");
         const queryParams: Record<string, unknown> = { keyPattern: `*${safeQuery}*` };
 
         if (c.req.query("category")) {
@@ -1491,7 +1511,11 @@ export class RESTPingMemServer {
           return c.json<RESTSuccessResponse<Record<string, unknown>>>({ data: row });
         }
 
-        const rows = db.prepare("SELECT * FROM agent_quotas ORDER BY updated_at DESC LIMIT 200").all();
+        // Exclude the admin column from the list response — it indicates privilege level
+        // and is reconnaissance-enabling to authenticated callers who share an API key.
+        const rows = db.prepare(
+          "SELECT agent_id, role, ttl_ms, quota_bytes, quota_count, expires_at, created_at, updated_at FROM agent_quotas ORDER BY updated_at DESC LIMIT 200"
+        ).all();
         return c.json<RESTSuccessResponse<{ agents: unknown[] }>>({ data: { agents: rows } });
       } catch (error) {
         return this.handleError(c, error);
@@ -1946,13 +1970,8 @@ export class RESTPingMemServer {
       ? rawMessage.replace(/[\x00-\x1f]/g, "?").slice(0, 200)
       : this.getErrorName(statusCode);
 
-    // 4xx are client errors — log at warn to avoid inflating server error alert volumes.
-    // 5xx are server-side problems — log at error for immediate alerting.
-    if (statusCode >= 500) {
-      log.error("Error", { statusCode, message: sanitizedMessage });
-    } else {
-      log.warn("Client error", { statusCode, message: sanitizedMessage });
-    }
+    // All 4xx reach this path (5xx returned early above with a requestId reference).
+    log.warn("Client error", { statusCode, message: sanitizedMessage });
     return c.json(
       { error: this.getErrorName(statusCode), message: safeMessage },
       statusCode as ContentfulStatusCode
@@ -2075,7 +2094,8 @@ export class RESTPingMemServer {
         config.agentId = createAgentId(meta.agentId);
       }
       if (meta?.agentRole && typeof meta.agentRole === "string") {
-        config.agentRole = meta.agentRole;
+        // Strip control characters (log injection) and cap length before storing.
+        config.agentRole = meta.agentRole.replace(/[\x00-\x1f]/g, "?").slice(0, 200);
       }
     }
 

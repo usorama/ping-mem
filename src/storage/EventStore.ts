@@ -169,6 +169,16 @@ export class EventStore {
   // Prepared statements for checkpoint item operations — hoisted for consistent hot-path performance
   private stmtInsertCheckpointItem: Statement;
   private stmtGetCheckpointItems: Statement;
+  // Remaining hot-path statements — hoisted to avoid per-call SQL compilation overhead
+  private stmtGetLastEventBySession: Statement;
+  private stmtGetRecentEvents: Statement;
+  private stmtListSessions: Statement;
+  private stmtIsAgentActive: Statement;
+  private stmtGetEventCount: Statement;
+  private stmtGetCheckpointCount: Statement;
+  private stmtGetPageCount: Statement;
+  private stmtGetFreelistCount: Statement;
+  private stmtQuickCheck: Statement;
 
   constructor(config?: EventStoreConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config } as typeof this.config;
@@ -281,6 +291,27 @@ export class EventStore {
     this.stmtGetCheckpointItems = this.db.prepare(
       "SELECT memory_key FROM checkpoint_items WHERE checkpoint_id = ?"
     );
+    // Fetch only the latest event for a session — used by createCheckpoint() to avoid
+    // loading the full event history when all we need is the last event ID.
+    this.stmtGetLastEventBySession = this.db.prepare(
+      "SELECT event_id FROM events WHERE session_id = $session_id ORDER BY timestamp DESC LIMIT 1"
+    );
+    // LIMIT 10000: prevent unbounded memory load on a store with many historical sessions.
+    this.stmtListSessions = this.db.prepare(
+      "SELECT DISTINCT session_id FROM events ORDER BY timestamp ASC LIMIT 10000"
+    );
+    // $limit is a bind parameter so we can reuse this statement for all limit values.
+    this.stmtGetRecentEvents = this.db.prepare(
+      "SELECT * FROM events ORDER BY timestamp DESC LIMIT $limit"
+    );
+    this.stmtIsAgentActive = this.db.prepare(
+      "SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
+    );
+    this.stmtGetEventCount = this.db.prepare("SELECT COUNT(*) as count FROM events");
+    this.stmtGetCheckpointCount = this.db.prepare("SELECT COUNT(*) as count FROM checkpoints");
+    this.stmtGetPageCount = this.db.prepare("PRAGMA page_count");
+    this.stmtGetFreelistCount = this.db.prepare("PRAGMA freelist_count");
+    this.stmtQuickCheck = this.db.prepare("PRAGMA quick_check");
   }
 
   /**
@@ -712,14 +743,10 @@ export class EventStore {
     description?: string,
     memoryKeys?: string[]
   ): Promise<Checkpoint> {
-    // Get latest event for this session
-    const events = await this.getBySession(sessionId);
-    if (events.length === 0) {
-      throw new Error(`No events found for session: ${sessionId}`);
-    }
-
-    const lastEvent = events[events.length - 1];
-    if (!lastEvent) {
+    // Fetch only the latest event ID — avoids loading the full event history into memory
+    // (getBySession() has no LIMIT and would materialize every event for a long-lived session).
+    const lastRow = this.stmtGetLastEventBySession.get({ $session_id: sessionId }) as { event_id: string } | undefined;
+    if (!lastRow) {
       throw new Error(`No events found for session: ${sessionId}`);
     }
 
@@ -727,7 +754,7 @@ export class EventStore {
       checkpointId: this.generateUUID(),
       sessionId,
       timestamp: new Date(),
-      lastEventId: lastEvent.eventId,
+      lastEventId: lastRow.event_id,
       memoryCount,
     };
     if (description !== undefined) {
@@ -791,10 +818,7 @@ export class EventStore {
   getRecentEvents(limit: number = 20): Event[] {
     // Clamp limit to prevent loading the entire events table into memory on a bad caller.
     const safeLimit = Math.min(Math.max(limit, 1), 1000);
-    const stmt = this.db.prepare(
-      "SELECT * FROM events ORDER BY timestamp DESC LIMIT $limit"
-    );
-    const rows = stmt.all({ $limit: safeLimit }) as EventRow[];
+    const rows = this.stmtGetRecentEvents.all({ $limit: safeLimit }) as EventRow[];
     return rows.map((row) => this.rowToEvent(row));
   }
 
@@ -804,10 +828,7 @@ export class EventStore {
    * List all unique session IDs in the event store
    */
   async listSessions(): Promise<SessionId[]> {
-    const stmt = this.db.prepare(
-      "SELECT DISTINCT session_id FROM events ORDER BY timestamp ASC"
-    );
-    const rows = stmt.all() as Array<{ session_id: string }>;
+    const rows = this.stmtListSessions.all() as Array<{ session_id: string }>;
     return rows.map((row) => row.session_id);
   }
 
@@ -832,17 +853,13 @@ export class EventStore {
     // should not prevent reporting stats for the other table.
     let eventCount = 0;
     try {
-      eventCount = (
-        this.db.prepare("SELECT COUNT(*) as count FROM events").get() as { count: number }
-      ).count;
+      eventCount = (this.stmtGetEventCount.get() as { count: number }).count;
     } catch {
       // Transient SQLite error — return 0 rather than crashing the health monitor caller.
     }
     let checkpointCount = 0;
     try {
-      checkpointCount = (
-        this.db.prepare("SELECT COUNT(*) as count FROM checkpoints").get() as { count: number }
-      ).count;
+      checkpointCount = (this.stmtGetCheckpointCount.get() as { count: number }).count;
     } catch {
       // Transient SQLite error — return 0 rather than crashing.
     }
@@ -897,8 +914,8 @@ export class EventStore {
    * Get ratio of free pages to total pages (fragmentation indicator).
    */
   getFreelistRatio(): number {
-    const pageCountRow = this.db.prepare("PRAGMA page_count").get() as { page_count?: number } | undefined;
-    const freelistRow = this.db.prepare("PRAGMA freelist_count").get() as { freelist_count?: number } | undefined;
+    const pageCountRow = this.stmtGetPageCount.get() as { page_count?: number } | undefined;
+    const freelistRow = this.stmtGetFreelistCount.get() as { freelist_count?: number } | undefined;
     const pageCount = pageCountRow?.page_count ?? 0;
     const freelistCount = freelistRow?.freelist_count ?? 0;
     if (pageCount <= 0) {
@@ -915,7 +932,7 @@ export class EventStore {
    * always the only row for this PRAGMA — so no records are silently discarded.
    */
   getIntegrityOk(): number {
-    const row = this.db.prepare("PRAGMA quick_check").get() as { quick_check?: string } | undefined;
+    const row = this.stmtQuickCheck.get() as { quick_check?: string } | undefined;
     return row?.quick_check === "ok" ? 1 : 0;
   }
 
@@ -967,9 +984,7 @@ export class EventStore {
    * Check if an agent is registered and not expired.
    */
   isAgentActive(agentId: string): boolean {
-    const row = this.db.prepare(
-      "SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
-    ).get({ $agent_id: agentId, $now: new Date().toISOString() });
+    const row = this.stmtIsAgentActive.get({ $agent_id: agentId, $now: new Date().toISOString() });
     return row !== null && row !== undefined;
   }
 
