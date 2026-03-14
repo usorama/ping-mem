@@ -23,9 +23,6 @@ import type {
 } from "../../types/index.js";
 import { createAgentId } from "../../types/index.js";
 import { checkEvidenceGate } from "../../validation/evidence-gates.js";
-import { createLogger } from "../../util/logger.js";
-
-const log = createLogger("ContextToolModule");
 
 // ============================================================================
 // Tool Schemas
@@ -480,7 +477,10 @@ export class ContextToolModule implements ToolModule {
           this.state.knowledgeStore.ingest(knowledgeIngestEntry);
         }
       } catch (knowledgeError) {
-        log.warn("Knowledge dual-write failed", { error: knowledgeError instanceof Error ? knowledgeError.message : String(knowledgeError) });
+        console.warn(
+          "[ContextToolModule] Knowledge dual-write failed:",
+          knowledgeError instanceof Error ? knowledgeError.message : String(knowledgeError)
+        );
       }
     }
 

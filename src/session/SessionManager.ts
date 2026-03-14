@@ -181,11 +181,31 @@ export class SessionManager {
       const sessionId = this.generateUUID();
       const now = new Date();
 
-      // Merge agentId into metadata when provided (no mutable global state)
-      const metadata: Record<string, unknown> = config.metadata ? { ...config.metadata } : {};
-      if (config.agentId !== undefined) {
-        metadata.agentId = config.agentId;
-      }
+    // Merge agentId into metadata when provided (no mutable global state)
+    const metadata: Record<string, unknown> = config.metadata ? { ...config.metadata } : {};
+    if (config.agentId !== undefined) {
+      metadata.agentId = config.agentId;
+    }
+
+    const session: Session = {
+      id: sessionId,
+      name: config.name,
+      status: "active",
+      startedAt: now,
+      memoryCount: 0,
+      eventCount: 0,
+      lastActivityAt: now,
+      metadata,
+    };
+    if (config.projectDir !== undefined) {
+      session.projectDir = config.projectDir;
+    }
+    if (config.continueFrom !== undefined) {
+      session.parentSessionId = config.continueFrom;
+    }
+    if (config.defaultChannel !== undefined) {
+      session.defaultChannel = config.defaultChannel;
+    }
 
       const session: Session = {
         id: sessionId,

@@ -591,7 +591,7 @@ export class MemoryManager {
         try {
           this.relevanceEngine.ensureTracking(memoryId, memory.priority, memory.category);
         } catch (error) {
-          log.warn("Relevance tracking failed", { error: error instanceof Error ? error.message : String(error) });
+          console.warn("[MemoryManager] Relevance tracking failed:", error instanceof Error ? error.message : String(error));
         }
       }
 

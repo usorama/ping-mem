@@ -12,9 +12,6 @@
 import { Database, Statement } from "bun:sqlite";
 import { SemanticCompressor } from "./SemanticCompressor.js";
 import type { Memory } from "../types/index.js";
-import { createLogger } from "../util/logger.js";
-
-const log = createLogger("RelevanceEngine");
 
 // ============================================================================
 // Types
@@ -563,9 +560,10 @@ export class RelevanceEngine {
             digestValue = this.buildHeuristicDigest(chunk);
           }
         } catch (compressError) {
-          log.warn("Semantic compression failed, falling back to heuristic", {
-            error: compressError instanceof Error ? compressError.message : String(compressError),
-          });
+          console.warn(
+            `[RelevanceEngine] Semantic compression failed, falling back to heuristic:`,
+            compressError instanceof Error ? compressError.message : String(compressError)
+          );
           digestValue = this.buildHeuristicDigest(chunk);
         }
 

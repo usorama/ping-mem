@@ -9,9 +9,6 @@
  */
 
 import type Database from "bun:sqlite";
-import { createLogger } from "../util/logger.js";
-
-const log = createLogger("KnowledgeStore");
 
 // ============================================================================
 // Types
@@ -79,23 +76,13 @@ function computeKnowledgeId(projectId: string, title: string): string {
   return hasher.digest("hex");
 }
 
-function parseTags(tagsJson: string, id: string): string[] {
-  try {
-    return JSON.parse(tagsJson) as string[];
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
-    log.debug("Failed to parse tags JSON", { id, error: msg });
-    return [];
-  }
-}
-
 function rowToEntry(row: KnowledgeRow): KnowledgeEntry {
   const entry: KnowledgeEntry = {
     id: row.id,
     projectId: row.project_id,
     title: row.title,
     solution: row.solution,
-    tags: parseTags(row.tags, row.id),
+    tags: (() => { try { return JSON.parse(row.tags) as string[]; } catch { return []; } })(),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

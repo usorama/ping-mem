@@ -9,9 +9,6 @@
 
 import { EventEmitter } from "node:events";
 import type { AgentMemoryScope } from "../types/index.js";
-import { createLogger } from "../util/logger.js";
-
-const log = createLogger("MemoryPubSub");
 
 // ============================================================================
 // Types
@@ -106,9 +103,9 @@ export class MemoryPubSub {
       } catch (err) {
         const count = (this.errorCounts.get(id) ?? 0) + 1;
         this.errorCounts.set(id, count);
-        log.error(`Subscriber ${id} handler threw (${count}/${MemoryPubSub.MAX_CONSECUTIVE_ERRORS})`, { error: err instanceof Error ? err.message : String(err) });
+        console.error(`[MemoryPubSub] Subscriber ${id} handler threw (${count}/${MemoryPubSub.MAX_CONSECUTIVE_ERRORS}):`, err instanceof Error ? err.message : String(err));
         if (count >= MemoryPubSub.MAX_CONSECUTIVE_ERRORS) {
-          log.error(`Circuit breaker: auto-unsubscribing ${id} after ${count} consecutive failures`);
+          console.error(`[MemoryPubSub] Circuit breaker: auto-unsubscribing ${id} after ${count} consecutive failures`);
           // Schedule unsubscribe outside the emit loop to avoid mutation during iteration
           queueMicrotask(() => this.unsubscribe(id));
         }

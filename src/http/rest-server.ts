@@ -44,6 +44,7 @@ import {
   type SessionId,
   type MemoryCategory,
   type MemoryPriority,
+  type MemoryPrivacy,
 } from "../types/index.js";
 
 import type {
@@ -53,12 +54,6 @@ import type {
 } from "./types.js";
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
 import { MemoryPubSub } from "../pubsub/index.js";
-
-/** Maximum number of cached MemoryManager instances before LRU eviction */
-const MAX_MEMORY_MANAGERS = 200;
-/** Maximum serialized SARIF payload size (5 MB). Guards against memory-amplification DoS
- * where a large SARIF JSON is fully deserialized then re-serialized before the DB write. */
-const MAX_SARIF_BYTES = 5 * 1024 * 1024;
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
 import { rateLimiter } from "./middleware/rate-limit.js";
@@ -77,9 +72,7 @@ import {
   KnowledgeSearchSchema,
   KnowledgeIngestSchema,
 } from "../validation/api-schemas.js";
-import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
 import { KnowledgeStore } from "../knowledge/index.js";
-import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 
 // ============================================================================
 // REST Server Class
@@ -116,12 +109,6 @@ export class RESTPingMemServer {
   private relevanceEngine: RelevanceEngine;
   private pubsub: MemoryPubSub;
   private knowledgeStore: KnowledgeStore;
-  private qdrantClient: QdrantClientWrapper | null = null;
-  private healthMonitor: HealthMonitor | null = null;
-  private readonly ownsEventStore: boolean;
-  private readonly ownsDiagnosticsStore: boolean;
-  private sseConnectionCount = 0;
-  private static readonly MAX_SSE_CONNECTIONS = 100;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -139,7 +126,6 @@ export class RESTPingMemServer {
     this.relevanceEngine = new RelevanceEngine(this.eventStore.getDatabase());
     this.pubsub = new MemoryPubSub();
     this.knowledgeStore = new KnowledgeStore(this.eventStore.getDatabase());
-    this.ownsDiagnosticsStore = !this.config.diagnosticsStore;
     this.diagnosticsStore =
       this.config.diagnosticsStore ??
       new DiagnosticsStore({
@@ -513,15 +499,6 @@ export class RESTPingMemServer {
           );
         }
 
-        // Validate session exists before proceeding
-        const existingSession = this.sessionManager.getSession(sessionId as SessionId);
-        if (!existingSession) {
-          return c.json<RESTErrorResponse>(
-            { error: "Not Found", message: `Session not found: ${sessionId}` },
-            404
-          );
-        }
-
         const memoryManager = await this.getMemoryManager(sessionId);
 
         // Build options, excluding undefined values
@@ -658,7 +635,7 @@ export class RESTPingMemServer {
           try {
             sarifPayload = typeof body.sarif === "string" ? JSON.parse(body.sarif) : body.sarif;
           } catch (err) {
-            log.warn("SARIF parse error", { error: err instanceof Error ? err.message : String(err) });
+            console.warn("[REST] SARIF parse error:", err instanceof Error ? err.message : String(err));
             return c.json<RESTErrorResponse>(
               { error: "Bad Request", message: "Invalid JSON in sarif field" },
               400
@@ -760,10 +737,7 @@ export class RESTPingMemServer {
           );
         }
 
-        let _reqBody2: unknown;
-        try { _reqBody2 = await c.req.json(); }
-        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
-        const parseResult = CodebaseIngestSchema.safeParse(_reqBody2);
+        const parseResult = CodebaseIngestSchema.safeParse(await c.req.json());
         if (!parseResult.success) {
           return c.json(
             { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -771,9 +745,6 @@ export class RESTPingMemServer {
           );
         }
         const projectDir = path.resolve(parseResult.data.projectDir);
-        if (!isProjectDirSafe(projectDir)) {
-          return c.json({ error: "BadRequest", message: "projectDir must be within an allowed root" }, 400);
-        }
         const forceReingest = parseResult.data.forceReingest;
 
         const result = await this.config.ingestionService.ingestProject({
@@ -827,10 +798,7 @@ export class RESTPingMemServer {
             503
           );
         }
-        let _reqBody3: unknown;
-        try { _reqBody3 = await c.req.json(); }
-        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
-        const parseResult = CodebaseVerifySchema.safeParse(_reqBody3);
+        const parseResult = CodebaseVerifySchema.safeParse(await c.req.json());
         if (!parseResult.success) {
           return c.json(
             { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
@@ -838,9 +806,6 @@ export class RESTPingMemServer {
           );
         }
         const projectDir = path.resolve(parseResult.data.projectDir);
-        if (!isProjectDirSafe(projectDir)) {
-          return c.json({ error: "BadRequest", message: "projectDir must be within an allowed root" }, 400);
-        }
         const result = await this.config.ingestionService.verifyProject(projectDir);
         return c.json({ data: result });
       } catch (error) {
@@ -860,23 +825,9 @@ export class RESTPingMemServer {
         if (!query) {
           return c.json({ error: "BadRequest", message: "query is required" }, 400);
         }
-        if (query.length > 2000) {
-          return c.json({ error: "BadRequest", message: "query exceeds maximum length" }, 400);
-        }
         const projectId = c.req.query("projectId");
-        if (projectId !== undefined && projectId.length > 128) {
-          return c.json({ error: "BadRequest", message: "projectId exceeds maximum length" }, 400);
-        }
-        const rawFilePath = c.req.query("filePath");
-        if (rawFilePath !== undefined && (rawFilePath.length > 1000 || rawFilePath.includes("..") || rawFilePath.startsWith("/"))) {
-          return c.json({ error: "BadRequest", message: "filePath must be a relative path without traversal sequences (max 1000 chars)" }, 400);
-        }
-        const filePath = rawFilePath;
-        const rawType = c.req.query("type");
-        if (rawType !== undefined && !RESTPingMemServer.VALID_CODE_TYPES.has(rawType)) {
-          return c.json({ error: "BadRequest", message: "Invalid type: must be one of: code, comment, docstring" }, 400);
-        }
-        const type = rawType as "code" | "comment" | "docstring" | undefined;
+        const filePath = c.req.query("filePath");
+        const type = c.req.query("type") as "code" | "comment" | "docstring" | undefined;
         const rawSearchLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
         const limit = rawSearchLimit !== undefined ? (Number.isNaN(rawSearchLimit) ? 10 : Math.min(Math.max(rawSearchLimit, 1), 1000)) : undefined;
         const searchOptions: {
@@ -909,14 +860,7 @@ export class RESTPingMemServer {
         if (!projectId) {
           return c.json({ error: "BadRequest", message: "projectId is required" }, 400);
         }
-        if (projectId.length > 128) {
-          return c.json({ error: "BadRequest", message: "projectId exceeds maximum length" }, 400);
-        }
-        const rawTimelineFilePath = c.req.query("filePath");
-        if (rawTimelineFilePath !== undefined && (rawTimelineFilePath.length > 1000 || rawTimelineFilePath.includes("..") || rawTimelineFilePath.startsWith("/"))) {
-          return c.json({ error: "BadRequest", message: "filePath must be a relative path without traversal sequences (max 1000 chars)" }, 400);
-        }
-        const filePath = rawTimelineFilePath;
+        const filePath = c.req.query("filePath") ?? undefined;
         const rawTimelineLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : undefined;
         const limit = rawTimelineLimit !== undefined ? (Number.isNaN(rawTimelineLimit) ? 50 : Math.min(Math.max(rawTimelineLimit, 1), 1000)) : undefined;
         const timelineOptions: { projectId: string; filePath?: string; limit?: number } = {
@@ -1114,15 +1058,6 @@ export class RESTPingMemServer {
           );
         }
 
-        // Validate session exists
-        const existingSession = this.sessionManager.getSession(sessionId as SessionId);
-        if (!existingSession) {
-          return c.json<RESTErrorResponse>(
-            { error: "Not Found", message: `Session not found: ${sessionId}` },
-            404
-          );
-        }
-
         const memoryManager = await this.getMemoryManager(sessionId);
 
         // Use recall to get memory by key
@@ -1175,15 +1110,6 @@ export class RESTPingMemServer {
           );
         }
 
-        // Validate session exists
-        const existingSession = this.sessionManager.getSession(sessionId as SessionId);
-        if (!existingSession) {
-          return c.json<RESTErrorResponse>(
-            { error: "Not Found", message: `Session not found: ${sessionId}` },
-            404
-          );
-        }
-
         const memoryManager = await this.getMemoryManager(sessionId);
         const deleted = await memoryManager.delete(key);
 
@@ -1233,14 +1159,7 @@ export class RESTPingMemServer {
           );
         }
 
-        // Validate session exists
-        const existingSession = this.sessionManager.getSession(sessionId as SessionId);
-        if (!existingSession) {
-          return c.json<RESTErrorResponse>(
-            { error: "Not Found", message: `Session not found: ${sessionId}` },
-            404
-          );
-        }
+        const memoryManager = await this.getMemoryManager(sessionId);
 
         const memoryManager = await this.getMemoryManager(sessionId);
 
@@ -1285,7 +1204,7 @@ export class RESTPingMemServer {
         }
         if (c.req.query("offset")) {
           const rawOff = parseInt(c.req.query("offset")!, 10);
-          queryParams.offset = Number.isNaN(rawOff) ? 0 : Math.min(Math.max(rawOff, 0), 100_000);
+          queryParams.offset = Number.isNaN(rawOff) ? 0 : Math.max(rawOff, 0);
         }
 
         const results = await memoryManager.recall(queryParams);
@@ -1485,56 +1404,43 @@ export class RESTPingMemServer {
 
         const db = this.eventStore.getDatabase();
 
-        // Enforce metadata size limit before entering transaction
+        // Garbage collect expired agents before counting (aligned with MCP handler)
+        db.prepare("DELETE FROM agent_quotas WHERE expires_at IS NOT NULL AND expires_at < $now").run({ $now: new Date().toISOString() });
+
+        // Enforce max-agents limit
+        const maxAgents = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10) || 100;
+        const countRow = db.prepare(
+          "SELECT COUNT(*) as cnt FROM agent_quotas"
+        ).get() as { cnt: number };
+        const existingRow = db.prepare("SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id").get({ $agent_id: agentId });
+        if (!existingRow && countRow.cnt >= maxAgents) {
+          return c.json<RESTErrorResponse>({ error: "Conflict", message: `Maximum agent registrations (${maxAgents}) reached` }, 409);
+        }
+
+        // Enforce metadata size limit
         const metadataStr = JSON.stringify(metadata ?? {});
         if (metadataStr.length > 10_000) {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "metadata exceeds 10KB size limit" }, 400);
         }
 
-        // Wrap GC + count check + insert in a single transaction to prevent
-        // concurrent registrations from exceeding maxAgents (TOCTOU race).
-        const parsedMax = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10);
-        // Guard NaN and non-positive values: `|| 100` would not catch negative ints (truthy).
-        const maxAgents = !Number.isNaN(parsedMax) && parsedMax > 0 ? parsedMax : 100;
-        let limitExceeded = false;
-
-        db.transaction(() => {
-          // Garbage collect expired agents before counting (aligned with MCP handler)
-          db.prepare("DELETE FROM agent_quotas WHERE expires_at IS NOT NULL AND expires_at < $now").run({ $now: new Date().toISOString() });
-
-          const countRow = db.prepare(
-            "SELECT COUNT(*) as cnt FROM agent_quotas"
-          ).get() as { cnt: number };
-          const existingRow = db.prepare("SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id").get({ $agent_id: agentId });
-          if (!existingRow && countRow.cnt >= maxAgents) {
-            limitExceeded = true;
-            return;
-          }
-
-          db.prepare(
-            `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
-             VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
-             ON CONFLICT(agent_id) DO UPDATE SET
-               role = $role, admin = $admin, ttl_ms = $ttl_ms, expires_at = $expires_at,
-               quota_bytes = $quota_bytes, quota_count = $quota_count,
-               updated_at = $updated_at, metadata = $metadata`
-          ).run({
-            $agent_id: agentId,
-            $role: role,
-            $admin: admin ? 1 : 0,
-            $ttl_ms: ttlMs,
-            $expires_at: expiresAt,
-            $quota_bytes: quotaBytes,
-            $quota_count: quotaCount,
-            $created_at: now,
-            $updated_at: now,
-            $metadata: metadataStr,
-          });
-        })();
-
-        if (limitExceeded) {
-          return c.json<RESTErrorResponse>({ error: "Conflict", message: `Maximum agent registrations (${maxAgents}) reached` }, 409);
-        }
+        db.prepare(
+          `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
+           VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
+           ON CONFLICT(agent_id) DO UPDATE SET
+             role = $role, ttl_ms = $ttl_ms, expires_at = $expires_at,
+             updated_at = $updated_at, metadata = $metadata`
+        ).run({
+          $agent_id: agentId,
+          $role: role,
+          $admin: admin ? 1 : 0,
+          $ttl_ms: ttlMs,
+          $expires_at: expiresAt,
+          $quota_bytes: quotaBytes,
+          $quota_count: quotaCount,
+          $created_at: now,
+          $updated_at: now,
+          $metadata: metadataStr,
+        });
 
         return c.json<RESTSuccessResponse<Record<string, unknown>>>({
           data: { agentId, role, admin, ttlMs, expiresAt, quotaBytes, quotaCount },
@@ -1554,28 +1460,22 @@ export class RESTPingMemServer {
           try {
             validatedAgentId = createAgentId(agentId);
           } catch (err) {
-            if (err instanceof Error && err.message.startsWith("Invalid agent ID")) {
+            if (err instanceof Error && err.message.includes("Invalid agent ID")) {
               return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
             }
             throw err;
           }
-          // Exclude admin column — same policy as the list endpoint to prevent
-          // privilege-level reconnaissance via per-agent lookup.
           const row = db.prepare(
-            "SELECT agent_id, role, ttl_ms, quota_bytes, quota_count, expires_at, created_at, updated_at FROM agent_quotas WHERE agent_id = $agent_id"
+            "SELECT * FROM agent_quotas WHERE agent_id = $agent_id"
           ).get({ $agent_id: validatedAgentId }) as Record<string, unknown> | undefined;
 
           if (!row) {
-            return c.json<RESTErrorResponse>({ error: "Not Found", message: "Agent not found" }, 404);
+            return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${agentId}' not found` }, 404);
           }
           return c.json<RESTSuccessResponse<Record<string, unknown>>>({ data: row });
         }
 
-        // Exclude the admin column from the list response — it indicates privilege level
-        // and is reconnaissance-enabling to authenticated callers who share an API key.
-        const rows = db.prepare(
-          "SELECT agent_id, role, ttl_ms, quota_bytes, quota_count, expires_at, created_at, updated_at FROM agent_quotas ORDER BY updated_at DESC LIMIT 200"
-        ).all();
+        const rows = db.prepare("SELECT * FROM agent_quotas ORDER BY updated_at DESC").all();
         return c.json<RESTSuccessResponse<{ agents: unknown[] }>>({ data: { agents: rows } });
       } catch (error) {
         return this.handleError(c, error);
@@ -1592,7 +1492,7 @@ export class RESTPingMemServer {
         try {
           agentId = createAgentId(rawId);
         } catch (err) {
-          if (err instanceof Error && err.message.startsWith("Invalid agent ID")) {
+          if (err instanceof Error && err.message.includes("Invalid agent ID")) {
             return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid agentId format" }, 400);
           }
           throw err;
@@ -1607,7 +1507,7 @@ export class RESTPingMemServer {
         const { lockResult, quotaResult } = deleteResult;
 
         if (quotaResult.changes === 0) {
-          return c.json<RESTErrorResponse>({ error: "Not Found", message: "Agent not found" }, 404);
+          return c.json<RESTErrorResponse>({ error: "Not Found", message: `Agent '${rawId}' not found` }, 404);
         }
 
         return c.json<RESTSuccessResponse<Record<string, unknown>>>({
@@ -1623,33 +1523,19 @@ export class RESTPingMemServer {
     // ============================================================================
 
     this.app.get("/api/v1/events/stream", async (c) => {
-      // SSE responses are returned via raw ReadableStream which bypasses the global auth middleware
-      // pipeline on some runtimes. Apply an explicit auth gate here so the stream is never
-      // accessible without credentials when auth is configured.
-      // Uses isAuthRequired() — same policy as the global middleware.
-      if (this.isAuthRequired() && !this.validateApiKey(this.extractApiKey(c))) {
-        return c.json<RESTErrorResponse>({ error: "Unauthorized", message: "Valid API key required" }, 401);
-      }
-
-      const rawChannel = c.req.query("channel");
+      const channel = c.req.query("channel");
       const category = c.req.query("category");
       const agentId = c.req.query("agentId");
-      if ((rawChannel && rawChannel.length > 200) || (category && category.length > 200)) {
-        return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Filter parameter exceeds maximum length" }, 400);
-      }
-      // Validate category against the known set to prevent arbitrary strings in subscription filters.
-      if (category && !RESTPingMemServer.VALID_CATEGORIES.has(category)) {
-        return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid category: must be task, decision, progress, note, error, or warning" }, 400);
-      }
-      // Strip control characters and BiDi overrides from channel: user-defined so an
-      // allowlist isn't possible, but these chars must not reach subscription map keys or log lines.
-      const channel = rawChannel ? rawChannel.replace(/[\x00-\x1f\x7f\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "") : undefined;
 
       // Validate agentId exists and is not expired if provided
       if (agentId) {
         try {
           const validId = createAgentId(agentId);
-          if (!this.eventStore.isAgentActive(validId)) {
+          const db = this.eventStore.getDatabase();
+          const row = db.prepare(
+            "SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
+          ).get({ $agent_id: validId, $now: new Date().toISOString() });
+          if (!row) {
             return c.json<RESTErrorResponse>({ error: "Forbidden", message: "Agent not registered or expired" }, 403);
           }
         } catch {
@@ -1657,37 +1543,12 @@ export class RESTPingMemServer {
         }
       }
 
-      // Increment first, then check to prevent TOCTOU race under concurrent SSE requests.
-      const sseCount = ++this.sseConnectionCount;
-      if (sseCount > RESTPingMemServer.MAX_SSE_CONNECTIONS) {
-        this.sseConnectionCount--;
-        return c.json<RESTErrorResponse>(
-          { error: "Service Unavailable", message: "Too many SSE connections" },
-          503
-        );
-      }
-
-      // Track cleanup state shared between start() and cancel()
-      // Initialized to null so clearInterval is never called with a bogus 0 handle
-      // before start() assigns the real interval (e.g., on an early abort/cancel event).
-      let sseHeartbeat: ReturnType<typeof setInterval> | null = null;
-      let sseSubscriptionId = "";
-      let sseReleaseConnection: (() => void) | null = null;
-
       const stream = new ReadableStream({
         start: (controller) => {
           const encoder = new TextEncoder();
-          // Use a once-guard so any cleanup path (abort, error, stream cancel) only decrements once
-          let released = false;
-          const releaseConnection = (): void => {
-            if (!released) {
-              released = true;
-              this.sseConnectionCount = Math.max(0, this.sseConnectionCount - 1);
-            }
-          };
-          sseReleaseConnection = releaseConnection;
+          let heartbeat: ReturnType<typeof setInterval>;
 
-          sseSubscriptionId = this.pubsub.subscribe(
+          const subscriptionId = this.pubsub.subscribe(
             {
               ...(channel ? { channel } : {}),
               ...(category ? { category } : {}),
@@ -1698,74 +1559,48 @@ export class RESTPingMemServer {
                 controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
               } catch (err) {
                 // Stream closed — clean up subscription and heartbeat
-                this.pubsub?.unsubscribe(sseSubscriptionId);
-                if (sseHeartbeat !== null) clearInterval(sseHeartbeat);
-                releaseConnection();
+                this.pubsub?.unsubscribe(subscriptionId);
+                clearInterval(heartbeat);
                 if (err instanceof TypeError && /closed|errored/i.test(String(err.message))) return;
-                log.error("SSE failed to send event", { error: err instanceof Error ? err.message : String(err) });
+                console.error("[SSE] Failed to send event:", err instanceof Error ? err.message : String(err));
               }
             }
           );
 
           // Heartbeat every 30 seconds
-          sseHeartbeat = setInterval(() => {
+          heartbeat = setInterval(() => {
             try {
               controller.enqueue(encoder.encode(`: heartbeat\n\n`));
             } catch (err) {
-              if (sseHeartbeat !== null) clearInterval(sseHeartbeat);
-              this.pubsub?.unsubscribe(sseSubscriptionId);
-              releaseConnection();
+              clearInterval(heartbeat);
+              this.pubsub?.unsubscribe(subscriptionId);
               if (!(err instanceof TypeError && /closed|errored/i.test(String(err.message)))) {
-                log.error("SSE heartbeat error", { error: err instanceof Error ? err.message : String(err) });
+                console.error("[SSE] Heartbeat error:", err instanceof Error ? err.message : String(err));
               }
             }
           }, 30_000);
 
           // Clean up on abort
           c.req.raw.signal.addEventListener("abort", () => {
-            if (sseHeartbeat !== null) clearInterval(sseHeartbeat);
-            this.pubsub.unsubscribe(sseSubscriptionId);
-            releaseConnection();
+            clearInterval(heartbeat);
+            this.pubsub.unsubscribe(subscriptionId);
             try {
               controller.close();
             } catch (err) {
               // Stream already closed by client disconnect
               if (err instanceof Error && !/closed|errored/i.test(err.message)) {
-                log.error("SSE cleanup error", { error: err.message });
+                console.error("[SSE] Cleanup error:", err.message);
               }
             }
           });
         },
-        cancel: () => {
-          // Fires when consumer calls reader.cancel() or stream is otherwise cancelled
-          if (sseHeartbeat !== null) clearInterval(sseHeartbeat);
-          if (sseSubscriptionId) this.pubsub?.unsubscribe(sseSubscriptionId);
-          sseReleaseConnection?.();
-        },
       });
 
-      // This raw Response bypasses Hono's middleware pipeline so security headers
-      // must be added explicitly here (the middleware only runs after next()).
       return new Response(stream, {
         headers: {
           "Content-Type": "text/event-stream",
-          // no-store prevents caches from retaining per-user event stream data;
-          // no-cache additionally prevents conditional caching on reconnect.
-          "Cache-Control": "no-store, no-cache",
+          "Cache-Control": "no-cache",
           "Connection": "keep-alive",
-          "X-Accel-Buffering": "no",
-          "X-Content-Type-Options": "nosniff",
-          "X-Frame-Options": "DENY",
-          "Referrer-Policy": "strict-origin-when-cross-origin",
-          "Content-Security-Policy": "default-src 'none'",
-          "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
-          "Cross-Origin-Opener-Policy": "same-origin",
-          "Cross-Origin-Resource-Policy": "same-origin",
-          // HSTS: only set when behind a TLS-terminating reverse proxy to match
-          // the main middleware policy applied to all other response paths.
-          ...(process.env.PING_MEM_BEHIND_PROXY === "true"
-            ? { "Strict-Transport-Security": "max-age=63072000; includeSubDomains" }
-            : {}),
         },
       });
     });
@@ -1776,9 +1611,7 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/knowledge/search", async (c) => {
       try {
-        let raw: unknown;
-        try { raw = await c.req.json(); }
-        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+        const raw = await c.req.json();
         const parsed = KnowledgeSearchSchema.safeParse(raw);
         if (!parsed.success) {
           return c.json<RESTErrorResponse>(
@@ -1816,9 +1649,7 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/knowledge/ingest", async (c) => {
       try {
-        let raw: unknown;
-        try { raw = await c.req.json(); }
-        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+        const raw = await c.req.json();
         const parsed = KnowledgeIngestSchema.safeParse(raw);
         if (!parsed.success) {
           return c.json<RESTErrorResponse>(
@@ -2010,42 +1841,21 @@ export class RESTPingMemServer {
    */
   private handleError(c: Context<AppEnv>, error: unknown): Response {
     const statusCode = this.getStatusCode(error);
-    const rawMessage = error instanceof Error ? error.message : "Unknown error";
+    const message = error instanceof Error ? error.message : "Unknown error";
+    const isClientError = statusCode >= 400 && statusCode < 500;
 
-    // Truncate and sanitize log messages to prevent log injection from user-controlled
-    // input embedded in error messages (e.g., session IDs, memory keys, file paths).
-    // Strip all C0 control characters (null bytes, ANSI escapes, CR/LF, tabs, etc.)
-    const sanitizedMessage = rawMessage.replace(/[\x00-\x1f]/g, "?").slice(0, 200);
-
-    if (statusCode >= 500) {
+    if (!isClientError) {
       const requestId = crypto.randomUUID().slice(0, 8);
-      log.error("Request error", {
-        requestId,
-        method: c.req.method,
-        path: c.req.path.replace(/[\x00-\x1f]/g, "?").slice(0, 200),
-        error: sanitizedMessage,
-      });
+      console.error(`[REST Server] Error [${requestId}] ${c.req.method} ${c.req.path}:`, error);
       return c.json(
         { error: this.getErrorName(statusCode), message: `An internal error occurred (ref: ${requestId})` },
         statusCode as ContentfulStatusCode
       );
     }
 
-    // For 4xx: only return raw message for known domain error classes whose messages
-    // are safe to expose. All others get a generic message to prevent leaking internal
-    // details (SQL errors, file paths) from misclassified exceptions.
-    const isDomainError = error instanceof Error &&
-      RESTPingMemServer.DOMAIN_ERROR_NAMES.has(error.name);
-    // Sanitize domain-error messages too: strip control chars and truncate in case
-    // any domain error message ever embeds user-supplied input (path, key, etc.).
-    const safeMessage = isDomainError
-      ? rawMessage.replace(/[\x00-\x1f]/g, "?").slice(0, 200)
-      : this.getErrorName(statusCode);
-
-    // All 4xx reach this path (5xx returned early above with a requestId reference).
-    log.warn("Client error", { statusCode, message: sanitizedMessage });
+    console.error("[REST Server] Error:", message);
     return c.json(
-      { error: this.getErrorName(statusCode), message: safeMessage },
+      { error: this.getErrorName(statusCode), message },
       statusCode as ContentfulStatusCode
     );
   }
@@ -2055,31 +1865,30 @@ export class RESTPingMemServer {
    */
   private getStatusCode(error: unknown): number {
     if (error instanceof Error) {
-      // Use error.name for reliable mapping (explicitly set in each error constructor)
+      // Use error class name or code property for reliable mapping
       const name = error.name;
-      if (name === "MemoryKeyNotFoundError" || name === "MemoryNotFoundError" || name === "AgentNotRegisteredError" || name === "SessionNotFoundError") return 404;
+      if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError") return 404;
       if (name === "QuotaExhaustedError" || name === "WriteLockConflictError") return 409;
       if (name === "EvidenceGateRejectionError" || name === "ScopeViolationError") return 403;
       if (name === "MemoryKeyExistsError") return 409;
       if (name === "SchemaValidationError" || name === "InvalidSessionError") return 400;
-      if (name === "InvalidSessionStateError") return 409;
       // Check for known error codes
       const codeErr = error as { code?: string };
-      if (codeErr.code === "MEMORY_NOT_FOUND" || codeErr.code === "SESSION_NOT_FOUND") return 404;
+      if (codeErr.code === "MEMORY_NOT_FOUND") return 404;
       if (codeErr.code === "QUOTA_EXHAUSTED" || codeErr.code === "WRITE_LOCK_CONFLICT") return 409;
       if (codeErr.code === "MEMORY_EXISTS") return 409;
       if (codeErr.code === "INVALID_SESSION") return 400;
-      if (codeErr.code === "INVALID_SESSION_STATE") return 409;
       if (codeErr.code === "AGENT_EXPIRED") return 410;
-      // Fallback to message-based detection — only for known domain error names
-      if (RESTPingMemServer.DOMAIN_ERROR_NAMES.has(error.name)) {
-        const safeName = error.name.replace(/[\r\n\t]/g, "?").slice(0, 64);
+      // Fallback to message-based detection — only for known domain error types
+      const isDomainError = "code" in error ||
+        /Memory|Agent|Quota|Lock|Evidence|Schema|Scope/.test(error.constructor.name);
+      if (isDomainError) {
         if (error.message.includes("not found")) {
-          log.warn("getStatusCode: message-based 404", { errorName: safeName, message: error.message.slice(0, 80) });
+          console.warn(`[REST Server] getStatusCode: message-based 404 for '${error.name}': ${error.message.slice(0, 80)}`);
           return 404;
         }
         if (error.message.includes("invalid") || error.message.includes("required")) {
-          log.warn("getStatusCode: message-based 400", { errorName: safeName, message: error.message.slice(0, 80) });
+          console.warn(`[REST Server] getStatusCode: message-based 400 for '${error.name}': ${error.message.slice(0, 80)}`);
           return 400;
         }
       }
@@ -2102,30 +1911,6 @@ export class RESTPingMemServer {
       503: "Service Unavailable",
     };
     return names[statusCode] ?? "Error";
-  }
-
-  /**
-   * Extract session ID from X-Session-ID header, falling back to the single-client
-   * currentSessionId when no header is present.
-   *
-   * Header is checked FIRST so a caller that provides X-Session-ID always gets their
-   * own session, regardless of what another concurrent caller's session/start set.
-   * Concurrent callers MUST supply X-Session-ID to avoid session confusion.
-   */
-  private getSessionIdFromRequest(c: Context<AppEnv>): SessionId | null {
-    // Header takes precedence — validates UUID format to prevent map pollution.
-    // Normalized to lowercase so uppercase UUIDs from external clients don't create
-    // duplicate MemoryManager entries.
-    const header = c.req.header("x-session-id");
-    if (header) {
-      const normalizedHeader = header.toLowerCase();
-      if (RESTPingMemServer.UUID_RE.test(normalizedHeader)) {
-        return normalizedHeader as SessionId;
-      }
-    }
-    // Single-client convenience fallback: if no header is supplied, use the session
-    // from the most recent session/start call on this server instance.
-    return this.currentSessionId;
   }
 
   /**
@@ -2166,30 +1951,12 @@ export class RESTPingMemServer {
         config.agentId = createAgentId(meta.agentId);
       }
       if (meta?.agentRole && typeof meta.agentRole === "string") {
-        // Strip (not replace) control characters: replacing with '?' creates misleading
-        // strings like "admin?user" from "admin\x01user" that could match downstream comparisons.
-        config.agentRole = meta.agentRole.replace(/[\x00-\x1f]/g, "").slice(0, 200);
+        config.agentRole = meta.agentRole;
       }
     }
 
     const manager = new MemoryManager(config);
     await manager.hydrate();
-
-    // Evict oldest entries if map exceeds cap to prevent unbounded memory growth.
-    // Map iteration order is insertion order (V8/Bun), so .keys().next().value gives
-    // the insertion-oldest entry — an approximation of LRU that is correct unless a
-    // session was evicted and re-hydrated (which would re-insert it at the tail).
-    // True LRU would require a doubly-linked list; this approximation is sufficient
-    // for the expected workload of a few active sessions at a time.
-    if (this.memoryManagers.size >= MAX_MEMORY_MANAGERS) {
-      const oldest = this.memoryManagers.keys().next().value;
-      if (oldest) {
-        // Evict from both maps together so their sizes stay bounded in tandem.
-        this.memoryManagers.delete(oldest);
-        this.managerPromises.delete(oldest);
-      }
-    }
-
     this.memoryManagers.set(sessionId, manager);
     this.managerPromises.delete(sessionId);
     return manager;
@@ -2319,29 +2086,12 @@ export class RESTPingMemServer {
     if (this.pubsub) {
       this.pubsub.destroy();
     }
-    // HealthMonitor is stopped by the caller (server.ts shutdown) before stop() is invoked,
-    // since server.ts owns the healthMonitor lifecycle. Do not call stop() again here to
-    // avoid ownership confusion and redundant quiesce loops.
-    // Close SessionManager to clear checkpoint timers (must precede EventStore close)
-    await this.sessionManager.close();
-    // Clear cached memory managers (do NOT call manager.close() — they share this.vectorIndex
-    // and MemoryManager.close() would close it N times; we close it explicitly below)
+    // Close event store (SQLite)
+    await this.eventStore.close();
+    // Clear cached memory managers
     this.memoryManagers.clear();
     this.managerPromises.clear();
-    // Close shared VectorIndex once (holds an open SQLite connection)
-    if (this.vectorIndex) {
-      await this.vectorIndex.close();
-    }
-    // Close event store only if we own it (not injected externally — caller closes it)
-    if (this.ownsEventStore) {
-      await this.eventStore.close();
-    }
-    // Close diagnostics store only if we own it (not injected externally — caller closes it)
-    if (this.ownsDiagnosticsStore) {
-      this.diagnosticsStore.close();
-    }
-    // adminStore is externally owned (injected via config from server.ts) — caller closes it
-    log.info("Stopped");
+    console.log("[REST Server] Stopped");
   }
 
   /**

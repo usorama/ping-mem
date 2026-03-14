@@ -64,7 +64,6 @@ services:
       - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-ping-mem-vectors}
       - QDRANT_VECTOR_DIMENSIONS=${QDRANT_VECTOR_DIMENSIONS:-768}
       - NODE_ENV=production
-      - TRUST_PROXY=1
       # Multi-agent memory settings (v2)
       # PING_MEM_MAX_AGENTS: Maximum number of registered agents (default: 100)
       - PING_MEM_MAX_AGENTS=${PING_MEM_MAX_AGENTS:-100}
