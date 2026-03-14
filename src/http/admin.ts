@@ -119,23 +119,17 @@ export function checkAdminRateLimit(req: IncomingMessage, res: ServerResponse): 
     }
   }
 
-  // Enforce hard cap on rate limit map size.
-  // First pass: evict expired entries O(N) — common under an attack with many distinct IPs
-  // because expired windows make up the bulk of entries. Only fall back to the O(N log N) sort
-  // if the map is still over capacity after expiry cleanup (i.e., all entries are active).
+  // Enforce hard cap on rate limit map size. The unconditional expired eviction above
+  // (lines 116-120) handles the common case (IP churn). This fallback handles the rare
+  // case where all entries are still active (sustained attack with stable IPs):
+  // evict the soonest-to-expire batch down to 90% capacity to avoid thrashing per-request.
   if (adminRateLimitMap.size >= MAX_RATE_LIMIT_ENTRIES) {
-    for (const [key, entry] of adminRateLimitMap) {
-      if (now > entry.resetAt) {
-        adminRateLimitMap.delete(key);
-      }
-    }
-    if (adminRateLimitMap.size >= MAX_RATE_LIMIT_ENTRIES) {
-      const sortedEntries = Array.from(adminRateLimitMap.entries())
-        .sort(([, a], [, b]) => a.resetAt - b.resetAt);
-      const toEvict = sortedEntries.slice(0, Math.max(1, sortedEntries.length - MAX_RATE_LIMIT_ENTRIES + 1));
-      for (const [key] of toEvict) {
-        adminRateLimitMap.delete(key);
-      }
+    const sortedEntries = Array.from(adminRateLimitMap.entries())
+      .sort(([, a], [, b]) => a.resetAt - b.resetAt);
+    const target = Math.floor(MAX_RATE_LIMIT_ENTRIES * 0.9);
+    const toEvict = sortedEntries.slice(0, Math.max(1, sortedEntries.length - target));
+    for (const [key] of toEvict) {
+      adminRateLimitMap.delete(key);
     }
   }
 

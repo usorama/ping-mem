@@ -1,7 +1,7 @@
 {
   "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
   "rootPath": "/projects/ping-mem",
-  "treeHash": "e218866fd61c75c64ab5b011b9bae70a3af8ee6561f96e3309c83b0fc57cb4fc",
+  "treeHash": "bedd44a2d310e5fd91626147a63aaa215e8e31752769a62ddc9409975e64abf4",
   "files": [
     {
       "path": ".ai/implementation-reviews/wave-review-enhancements.md",
@@ -45,7 +45,7 @@
     },
     {
       "path": ".ping-mem/manifest.json",
-      "sha256": "d34980820fe2ce8f1a27b771b4944a1c3208a53918a87ad5d58dcdda6a6ad0cf",
+      "sha256": "5bb99c2bf4032bb186bd6f86ffd9423098d81065a5f5f7110890c1c0b7bb0f10",
       "bytes": 57401
     },
     {
@@ -270,8 +270,8 @@
     },
     {
       "path": "docs/plans/2026-03-09-code-structural-intelligence.md",
-      "sha256": "dc6ef658ba0176a509da18db57cc26fbbe85d7a163b4c19f0f280a02548d45b5",
-      "bytes": 62788
+      "sha256": "cbf12a2212f18e872b6b34af673e0c78280faac00c7463109fcb540866eae17d",
+      "bytes": 62790
     },
     {
       "path": "docs/plans/2026-03-09-deterministic-search-quality.md",
@@ -715,8 +715,8 @@
     },
     {
       "path": "src/graph/Neo4jClient.ts",
-      "sha256": "86064d84e9ce0f3216e9d6f9d54e413b045998930bd0df4cec81d0d2419fd5a3",
-      "bytes": 18602
+      "sha256": "2304c13bcca2e7981441acdeaa7b01d366dadaed323d8f35147e6107be6f3e17",
+      "bytes": 20158
     },
     {
       "path": "src/graph/RelationshipInferencer.ts",
@@ -825,8 +825,8 @@
     },
     {
       "path": "src/http/admin.ts",
-      "sha256": "0d9f4de2defcb9a85a07b9510b1c2342da4924291e51889642d107c93cc9d71f",
-      "bytes": 48475
+      "sha256": "52a62a12f0c15ff9a20d888419a75df6b84d8e55c71387725876b9a6cb442afe",
+      "bytes": 55329
     },
     {
       "path": "src/http/index.ts",
@@ -855,13 +855,13 @@
     },
     {
       "path": "src/http/rest-server.ts",
-      "sha256": "c3cb9ec3c40d88e3ebeaf2d5a15247a3d566d0a48409aa74435aa35a5dd92bf9",
-      "bytes": 79315
+      "sha256": "0fbf317f40d6c2f79bb544a22f69a549f328a18c039f9e0174dc5abef1c0685a",
+      "bytes": 93059
     },
     {
       "path": "src/http/server.ts",
-      "sha256": "919e39700bc7bb36e7947fd8997b47062ffc5eb0a6087e5843f13e961daf138e",
-      "bytes": 9225
+      "sha256": "eb4b88791cd5df3230bd8c32717fc5bbba5d0bfaab7810e4c21772a32696bcb7",
+      "bytes": 9631
     },
     {
       "path": "src/http/sse-server.ts",
@@ -1325,23 +1325,23 @@
     },
     {
       "path": "src/observability/HealthMonitor.ts",
-      "sha256": "87ebe9160fdfda4b4c768ba4e142657a973e64f9f924b664637c73229ade6775",
-      "bytes": 17031
+      "sha256": "a23f2208de5799510d6dc975c2c72116a77e85559d83602260de12996ff31244",
+      "bytes": 20167
     },
     {
       "path": "src/observability/__tests__/HealthMonitor.test.ts",
-      "sha256": "a4a1a360f891b139979a83540da765193924c5c78bf56f7f9a3ab87a3b416c0d",
-      "bytes": 25606
+      "sha256": "c127b606e6eb22a67cbd89f737fdceeed6990516d498869225b3b4f2a84146a4",
+      "bytes": 25558
     },
     {
       "path": "src/observability/__tests__/health-probes.test.ts",
-      "sha256": "6d788ee49f5f5a9f111c63acf707b731bb84586bdd3acda0dd9a40d4ca2f9e4d",
-      "bytes": 5513
+      "sha256": "20b234c2acc579dfe8c63116349272121596fc97be5a4025d51f5e909b78275d",
+      "bytes": 5933
     },
     {
       "path": "src/observability/health-probes.ts",
-      "sha256": "ed84fc8a1547c0ed95144334da771e9632b81d3e5f7bef9e439e82605ca113ab",
-      "bytes": 6800
+      "sha256": "4e9740eae35cc472b4c6cdcbd060687a6998f86bbc949d6d89937a5896a3d750",
+      "bytes": 9869
     },
     {
       "path": "src/profile/UserProfile.ts",
@@ -1525,8 +1525,8 @@
     },
     {
       "path": "src/storage/EventStore.ts",
-      "sha256": "95f8dcb9034aee363835ea725ce9d50198f7a1bff258d50747b4b4d02382fdb2",
-      "bytes": 25796
+      "sha256": "5c8230595cc5f16eaaf99b2fd1d3915e1dbcd2934e0cf1892bad3876f6b9a0d0",
+      "bytes": 34638
     },
     {
       "path": "src/storage/WriteLockManager.ts",
@@ -1575,8 +1575,8 @@
     },
     {
       "path": "src/util/CircuitBreaker.ts",
-      "sha256": "8b0778ece516a9e4eb4a959436ee47dc10c4f971c62c6981ea2a266b682f9a8f",
-      "bytes": 3067
+      "sha256": "4cb3df9e0070022eedc19a30ed470a1885beb5384d547aa6605e0615c83a1966",
+      "bytes": 3123
     },
     {
       "path": "src/util/__tests__/CircuitBreaker.test.ts",
@@ -1689,6 +1689,6 @@
       "bytes": 849
     }
   ],
-  "generatedAt": "2026-03-13T17:17:59.192Z",
+  "generatedAt": "2026-03-14T15:25:48.888Z",
   "schemaVersion": 1
 }

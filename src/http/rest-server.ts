@@ -1214,6 +1214,11 @@ export class RESTPingMemServer {
         // ever uses a LIKE expression for pattern matching. Capped at 1000 chars: the query
         // param itself is validated at 2000, but stripping metacharacters doesn't reduce length.
         const safeQuery = query.replace(/[*?[\]\\%_]/g, "").slice(0, 1000);
+        // An empty safeQuery after metacharacter stripping would produce keyPattern `**`,
+        // matching all stored memories — effectively a full data dump. Reject it explicitly.
+        if (safeQuery.length === 0) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Query must contain at least one non-metacharacter character" }, 400);
+        }
         const queryParams: Record<string, unknown> = { keyPattern: `*${safeQuery}*` };
 
         if (c.req.query("category")) {
@@ -1228,8 +1233,8 @@ export class RESTPingMemServer {
           if (rawChannel.length > 200) {
             return c.json<RESTErrorResponse>({ error: "Bad Request", message: "channel exceeds maximum length" }, 400);
           }
-          // Strip SQLite LIKE wildcards to prevent logic-bypass in downstream LIKE expressions.
-          queryParams.channel = rawChannel.replace(/[%_]/g, "");
+          // Strip control chars, BiDi overrides, and SQLite LIKE wildcards.
+          queryParams.channel = rawChannel.replace(/[\x00-\x1f\x7f\u061C\uFEFF\u202A-\u202E\u2066-\u2069%_]/g, "");
         }
         if (c.req.query("priority")) {
           const rawPriority = c.req.query("priority")!;
@@ -1444,45 +1449,55 @@ export class RESTPingMemServer {
 
         const db = this.eventStore.getDatabase();
 
-        // Garbage collect expired agents before counting (aligned with MCP handler)
-        db.prepare("DELETE FROM agent_quotas WHERE expires_at IS NOT NULL AND expires_at < $now").run({ $now: new Date().toISOString() });
-
-        // Enforce max-agents limit
-        const parsedMax = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10);
-        // Guard NaN and non-positive values: `|| 100` would not catch negative ints (truthy).
-        const maxAgents = !Number.isNaN(parsedMax) && parsedMax > 0 ? parsedMax : 100;
-        const countRow = db.prepare(
-          "SELECT COUNT(*) as cnt FROM agent_quotas"
-        ).get() as { cnt: number };
-        const existingRow = db.prepare("SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id").get({ $agent_id: agentId });
-        if (!existingRow && countRow.cnt >= maxAgents) {
-          return c.json<RESTErrorResponse>({ error: "Conflict", message: `Maximum agent registrations (${maxAgents}) reached` }, 409);
-        }
-
-        // Enforce metadata size limit
+        // Enforce metadata size limit before entering transaction
         const metadataStr = JSON.stringify(metadata ?? {});
         if (metadataStr.length > 10_000) {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "metadata exceeds 10KB size limit" }, 400);
         }
 
-        db.prepare(
-          `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
-           VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
-           ON CONFLICT(agent_id) DO UPDATE SET
-             role = $role, ttl_ms = $ttl_ms, expires_at = $expires_at,
-             updated_at = $updated_at, metadata = $metadata`
-        ).run({
-          $agent_id: agentId,
-          $role: role,
-          $admin: admin ? 1 : 0,
-          $ttl_ms: ttlMs,
-          $expires_at: expiresAt,
-          $quota_bytes: quotaBytes,
-          $quota_count: quotaCount,
-          $created_at: now,
-          $updated_at: now,
-          $metadata: metadataStr,
-        });
+        // Wrap GC + count check + insert in a single transaction to prevent
+        // concurrent registrations from exceeding maxAgents (TOCTOU race).
+        const parsedMax = parseInt(process.env.PING_MEM_MAX_AGENTS ?? "100", 10);
+        // Guard NaN and non-positive values: `|| 100` would not catch negative ints (truthy).
+        const maxAgents = !Number.isNaN(parsedMax) && parsedMax > 0 ? parsedMax : 100;
+        let limitExceeded = false;
+
+        db.transaction(() => {
+          // Garbage collect expired agents before counting (aligned with MCP handler)
+          db.prepare("DELETE FROM agent_quotas WHERE expires_at IS NOT NULL AND expires_at < $now").run({ $now: new Date().toISOString() });
+
+          const countRow = db.prepare(
+            "SELECT COUNT(*) as cnt FROM agent_quotas"
+          ).get() as { cnt: number };
+          const existingRow = db.prepare("SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id").get({ $agent_id: agentId });
+          if (!existingRow && countRow.cnt >= maxAgents) {
+            limitExceeded = true;
+            return;
+          }
+
+          db.prepare(
+            `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
+             VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
+             ON CONFLICT(agent_id) DO UPDATE SET
+               role = $role, ttl_ms = $ttl_ms, expires_at = $expires_at,
+               updated_at = $updated_at, metadata = $metadata`
+          ).run({
+            $agent_id: agentId,
+            $role: role,
+            $admin: admin ? 1 : 0,
+            $ttl_ms: ttlMs,
+            $expires_at: expiresAt,
+            $quota_bytes: quotaBytes,
+            $quota_count: quotaCount,
+            $created_at: now,
+            $updated_at: now,
+            $metadata: metadataStr,
+          });
+        })();
+
+        if (limitExceeded) {
+          return c.json<RESTErrorResponse>({ error: "Conflict", message: `Maximum agent registrations (${maxAgents}) reached` }, 409);
+        }
 
         return c.json<RESTSuccessResponse<Record<string, unknown>>>({
           data: { agentId, role, admin, ttlMs, expiresAt, quotaBytes, quotaCount },
@@ -1589,9 +1604,9 @@ export class RESTPingMemServer {
       if (category && !RESTPingMemServer.VALID_CATEGORIES.has(category)) {
         return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid category: must be task, decision, progress, note, error, or warning" }, 400);
       }
-      // Strip control characters from channel: it's user-defined so an allowlist isn't possible,
-      // but control chars must not reach subscription map keys or log lines.
-      const channel = rawChannel ? rawChannel.replace(/[\x00-\x1f\x7f]/g, "") : undefined;
+      // Strip control characters and BiDi overrides from channel: user-defined so an
+      // allowlist isn't possible, but these chars must not reach subscription map keys or log lines.
+      const channel = rawChannel ? rawChannel.replace(/[\x00-\x1f\x7f\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "") : undefined;
 
       // Validate agentId exists and is not expired if provided
       if (agentId) {
@@ -1875,9 +1890,12 @@ export class RESTPingMemServer {
    */
   private extractApiKey(c: Context<AppEnv>): string | undefined {
     const apiKey = c.req.header("x-api-key");
-    if (apiKey) return apiKey;
+    if (apiKey) return apiKey.length <= 512 ? apiKey : undefined;
     const authHeader = c.req.header("authorization");
-    if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.slice(7);
+      return token.length <= 512 ? token : undefined;
+    }
     return undefined;
   }
 

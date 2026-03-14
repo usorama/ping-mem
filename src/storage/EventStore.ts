@@ -164,7 +164,6 @@ export class EventStore {
   private stmtDeleteCheckpointItems: Statement;
   private stmtDeleteCheckpointsBySession: Statement;
   private stmtDeleteEventsBySession: Statement;
-  private stmtOrphanCheck: Statement;
   private stmtForeignKeyCheck: Statement;
   // Prepared statements for checkpoint item operations — hoisted for consistent hot-path performance
   private stmtInsertCheckpointItem: Statement;
@@ -172,6 +171,8 @@ export class EventStore {
   // Remaining hot-path statements — hoisted to avoid per-call SQL compilation overhead
   private stmtGetLastEventBySession: Statement;
   private stmtGetRecentEvents: Statement;
+  // ping() uses a hoisted statement to avoid per-call SQL compilation overhead
+  private stmtPing: Statement;
   private stmtListSessions: Statement;
   private stmtIsAgentActive: Statement;
   private stmtGetEventCount: Statement;
@@ -266,10 +267,12 @@ export class EventStore {
 
     // LIMIT 10000: prevents a full-table scan from loading unbounded rows into memory
     // when findSessionIdsByProjectDir() is called during project deletion.
+    // ORDER BY timestamp ASC: stable ordering for consistent project-dir filtering results.
     this.stmtListSessionStarts = this.db.prepare(`
       SELECT session_id, metadata
       FROM events
       WHERE event_type = 'SESSION_STARTED'
+      ORDER BY timestamp ASC
       LIMIT 10000
     `);
 
@@ -282,9 +285,6 @@ export class EventStore {
     );
     this.stmtDeleteEventsBySession = this.db.prepare(
       "DELETE FROM events WHERE session_id = $sessionId"
-    );
-    this.stmtOrphanCheck = this.db.prepare(
-      "SELECT COUNT(*) as orphans FROM checkpoints WHERE last_event_id NOT IN (SELECT event_id FROM events)"
     );
     this.stmtForeignKeyCheck = this.db.prepare("PRAGMA foreign_keys");
     this.stmtInsertCheckpointItem = this.db.prepare(
@@ -312,6 +312,8 @@ export class EventStore {
     this.stmtGetRecentEvents = this.db.prepare(
       "SELECT * FROM events ORDER BY timestamp DESC LIMIT $limit"
     );
+    // Hoisted so ping() avoids per-call SQL compilation overhead on the hot liveness path.
+    this.stmtPing = this.db.prepare("SELECT 1");
     this.stmtIsAgentActive = this.db.prepare(
       "SELECT 1 FROM agent_quotas WHERE agent_id = $agent_id AND (expires_at IS NULL OR expires_at >= $now)"
     );
@@ -714,9 +716,14 @@ export class EventStore {
         throw new Error("Foreign key constraints must be enabled for safe session deletion");
       }
 
-      // Count pre-existing orphans before deletion so the post-check is scoped to
-      // only orphans *created by this operation* (avoids false positives from prior bugs).
-      const preOrphans = (this.stmtOrphanCheck.get() as { orphans: number }).orphans;
+      // Collect the event IDs being deleted so the post-deletion orphan check is
+      // scoped to only these events — avoids false positives from pre-existing orphans.
+      const eventIds: string[] = [];
+      for (const sessionId of sessionIds) {
+        const rows = this.db.prepare("SELECT event_id FROM events WHERE session_id = ?")
+          .all(sessionId) as Array<{ event_id: string }>;
+        for (const row of rows) { eventIds.push(row.event_id); }
+      }
 
       for (const sessionId of sessionIds) {
         this.stmtDeleteCheckpointItems.run({ $sessionId: sessionId });
@@ -724,10 +731,18 @@ export class EventStore {
         this.stmtDeleteEventsBySession.run({ $sessionId: sessionId });
       }
 
-      // Verify referential integrity: only fail if THIS deletion created new orphans.
-      const postOrphans = (this.stmtOrphanCheck.get() as { orphans: number }).orphans;
-      if (postOrphans > preOrphans) {
-        throw new Error(`Session deletion created ${postOrphans - preOrphans} orphaned checkpoint references`);
+      // Scoped orphan check: verify no checkpoint (from any session) still references
+      // one of the now-deleted event IDs. Pre-existing global orphans are not flagged.
+      if (eventIds.length > 0) {
+        const placeholders = eventIds.map((_, i) => `$e${i}`).join(", ");
+        const params: Record<string, string> = {};
+        eventIds.forEach((id, i) => { params[`$e${i}`] = id; });
+        const orphans = (this.db.prepare(
+          `SELECT COUNT(*) as orphans FROM checkpoints WHERE last_event_id IN (${placeholders})`
+        ).get(params) as { orphans: number }).orphans;
+        if (orphans > 0) {
+          throw new Error(`Session deletion created ${orphans} orphaned checkpoint references`);
+        }
       }
     });
     deleteMany();
@@ -849,7 +864,7 @@ export class EventStore {
    */
   async ping(): Promise<boolean> {
     try {
-      this.db.prepare("SELECT 1").get();
+      this.stmtPing.get();
       return true;
     } catch (error) {
       log.warn("ping failed", { error: error instanceof Error ? error.message : String(error) });
