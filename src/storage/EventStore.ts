@@ -160,7 +160,12 @@ export class EventStore {
     if (this.config.dbPath !== ":memory:") {
       const dbDir = path.dirname(this.config.dbPath);
       if (!fs.existsSync(dbDir)) {
-        fs.mkdirSync(dbDir, { recursive: true });
+        try {
+          fs.mkdirSync(dbDir, { recursive: true });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new Error(`EventStore: cannot create database directory '${dbDir}': ${msg}`);
+        }
       }
     }
 
@@ -433,13 +438,25 @@ export class EventStore {
    * Convert database row to event
    */
   private rowToEvent(row: EventRow): Event {
+    let payload: unknown;
+    let metadata: unknown;
+    try {
+      payload = JSON.parse(row.payload);
+    } catch {
+      throw new Error(`EventStore: corrupted payload JSON for event ${row.event_id}`);
+    }
+    try {
+      metadata = JSON.parse(row.metadata);
+    } catch {
+      throw new Error(`EventStore: corrupted metadata JSON for event ${row.event_id}`);
+    }
     const event: Event = {
       eventId: row.event_id,
       timestamp: new Date(row.timestamp),
       sessionId: row.session_id,
       eventType: row.event_type as EventType,
-      payload: JSON.parse(row.payload),
-      metadata: JSON.parse(row.metadata),
+      payload: payload as Event["payload"],
+      metadata: metadata as Event["metadata"],
     };
     if (row.caused_by !== null) {
       event.causedBy = row.caused_by;
@@ -759,8 +776,13 @@ export class EventStore {
 
     let dbSize = 0;
     if (this.config.dbPath !== ":memory:") {
-      const stats = fs.statSync(this.config.dbPath);
-      dbSize = stats.size;
+      try {
+        const stats = fs.statSync(this.config.dbPath);
+        dbSize = stats.size;
+      } catch {
+        // File transiently inaccessible (e.g., being rotated or on a slow mount).
+        // Return 0 rather than propagating — callers (health monitor) should not crash.
+      }
     }
 
     return { eventCount, checkpointCount, dbSize };
@@ -855,6 +877,10 @@ export class EventStore {
       // the microtask runs will find closePromise already set and return the same promise.
       this.closePromise = Promise.resolve().then(() => {
         this.db.close();
+      }).catch((err: unknown) => {
+        // Clear the stuck promise so a retry is possible after a failed close attempt.
+        this.closePromise = undefined;
+        throw err;
       });
     }
     return this.closePromise;
@@ -871,9 +897,12 @@ export class EventStore {
   }
 
   /**
-   * Clear all data (for testing only)
+   * Clear all data (for testing only — in-memory databases only)
    */
   clear(): void {
+    if (this.config.dbPath !== ":memory:") {
+      throw new Error("EventStore.clear() is only permitted on in-memory databases");
+    }
     this.db.exec("DELETE FROM checkpoint_items");
     this.db.exec("DELETE FROM checkpoints");
     this.db.exec("DELETE FROM events");

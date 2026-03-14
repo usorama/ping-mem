@@ -954,6 +954,10 @@ function renderAdminPage(nonce: string): string {
       saveApiKey.addEventListener("click", () => {
         state.apiKey = apiKeyInput.value.trim();
         apiKeyStatus.textContent = state.apiKey ? "Saved (in-memory only)" : "Missing";
+        // Auto-load LLM config so the form shows current values rather than blanks.
+        if (state.apiKey) {
+          loadLLMConfig().catch((err) => console.error("loadLLMConfig failed:", err));
+        }
       });
     }
 
@@ -992,6 +996,7 @@ function renderAdminPage(nonce: string): string {
       const keys = await apiFetch("/api/admin/keys");
       const table = document.getElementById("keysTable");
       if (!table) { console.error("refreshKeys: missing DOM element keysTable"); return; }
+      if (!Array.isArray(keys)) { console.error("refreshKeys: unexpected response shape", keys); return; }
       table.textContent = "";
       keys.forEach((key) => {
         const row = document.createElement("tr");
@@ -1040,7 +1045,7 @@ function renderAdminPage(nonce: string): string {
       // Sync the in-memory API key so subsequent apiFetch calls (including refreshKeys)
       // use the new key instead of the now-deactivated old one.
       state.apiKey = result.key;
-      const apiKeyInput = document.getElementById("currentApiKey") as HTMLInputElement | null;
+      const apiKeyInput = /** @type {HTMLInputElement | null} */ (document.getElementById("currentApiKey"));
       if (apiKeyInput) apiKeyInput.value = result.key;
       value.textContent = result.key;
       box.style.display = "block";
@@ -1051,6 +1056,7 @@ function renderAdminPage(nonce: string): string {
       const projects = await apiFetch("/api/admin/projects");
       const table = document.getElementById("projectsTable");
       if (!table) { console.error("refreshProjects: missing DOM element projectsTable"); return; }
+      if (!Array.isArray(projects)) { console.error("refreshProjects: unexpected response shape", projects); return; }
       table.textContent = "";
       projects.forEach((project) => {
         const row = document.createElement("tr");
@@ -1136,12 +1142,16 @@ function renderAdminPage(nonce: string): string {
         baseUrl: baseUrlEl.value,
         apiKey: llmApiKeyEl.value,
       };
-      await apiFetch("/api/admin/llm-config", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      statusEl.textContent = "Saved";
-      llmApiKeyEl.value = "";
+      try {
+        await apiFetch("/api/admin/llm-config", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        statusEl.textContent = "Saved";
+        llmApiKeyEl.value = "";
+      } catch (err) {
+        statusEl.textContent = "Error: " + (err?.message ?? "Save failed");
+      }
     }
 
     // Wire up button event listeners with null-guards: if the HTML template ever changes

@@ -229,7 +229,8 @@ export class Neo4jClient {
     try {
       uriScheme = new URL(this.config.uri).protocol;
     } catch {
-      throw new Neo4jConnectionError(`NEO4J_URI is not a valid URL: ${this.config.uri}`);
+      // Do not include the raw URI in the error — it may contain embedded credentials.
+      throw new Neo4jConnectionError("NEO4J_URI is not a valid URL");
     }
     if (!ALLOWED_NEO4J_SCHEMES.has(uriScheme)) {
       throw new Neo4jConnectionError(
@@ -631,9 +632,10 @@ export function createNeo4jClientFromEnv(): Neo4jClient {
 
   const database = process.env["NEO4J_DATABASE"] ?? DEFAULT_DATABASE;
   const maxPoolSizeStr = process.env["NEO4J_MAX_POOL_SIZE"];
-  const maxConnectionPoolSize = maxPoolSizeStr
-    ? parseInt(maxPoolSizeStr, 10)
-    : DEFAULT_MAX_POOL_SIZE;
+  const parsedPoolSize = maxPoolSizeStr ? parseInt(maxPoolSizeStr, 10) : NaN;
+  // Guard NaN (non-numeric env var) and non-positive values — fall back to default.
+  const maxConnectionPoolSize =
+    !Number.isNaN(parsedPoolSize) && parsedPoolSize > 0 ? parsedPoolSize : DEFAULT_MAX_POOL_SIZE;
 
   return new Neo4jClient({
     uri,

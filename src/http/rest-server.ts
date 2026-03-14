@@ -317,12 +317,16 @@ export class RESTPingMemServer {
           skipIntegrityCheck: true,
         });
 
+        // comp.error was already sanitized at probe origin by sanitizeHealthError().
+        // Re-running sanitizeHealthError() here would double-sanitize: "connection refused"
+        // (already a safe friendly string) matches no keywords and becomes "service unavailable".
+        // Apply only a control-character strip as defense-in-depth.
         const sanitizedSnapshot = {
           ...snapshot,
           components: Object.fromEntries(
             Object.entries(snapshot.components).map(([key, comp]) => [
               key,
-              comp.error ? { ...comp, error: sanitizeHealthError(comp.error) } : comp,
+              comp.error ? { ...comp, error: comp.error.replace(/[\r\n\t\x00-\x1F\x7F]/g, "") } : comp,
             ])
           ),
         };
@@ -1593,12 +1597,21 @@ export class RESTPingMemServer {
         },
       });
 
+      // This raw Response bypasses Hono's middleware pipeline so security headers
+      // must be added explicitly here (the middleware only runs after next()).
       return new Response(stream, {
         headers: {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache",
           "Connection": "keep-alive",
           "X-Accel-Buffering": "no",
+          "X-Content-Type-Options": "nosniff",
+          "X-Frame-Options": "DENY",
+          "Referrer-Policy": "strict-origin-when-cross-origin",
+          "Content-Security-Policy": "default-src 'none'",
+          "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+          "Cross-Origin-Opener-Policy": "same-origin",
+          "Cross-Origin-Resource-Policy": "same-origin",
         },
       });
     });

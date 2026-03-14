@@ -107,6 +107,10 @@ export class HealthMonitor {
 
     this.stopping = false;
     this.consecutiveTickFailures = 0;
+    // Clear stale alert state from a previous run so a restart does not immediately
+    // escalate on leftover alerts or suppress new ones within the dedup window.
+    this.activeAlerts.clear();
+    this.lastAlerts.clear();
 
     this.fastTimer = setInterval(() => {
       this.tick().catch((err) => {
@@ -324,11 +328,11 @@ export class HealthMonitor {
               ? 0
               : Math.abs(pointCount - this.baselineQdrantCount) / this.baselineQdrantCount * 100;
 
-            // Ratchet baseline forward when drift is within the critical threshold.
-            // This allows legitimate large growth to be tracked without permanent alert floods.
-            if (driftPct <= 15) {
-              this.baselineQdrantCount = pointCount;
-            }
+            // Always ratchet baseline to current count so a large legitimate ingest
+            // does not permanently lock the alert (the alert fires once per tick while
+            // drift is high, then self-clears once the baseline catches up after the
+            // next successful tick regardless of drift magnitude).
+            this.baselineQdrantCount = pointCount;
             this.checkThresholds({
               source: "qdrant",
               metrics: [{ name: "point_count_drift_pct", value: driftPct, unit: "percent" }],
@@ -345,9 +349,9 @@ export class HealthMonitor {
         }
       }
 
-      if (probeSucceeded) {
-        this.lastQualityTickAt = new Date().toISOString();
-      }
+      // Update lastQualityTickAt whenever at least one probe ran (not only on success)
+      // so SQLite-only deployments (where neo4j/qdrant are null) still show tick activity.
+      this.lastQualityTickAt = new Date().toISOString();
     } finally {
       this.qualityTickRunning = false;
     }
