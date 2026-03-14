@@ -269,7 +269,7 @@ export class Neo4jClient {
           : undefined;
 
       throw new Neo4jConnectionError(
-        `Failed to connect to Neo4j: ${errorMessage}`,
+        "Failed to connect to Neo4j — check NEO4J_URI and credentials",
         errorCode,
         error instanceof Error ? error : undefined
       );

@@ -1647,7 +1647,9 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/knowledge/search", async (c) => {
       try {
-        const raw = await c.req.json();
+        let raw: unknown;
+        try { raw = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
         const parsed = KnowledgeSearchSchema.safeParse(raw);
         if (!parsed.success) {
           return c.json<RESTErrorResponse>(
@@ -1685,7 +1687,9 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/knowledge/ingest", async (c) => {
       try {
-        const raw = await c.req.json();
+        let raw: unknown;
+        try { raw = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
         const parsed = KnowledgeIngestSchema.safeParse(raw);
         if (!parsed.success) {
           return c.json<RESTErrorResponse>(
