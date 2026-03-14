@@ -437,9 +437,9 @@ export class HealthMonitor {
     }
 
     if (severity === "critical") {
-      log.error(`CRITICAL ${message}`, { key, source });
+      log.error(`CRITICAL ${safeMessage}`, { key, source });
       return;
     }
-    log.warn(`WARNING ${message}`, { key, source });
+    log.warn(`WARNING ${safeMessage}`, { key, source });
   }
 }

@@ -223,7 +223,9 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
   let diagnostics: HealthComponent | undefined;
   if (deps.diagnosticsStore) {
     try {
-      deps.diagnosticsStore.listRuns({ limit: 1 });
+      // listRuns return value intentionally discarded — we only need the call to succeed
+      // (throws on DB error) to confirm the diagnostics store is operational.
+      void deps.diagnosticsStore.listRuns({ limit: 1 });
       diagnostics = {
         status: "healthy",
         configured: true,

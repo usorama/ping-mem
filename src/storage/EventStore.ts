@@ -143,6 +143,11 @@ export class EventStore {
     busyTimeout: number;
   };
 
+  // UUID v7 monotonic counter — RFC 9562 §5.7 requires monotonic ordering when multiple
+  // IDs are generated within the same millisecond. Counter resets on each new ms tick.
+  private uuidLastMs = -1;
+  private uuidSeq = 0;
+
   // Prepared statements
   private stmtInsertEvent: Statement;
   private stmtGetEventById: Statement;
@@ -158,6 +163,9 @@ export class EventStore {
   private stmtDeleteEventsBySession: Statement;
   private stmtOrphanCheck: Statement;
   private stmtForeignKeyCheck: Statement;
+  // Prepared statements for checkpoint item operations — hoisted for consistent hot-path performance
+  private stmtInsertCheckpointItem: Statement;
+  private stmtGetCheckpointItems: Statement;
 
   constructor(config?: EventStoreConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config } as typeof this.config;
@@ -259,6 +267,12 @@ export class EventStore {
       "SELECT COUNT(*) as orphans FROM checkpoints WHERE last_event_id NOT IN (SELECT event_id FROM events)"
     );
     this.stmtForeignKeyCheck = this.db.prepare("PRAGMA foreign_keys");
+    this.stmtInsertCheckpointItem = this.db.prepare(
+      "INSERT INTO checkpoint_items (checkpoint_id, memory_key) VALUES (?, ?)"
+    );
+    this.stmtGetCheckpointItems = this.db.prepare(
+      "SELECT memory_key FROM checkpoint_items WHERE checkpoint_id = ?"
+    );
   }
 
   /**
@@ -416,27 +430,47 @@ export class EventStore {
   }
 
   /**
-   * Generate UUID v7 (time-sortable)
+   * Generate UUID v7 (time-sortable) with RFC 9562 §5.7 monotonic counter.
+   *
+   * Within the same millisecond tick the 12-bit sequence field increments so that
+   * IDs remain sortable even when multiple are generated in rapid succession.
+   * The sequence resets to 0 on each new millisecond tick.
    */
   private generateUUID(): string {
-    const timestamp = Date.now();
-    const timestampHex = timestamp.toString(16).padStart(12, "0");
+    let timestamp = Date.now();
 
-    const randomBytes = crypto.randomBytes(10);
+    if (timestamp === this.uuidLastMs) {
+      this.uuidSeq++;
+      // If sequence overflows 12 bits, advance the timestamp by 1 ms to guarantee uniqueness.
+      if (this.uuidSeq > 0xfff) {
+        timestamp++;
+        this.uuidLastMs = timestamp;
+        this.uuidSeq = 0;
+      }
+    } else {
+      this.uuidLastMs = timestamp;
+      this.uuidSeq = 0;
+    }
+
+    const timestampHex = timestamp.toString(16).padStart(12, "0");
+    const seqHex = this.uuidSeq.toString(16).padStart(3, "0");
+
+    const randomBytes = crypto.randomBytes(8);
     const randomHex = randomBytes.toString("hex");
 
-    // UUID v7 format: tttttttt-tttt-7xxx-yxxx-xxxxxxxxxxxx
+    // UUID v7 format: tttttttt-tttt-7sss-yxxx-xxxxxxxxxxxx
+    // Where sss = 12-bit monotonic sequence for sub-ms ordering
     const uuid =
       timestampHex.slice(0, 8) +
       "-" +
       timestampHex.slice(8, 12) +
       "-7" +
-      randomHex.slice(0, 3) +
+      seqHex +
       "-" +
-      ((parseInt(randomHex.slice(3, 4), 16) & 0x3) | 0x8).toString(16) +
-      randomHex.slice(4, 7) +
+      ((parseInt(randomHex.slice(0, 1), 16) & 0x3) | 0x8).toString(16) +
+      randomHex.slice(1, 4) +
       "-" +
-      randomHex.slice(7, 19);
+      randomHex.slice(4, 16);
 
     return uuid;
   }
@@ -701,11 +735,8 @@ export class EventStore {
 
       // Insert checkpoint items if provided
       if (memoryKeys && memoryKeys.length > 0) {
-        const insertItemStmt = this.db.prepare(
-          "INSERT INTO checkpoint_items (checkpoint_id, memory_key) VALUES (?, ?)"
-        );
         for (const memoryKey of memoryKeys) {
-          insertItemStmt.run(checkpoint.checkpointId, memoryKey);
+          this.stmtInsertCheckpointItem.run(checkpoint.checkpointId, memoryKey);
         }
       }
     });
@@ -736,10 +767,7 @@ export class EventStore {
    * Get memory keys associated with a checkpoint
    */
   async getCheckpointItems(checkpointId: string): Promise<string[]> {
-    const stmt = this.db.prepare(
-      "SELECT memory_key FROM checkpoint_items WHERE checkpoint_id = ?"
-    );
-    const rows = stmt.all(checkpointId) as Array<{ memory_key: string }>;
+    const rows = this.stmtGetCheckpointItems.all(checkpointId) as Array<{ memory_key: string }>;
     return rows.map((row) => row.memory_key);
   }
 

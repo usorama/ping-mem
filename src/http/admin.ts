@@ -79,7 +79,8 @@ function getRemoteIp(req: IncomingMessage): string {
         // If it contains replacement '?' chars it was not a valid IP — fall through to
         // socket address to prevent crafted XFF values from colliding with legitimate
         // IP keys in the rate-limit and auth-failure maps.
-        const isValidIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(sanitized);
+        // Strict IPv4: each octet must be 0-255 (rejects "999.0.0.1" etc.)
+        const isValidIpv4 = /^((?:\d|[1-9]\d|1\d{2}|2[0-4]\d|25[0-5])\.){3}(?:\d|[1-9]\d|1\d{2}|2[0-4]\d|25[0-5])$/.test(sanitized);
         const isValidIpv6 = /^[0-9a-fA-F:]+$/.test(sanitized) && sanitized.includes(":");
         const isValidBracketedIpv6 = /^\[[0-9a-fA-F:]+\]$/.test(sanitized);
         if (isValidIpv4 || isValidIpv6 || isValidBracketedIpv6) return sanitized;
@@ -1045,7 +1046,7 @@ function renderAdminPage(nonce: string): string {
               body: JSON.stringify({ id: key.id }),
             }).then(() => refreshKeys()).catch((err) => {
               console.error("Deactivate key failed:", err);
-              if (statusEl) statusEl.textContent = "Error: " + (err?.message ?? "Deactivate failed");
+              if (statusEl) statusEl.textContent = "Error: " + ((err?.message ?? "Deactivate failed") + "").replace(/[\x00-\x1f]/g, "").slice(0, 200);
             });
           });
           actionTd.appendChild(btn);
@@ -1108,8 +1109,9 @@ function renderAdminPage(nonce: string): string {
             body: JSON.stringify({ projectDir: project.projectDir }),
           }).then((result) => {
             // Surface partial-cleanup warnings (HTTP 207) to the operator before refreshing.
-            const warns = result && result.data && Array.isArray(result.data.warnings)
-              ? result.data.warnings
+            // apiFetch() returns json.data (unwrapped), so result IS the data object.
+            const warns = result && Array.isArray(result.warnings)
+              ? result.warnings
               : null;
             if (Array.isArray(warns) && warns.length > 0 && statusNote) {
               const warnEl = document.createElement("span");
@@ -1124,7 +1126,7 @@ function renderAdminPage(nonce: string): string {
             if (statusNote) {
               const errEl = document.createElement("span");
               errEl.className = "error";
-              errEl.textContent = " Error: " + (err?.message ?? "Delete failed");
+              errEl.textContent = " Error: " + ((err?.message ?? "Delete failed") + "").replace(/[\x00-\x1f]/g, "").slice(0, 200);
               statusNote.appendChild(errEl);
               setTimeout(() => errEl.remove(), 5000);
             }
@@ -1179,7 +1181,7 @@ function renderAdminPage(nonce: string): string {
         statusEl.textContent = "Saved";
         llmApiKeyEl.value = "";
       } catch (err) {
-        statusEl.textContent = "Error: " + (err?.message ?? "Save failed");
+        statusEl.textContent = "Error: " + ((err?.message ?? "Save failed") + "").replace(/[\x00-\x1f]/g, "").slice(0, 200);
       }
     }
 
