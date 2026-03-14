@@ -38,9 +38,13 @@ export interface HealthProbeDeps {
 }
 
 export function sanitizeHealthError(error: unknown): string {
-  const msg = error instanceof Error ? error.message : String(error);
+  const raw = error instanceof Error ? error.message : String(error);
+  // Strip control characters before keyword matching (log injection defence).
+  const msg = raw.replace(/[\r\n\t\x00-\x1F\x7F]/g, "");
   const lower = msg.toLowerCase();
   if (lower.includes("econnrefused")) return "connection refused";
+  if (lower.includes("enotfound") || lower.includes("eai_again")) return "hostname not found";
+  if (lower.includes("ehostunreach") || lower.includes("enetunreach")) return "host unreachable";
   if (lower.includes("etimedout") || lower.includes("timeout")) return "connection timeout";
   if (lower.includes("econnreset")) return "connection reset";
   if (lower.includes("auth") || lower.includes("credentials") || lower.includes("unauthorized")) return "authentication failed";

@@ -586,20 +586,23 @@ export class EventStore {
         throw new Error("Foreign key constraints must be enabled for safe session deletion");
       }
 
+      // Count pre-existing orphans before deletion so the post-check is scoped to
+      // only orphans *created by this operation* (avoids false positives from prior bugs).
+      const stmtOrphans = this.db.prepare(
+        "SELECT COUNT(*) as orphans FROM checkpoints WHERE last_event_id NOT IN (SELECT event_id FROM events)"
+      );
+      const preOrphans = (stmtOrphans.get() as { orphans: number }).orphans;
+
       for (const sessionId of sessionIds) {
-        const checkpointItemsResult = stmtCheckpointItems.run({ $sessionId: sessionId });
-        const checkpointResult = stmtCheckpoint.run({ $sessionId: sessionId });
-        const eventResult = stmtEvent.run({ $sessionId: sessionId });
+        stmtCheckpointItems.run({ $sessionId: sessionId });
+        stmtCheckpoint.run({ $sessionId: sessionId });
+        stmtEvent.run({ $sessionId: sessionId });
       }
 
-      // Verify referential integrity after all deletions (SQLite changes are never negative, so check for orphans instead)
-      const orphanCheck = this.db.prepare(`
-        SELECT COUNT(*) as orphans FROM checkpoints
-        WHERE last_event_id NOT IN (SELECT event_id FROM events)
-      `).get() as { orphans: number };
-
-      if (orphanCheck.orphans > 0) {
-        throw new Error(`Session deletion created ${orphanCheck.orphans} orphaned checkpoint references`);
+      // Verify referential integrity: only fail if THIS deletion created new orphans.
+      const postOrphans = (stmtOrphans.get() as { orphans: number }).orphans;
+      if (postOrphans > preOrphans) {
+        throw new Error(`Session deletion created ${postOrphans - preOrphans} orphaned checkpoint references`);
       }
     });
     deleteMany();

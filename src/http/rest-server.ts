@@ -225,6 +225,9 @@ export class RESTPingMemServer {
         "Content-Security-Policy",
         `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
       );
+      c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+      c.header("Cross-Origin-Opener-Policy", "same-origin");
+      c.header("Cross-Origin-Resource-Policy", "same-origin");
       if (process.env["PING_MEM_BEHIND_PROXY"] === "true") {
         c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
       }
@@ -327,11 +330,14 @@ export class RESTPingMemServer {
         const sanitizedMonitor = monitorStatus ? {
           ...monitorStatus,
           lastSnapshot: monitorStatus.lastSnapshot ? sanitizedSnapshot : null,
-          // Alert messages may contain raw error text from probes (hostnames, auth details).
-          // Apply sanitizeHealthError to the dynamic portion of every alert message.
+          // Alert messages are system-composed (metric names, numbers, static text) and do not
+          // contain raw external error text. Apply light sanitization: strip control characters
+          // (log-injection defence) and redact IPv4 addresses that may appear in metric values.
           activeAlerts: monitorStatus.activeAlerts.map((alert) => ({
             ...alert,
-            message: sanitizeHealthError(alert.message),
+            message: alert.message
+              .replace(/[\r\n\t\x00-\x1F\x7F]/g, "")
+              .replace(/\b\d{1,3}(\.\d{1,3}){3}\b/g, "[redacted]"),
           })),
         } : null;
 

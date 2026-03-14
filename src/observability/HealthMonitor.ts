@@ -231,6 +231,7 @@ export class HealthMonitor {
           // PASSIVE mode never blocks writers - SQLite WAL checkpoint is atomic
           this.deps.eventStore.walCheckpoint("PASSIVE");
           this.activeAlerts.delete("sqlite:wal_checkpoint_failed");
+          this.lastAlerts.delete("sqlite:wal_checkpoint_failed");
         }
       } catch (error) {
         const lastWalSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
@@ -273,7 +274,7 @@ export class HealthMonitor {
       if (this.stopping) return;
 
       const neo4jClient = this.deps.services.neo4jClient;
-      if (neo4jClient && (neo4jClient.isConnected() || neo4jClient.getCircuitState() === "half-open")) {
+      if (neo4jClient && neo4jClient.isConnected() && neo4jClient.getCircuitState() !== "open") {
         try {
           const nullRows = await neo4jClient.executeQuery<{ cnt: number | string }>(QUALITY_QUERIES.nullProperties);
           const nullNodeCount = nullRows.reduce((sum, row) => {

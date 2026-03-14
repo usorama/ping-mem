@@ -338,6 +338,9 @@ export async function handleAdminRequest(
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+      "Cross-Origin-Opener-Policy": "same-origin",
+      "Cross-Origin-Resource-Policy": "same-origin",
       // HSTS is only meaningful over HTTPS. Only send it in production (behind a TLS proxy).
       // Sending HSTS over plain HTTP causes browsers to refuse future plain-HTTP connections,
       // which would break local development.
@@ -886,7 +889,7 @@ function renderAdminPage(nonce: string): string {
     </section>
 
     <section class="card">
-      <h2>Projects</h2>
+      <h2 id="projects-heading">Projects</h2>
       <div class="row">
         <button id="refreshProjects" class="ghost">Refresh Projects</button>
         <span class="note">Delete removes memories, sessions, diagnostics, graph, and vectors for the project.</span>
@@ -1065,7 +1068,7 @@ function renderAdminPage(nonce: string): string {
           if (!confirm("Delete all memory, graph, and diagnostics for this project?")) {
             return;
           }
-          const statusNote = document.querySelector(".card h2");
+          const statusNote = document.getElementById("projects-heading");
           apiFetch("/api/admin/projects", {
             method: "DELETE",
             body: JSON.stringify({ projectDir: project.projectDir }),

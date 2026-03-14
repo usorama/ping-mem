@@ -149,7 +149,6 @@ const DEFAULT_TX_RETRY_TIME = 30000;
 export class Neo4jClient {
   private driver: Driver | null = null;
   private readonly config: ResolvedConfig;
-  private connected = false;
   private readonly servicePolicy: ServicePolicy;
   private readonly writePolicy: ServicePolicy;
 
@@ -220,6 +219,24 @@ export class Neo4jClient {
       return;
     }
 
+    // Validate URI scheme to prevent SSRF credential exfiltration: the driver sends
+    // credentials during the handshake, so an attacker-controlled URI would receive them.
+    const ALLOWED_NEO4J_SCHEMES = new Set([
+      "bolt:", "bolt+s:", "bolt+ssc:",
+      "neo4j:", "neo4j+s:", "neo4j+ssc:",
+    ]);
+    let uriScheme: string;
+    try {
+      uriScheme = new URL(this.config.uri).protocol;
+    } catch {
+      throw new Neo4jConnectionError(`NEO4J_URI is not a valid URL: ${this.config.uri}`);
+    }
+    if (!ALLOWED_NEO4J_SCHEMES.has(uriScheme)) {
+      throw new Neo4jConnectionError(
+        `NEO4J_URI scheme '${uriScheme}' is not allowed. Use bolt:// or neo4j://`
+      );
+    }
+
     try {
       const driverConfig: Record<string, unknown> = {
         maxConnectionPoolSize: this.config.maxConnectionPoolSize,
@@ -240,10 +257,8 @@ export class Neo4jClient {
 
       // Verify connectivity
       await this.driver.verifyConnectivity();
-      this.connected = true;
     } catch (error) {
       this.driver = null;
-      this.connected = false;
 
       const errorMessage =
         error instanceof Error ? error.message : String(error);
@@ -267,7 +282,6 @@ export class Neo4jClient {
     if (this.driver !== null) {
       await this.driver.close();
       this.driver = null;
-      this.connected = false;
     }
   }
 
@@ -495,8 +509,6 @@ export class Neo4jClient {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       log.warn("Neo4j ping failed", { error: msg });
-      // Let the circuit breaker manage connected state via its onStateChange handler.
-      // Setting this.connected = false here would desync from the breaker's state.
       return false;
     }
   }
