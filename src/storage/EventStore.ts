@@ -164,6 +164,7 @@ export class EventStore {
   private stmtDeleteCheckpointItems: Statement;
   private stmtDeleteCheckpointsBySession: Statement;
   private stmtDeleteEventsBySession: Statement;
+  private stmtGetEventIdsBySession: Statement;
   private stmtForeignKeyCheck: Statement;
   // Prepared statements for checkpoint item operations — hoisted for consistent hot-path performance
   private stmtInsertCheckpointItem: Statement;
@@ -285,6 +286,9 @@ export class EventStore {
     );
     this.stmtDeleteEventsBySession = this.db.prepare(
       "DELETE FROM events WHERE session_id = $sessionId"
+    );
+    this.stmtGetEventIdsBySession = this.db.prepare(
+      "SELECT event_id FROM events WHERE session_id = ?"
     );
     this.stmtForeignKeyCheck = this.db.prepare("PRAGMA foreign_keys");
     this.stmtInsertCheckpointItem = this.db.prepare(
@@ -716,12 +720,10 @@ export class EventStore {
         throw new Error("Foreign key constraints must be enabled for safe session deletion");
       }
 
-      // Collect the event IDs being deleted so the post-deletion orphan check is
-      // scoped to only these events — avoids false positives from pre-existing orphans.
+      // Collect event IDs before deletion for the post-delete integrity check.
       const eventIds: string[] = [];
       for (const sessionId of sessionIds) {
-        const rows = this.db.prepare("SELECT event_id FROM events WHERE session_id = ?")
-          .all(sessionId) as Array<{ event_id: string }>;
+        const rows = this.stmtGetEventIdsBySession.all(sessionId) as Array<{ event_id: string }>;
         for (const row of rows) { eventIds.push(row.event_id); }
       }
 
@@ -731,8 +733,10 @@ export class EventStore {
         this.stmtDeleteEventsBySession.run({ $sessionId: sessionId });
       }
 
-      // Scoped orphan check: verify no checkpoint (from any session) still references
-      // one of the now-deleted event IDs. Pre-existing global orphans are not flagged.
+      // Safety-net orphan check: by design, last_event_id only references same-session
+      // events, so this check should always return 0 after correctly deleting both
+      // checkpoints and events for the target sessions. It guards against future schema
+      // changes that might introduce cross-session checkpoint references.
       if (eventIds.length > 0) {
         const placeholders = eventIds.map((_, i) => `$e${i}`).join(", ");
         const params: Record<string, string> = {};

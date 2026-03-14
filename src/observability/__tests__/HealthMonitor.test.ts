@@ -52,7 +52,6 @@ describe("HealthMonitor", () => {
 
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [
         { name: "wal_size_bytes", value: 60_000_000, unit: "bytes" },
         { name: "integrity_ok", value: 0, unit: "boolean" },
@@ -70,7 +69,6 @@ describe("HealthMonitor", () => {
 
     const result: ProbeResult = {
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "wal_size_bytes", value: 60_000_000, unit: "bytes" }],
     };
 
@@ -90,7 +88,6 @@ describe("HealthMonitor", () => {
     // Fire alert
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "wal_size_bytes", value: 60_000_000, unit: "bytes" }],
     });
     expect(monitor.getStatus().activeAlerts.length).toBe(1);
@@ -98,7 +95,6 @@ describe("HealthMonitor", () => {
     // Resolve alert (value back to normal)
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "wal_size_bytes", value: 10_000_000, unit: "bytes" }],
     });
     expect(monitor.getStatus().activeAlerts.length).toBe(0);
@@ -107,7 +103,6 @@ describe("HealthMonitor", () => {
     // Re-fire should work immediately (no dedup window blocking)
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "wal_size_bytes", value: 60_000_000, unit: "bytes" }],
     });
     expect(monitor.getStatus().activeAlerts.length).toBe(1);
@@ -119,7 +114,6 @@ describe("HealthMonitor", () => {
 
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "wal_size_bytes", value: 250_000_000, unit: "bytes" }],
     });
 
@@ -133,7 +127,6 @@ describe("HealthMonitor", () => {
 
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "integrity_ok", value: 0, unit: "boolean" }],
     });
 
@@ -167,7 +160,6 @@ describe("HealthMonitor", () => {
 
     internals.checkThresholds({
       source: "neo4j",
-      status: "healthy",
       metrics: [
         { name: "null_node_count", value: 200, unit: "count" },
         { name: "orphan_node_count", value: 600, unit: "count" },
@@ -188,7 +180,6 @@ describe("HealthMonitor", () => {
     // warnAbove is now 15 (aligned with ratchet threshold) — use a value above it
     internals.checkThresholds({
       source: "qdrant",
-      status: "healthy",
       metrics: [{ name: "point_count_drift_pct", value: 20, unit: "ratio" }],
     });
 
@@ -203,7 +194,6 @@ describe("HealthMonitor", () => {
     // Fire two alerts at slightly different times
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "wal_size_bytes", value: 60_000_000, unit: "bytes" }],
     });
 
@@ -212,7 +202,6 @@ describe("HealthMonitor", () => {
 
     internals.checkThresholds({
       source: "sqlite",
-      status: "unhealthy",
       metrics: [{ name: "integrity_ok", value: 0, unit: "boolean" }],
     });
 
@@ -230,7 +219,6 @@ describe("HealthMonitor", () => {
 
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "unknown_metric", value: 9999, unit: "count" }],
     });
 
@@ -244,7 +232,6 @@ describe("HealthMonitor", () => {
     // Fire warning alert
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "wal_size_bytes", value: 60_000_000, unit: "bytes" }],
     });
 
@@ -254,7 +241,6 @@ describe("HealthMonitor", () => {
     // Escalate to critical within same dedup window — should bypass
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "wal_size_bytes", value: 250_000_000, unit: "bytes" }],
     });
 
@@ -269,7 +255,6 @@ describe("HealthMonitor", () => {
     // Fire warning alert
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "wal_size_bytes", value: 60_000_000, unit: "bytes" }],
     });
 
@@ -280,7 +265,6 @@ describe("HealthMonitor", () => {
     // Same severity within dedup window — should be suppressed (timestamp unchanged)
     internals.checkThresholds({
       source: "sqlite",
-      status: "healthy",
       metrics: [{ name: "wal_size_bytes", value: 70_000_000, unit: "bytes" }],
     });
 
@@ -432,7 +416,6 @@ describe("HealthMonitor", () => {
     // Simulate 10% drift (within ratchet threshold)
     internals.checkThresholds({
       source: "qdrant",
-      status: "healthy",
       metrics: [{ name: "point_count_drift_pct", value: 10, unit: "percent" }],
     });
 
@@ -447,7 +430,6 @@ describe("HealthMonitor", () => {
 
     internals.checkThresholds({
       source: "qdrant",
-      status: "healthy",
       metrics: [{ name: "point_count_drift_pct", value: 35, unit: "percent" }],
     });
 
@@ -599,7 +581,6 @@ describe("HealthMonitor", () => {
     internals.lastAlerts.clear();
     internals.checkThresholds({
       source: "sqlite",
-      status: "unhealthy",
       metrics: [{ name: "integrity_ok", value: 0, unit: "boolean" }],
     });
 

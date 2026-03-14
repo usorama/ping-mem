@@ -1479,7 +1479,8 @@ export class RESTPingMemServer {
             `INSERT INTO agent_quotas (agent_id, role, admin, ttl_ms, expires_at, current_bytes, current_count, quota_bytes, quota_count, created_at, updated_at, metadata)
              VALUES ($agent_id, $role, $admin, $ttl_ms, $expires_at, 0, 0, $quota_bytes, $quota_count, $created_at, $updated_at, $metadata)
              ON CONFLICT(agent_id) DO UPDATE SET
-               role = $role, ttl_ms = $ttl_ms, expires_at = $expires_at,
+               role = $role, admin = $admin, ttl_ms = $ttl_ms, expires_at = $expires_at,
+               quota_bytes = $quota_bytes, quota_count = $quota_count,
                updated_at = $updated_at, metadata = $metadata`
           ).run({
             $agent_id: agentId,

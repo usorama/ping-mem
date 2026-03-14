@@ -1,7 +1,7 @@
 {
   "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
   "rootPath": "/projects/ping-mem",
-  "treeHash": "da22e4ee8763f23080dd0d50ad04fdbc20a39e13c4685567bcd0853aceee7ad8",
+  "treeHash": "079f0035670bc2dcfe72d2691946da20b133df420b614fb721c897d7660382ef",
   "files": [
     {
       "path": ".ai/implementation-reviews/wave-review-enhancements.md",
@@ -45,7 +45,7 @@
     },
     {
       "path": ".ping-mem/manifest.json",
-      "sha256": "a826477908e6392dabca9ee4ea5613cfa441f2720edea9e32475d0ccac1ef1ee",
+      "sha256": "584213eed51bf24e8642eb71a212e053b3b07e33a71b733a2d645e2e70a74d3d",
       "bytes": 57401
     },
     {
@@ -855,8 +855,8 @@
     },
     {
       "path": "src/http/rest-server.ts",
-      "sha256": "063983101afc943cb96aad9b21154dd1f473eb94d7f5aeae7b51dcafcfbd836e",
-      "bytes": 94004
+      "sha256": "c4537f4a4913c496d06838642e0650c689523925ad3849b3a35a3218cc50cc9a",
+      "bytes": 94187
     },
     {
       "path": "src/http/server.ts",
@@ -1325,8 +1325,8 @@
     },
     {
       "path": "src/observability/HealthMonitor.ts",
-      "sha256": "a23f2208de5799510d6dc975c2c72116a77e85559d83602260de12996ff31244",
-      "bytes": 20167
+      "sha256": "b23f4ce9b3f0c475bbb9da627c3da3ecdc680e684797eb39b4a03bab2c7af072",
+      "bytes": 20428
     },
     {
       "path": "src/observability/__tests__/HealthMonitor.test.ts",
@@ -1340,8 +1340,8 @@
     },
     {
       "path": "src/observability/health-probes.ts",
-      "sha256": "4e9740eae35cc472b4c6cdcbd060687a6998f86bbc949d6d89937a5896a3d750",
-      "bytes": 9869
+      "sha256": "7b63868b04948f83186560f5f70162886158e3f3d6042845a3432d140ee87ae6",
+      "bytes": 10363
     },
     {
       "path": "src/profile/UserProfile.ts",
@@ -1689,6 +1689,6 @@
       "bytes": 849
     }
   ],
-  "generatedAt": "2026-03-14T15:38:08.596Z",
+  "generatedAt": "2026-03-14T16:14:15.864Z",
   "schemaVersion": 1
 }

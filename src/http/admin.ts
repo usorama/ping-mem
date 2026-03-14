@@ -1081,7 +1081,7 @@ function renderAdminPage(nonce: string): string {
               body: JSON.stringify({ id: key.id }),
             }).then(() => refreshKeys()).catch((err) => {
               console.error("Deactivate key failed:", err);
-              if (statusEl) statusEl.textContent = "Error: " + ((err?.message ?? "Deactivate failed") + "").replace(/[\x00-\x1f\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 200);
+              if (statusEl) statusEl.textContent = "Error: " + ((err?.message ?? "Deactivate failed") + "").replace(/[\x00-\x1f\x7f\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 200);
             });
           });
           actionTd.appendChild(btn);
@@ -1161,7 +1161,7 @@ function renderAdminPage(nonce: string): string {
             if (statusNote) {
               const errEl = document.createElement("span");
               errEl.className = "error";
-              errEl.textContent = " Error: " + ((err?.message ?? "Delete failed") + "").replace(/[\x00-\x1f\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 200);
+              errEl.textContent = " Error: " + ((err?.message ?? "Delete failed") + "").replace(/[\x00-\x1f\x7f\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 200);
               statusNote.appendChild(errEl);
               setTimeout(() => errEl.remove(), 5000);
             }
@@ -1216,7 +1216,7 @@ function renderAdminPage(nonce: string): string {
         statusEl.textContent = "Saved";
         llmApiKeyEl.value = "";
       } catch (err) {
-        statusEl.textContent = "Error: " + ((err?.message ?? "Save failed") + "").replace(/[\x00-\x1f\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 200);
+        statusEl.textContent = "Error: " + ((err?.message ?? "Save failed") + "").replace(/[\x00-\x1f\x7f\u061C\uFEFF\u202A-\u202E\u2066-\u2069]/g, "").slice(0, 200);
       }
     }
 
