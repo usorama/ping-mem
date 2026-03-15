@@ -87,6 +87,9 @@ export class SessionManager {
 
     // Get all session IDs (bounded by EventStore's LIMIT 10000)
     const sessionIds = await this.eventStore.listSessions();
+    let restoredCount = 0;
+    let skippedEndedCount = 0;
+    let skippedInvalidCount = 0;
 
     for (const sessionId of sessionIds) {
       const events = await this.eventStore.getBySession(sessionId);
@@ -97,16 +100,27 @@ export class SessionManager {
           sessionId,
           eventCount: events.length,
         });
+        skippedInvalidCount++;
         continue;
       }
 
       // Skip ended sessions — they cannot be resumed and loading them wastes memory.
       const endEvent = events.find((e) => e.eventType === "SESSION_ENDED");
       if (endEvent) {
+        skippedEndedCount++;
         continue;
       }
 
-      const payload = startEvent.payload as SessionEventData;
+      const rawPayload = startEvent.payload;
+      if (!rawPayload || typeof rawPayload !== "object" || !("name" in rawPayload)) {
+        log.warn("Session START event has invalid payload — skipping hydration", {
+          sessionId,
+          payloadType: typeof rawPayload,
+        });
+        skippedInvalidCount++;
+        continue;
+      }
+      const payload = rawPayload as SessionEventData;
       const config = payload.config;
 
       const session: Session = {
@@ -145,7 +159,15 @@ export class SessionManager {
       }
 
       this.sessions.set(sessionId, session);
+      restoredCount++;
     }
+
+    log.info("Session hydration complete", {
+      restored: restoredCount,
+      skippedEnded: skippedEndedCount,
+      skippedInvalid: skippedInvalidCount,
+      totalScanned: sessionIds.length,
+    });
   }
 
   /**

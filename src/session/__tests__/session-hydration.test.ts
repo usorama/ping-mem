@@ -21,7 +21,12 @@ describe("SessionManager.hydrate() — restart survival", () => {
   afterEach(() => {
     for (const f of tmpFiles) {
       for (const suffix of ["", "-wal", "-shm"]) {
-        try { fs.unlinkSync(f + suffix); } catch { /* ignore */ }
+        try { fs.unlinkSync(f + suffix); } catch (e: unknown) {
+          // ENOENT expected — file may not have been created by this test
+          if (e instanceof Error && "code" in e && (e as NodeJS.ErrnoException).code !== "ENOENT") {
+            console.warn(`Test cleanup failed for ${f}${suffix}: ${(e as Error).message}`);
+          }
+        }
       }
     }
     tmpFiles.length = 0;

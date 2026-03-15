@@ -789,8 +789,8 @@ flowchart TD
       </ul>
       <div class="spacer"></div>
       <div style="display:flex;align-items:center;gap:0.5rem">
-        <span class="port-label"><span class="port">:3003</span> ping-mem-rest</span>
-        <span style="color:var(--text-dim);font-size:11px">Docker container</span>
+        <span class="port-label"><span class="port">:3000</span> ping-mem</span>
+        <span style="color:var(--text-dim);font-size:11px">Docker container (transport via PING_MEM_TRANSPORT)</span>
       </div>
     </div>
   </div>
@@ -1221,7 +1221,7 @@ sequenceDiagram
             <tr>
               <td>503 on codebase endpoints</td>
               <td>IngestionService not initialized</td>
-              <td><code>docker-compose restart ping-mem-rest</code></td>
+              <td><code>docker-compose restart ping-mem</code></td>
             </tr>
             <tr>
               <td>Empty search results</td>
@@ -1234,9 +1234,9 @@ sequenceDiagram
               <td>Verify git remote URL is consistent</td>
             </tr>
             <tr>
-              <td>ECONNREFUSED :3003</td>
-              <td>REST container down</td>
-              <td><code>docker-compose up -d ping-mem-rest</code></td>
+              <td>ECONNREFUSED :3000</td>
+              <td>ping-mem container down</td>
+              <td><code>docker-compose up -d ping-mem</code></td>
             </tr>
             <tr>
               <td>ECONNREFUSED :6333</td>

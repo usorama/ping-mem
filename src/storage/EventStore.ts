@@ -231,8 +231,9 @@ export class EventStore {
           this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
           log.info("WAL recovery complete", { newWalSize: this.getWalSizeBytes() });
         } catch (err) {
-          log.warn("WAL recovery failed — will retry via HealthMonitor", {
+          log.error("WAL recovery failed — HealthMonitor will attempt PASSIVE checkpoints at runtime", {
             error: err instanceof Error ? err.message : String(err),
+            walSize,
           });
         }
       }
