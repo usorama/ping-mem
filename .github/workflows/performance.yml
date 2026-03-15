@@ -30,10 +30,10 @@ jobs:
         run: bun run build
 
       - name: Run performance benchmarks
-        run: bun test --grep "Performance Benchmarks"
+        run: bun test src/diagnostics/__tests__/performance.test.ts
 
       - name: Run memory benchmarks
-        run: bun test --grep "Memory Usage Benchmarks"
+        run: bun test src/diagnostics/__tests__/memory.test.ts
 
       - name: Generate benchmark report
         if: always()
