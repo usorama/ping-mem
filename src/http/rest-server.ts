@@ -2293,12 +2293,14 @@ export class RESTPingMemServer {
     }
     // Close SessionManager before EventStore — checkpoint timers depend on EventStore
     await this.sessionManager.close();
-    // Close event store (SQLite)
-    await this.eventStore.close();
+    // Close event store only if we own it (not injected externally — caller closes it)
+    if (this.ownsEventStore) {
+      await this.eventStore.close();
+    }
     // Clear cached memory managers
     this.memoryManagers.clear();
     this.managerPromises.clear();
-    console.log("[REST Server] Stopped");
+    log.info("Stopped");
   }
 
   /**

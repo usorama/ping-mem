@@ -447,8 +447,7 @@ Because projectId uses `SHA-256(gitRemoteUrl + "::" + relativeToGitRoot)`, the s
 | Neo4j Bolt | `ping-mem-neo4j` | 7687 | Bolt |
 | Qdrant HTTP | `ping-mem-qdrant` | 6333 | HTTP |
 | Qdrant gRPC | `ping-mem-qdrant` | 6334 | gRPC |
-| ping-mem SSE | `ping-mem` | 3000 | HTTP/SSE |
-| ping-mem REST | `ping-mem-rest` | 3003 | HTTP |
+| ping-mem | `ping-mem` | 3000 | HTTP (transport via `PING_MEM_TRANSPORT`) |
 
 ### Symlink Handling (macOS)
 
@@ -532,7 +531,6 @@ DETACH DELETE p, n
 ```bash
 docker compose up -d        # Ensure all containers running
 docker restart ping-mem      # Restart to re-initialize
-docker restart ping-mem-rest # If using REST container
 ```
 
 ### Search Returns No Results

@@ -93,11 +93,14 @@ export class SessionManager {
       const startEvent = events.find((e) => e.eventType === "SESSION_STARTED");
 
       if (!startEvent) {
+        log.warn("Session has events but no SESSION_STARTED event — skipping hydration", {
+          sessionId,
+          eventCount: events.length,
+        });
         continue;
       }
 
       // Skip ended sessions — they cannot be resumed and loading them wastes memory.
-      // A long-running deployment may accumulate thousands of ended sessions.
       const endEvent = events.find((e) => e.eventType === "SESSION_ENDED");
       if (endEvent) {
         continue;
@@ -125,6 +128,20 @@ export class SessionManager {
       }
       if (config?.continueFrom !== undefined) {
         session.parentSessionId = config.continueFrom;
+      }
+
+      // Restore pause state (last PAUSED/RESUMED event wins)
+      const lastPauseEvent = events
+        .filter((e) => e.eventType === "SESSION_PAUSED" || e.eventType === "SESSION_RESUMED")
+        .at(-1);
+      if (lastPauseEvent?.eventType === "SESSION_PAUSED") {
+        session.status = "paused";
+      }
+
+      // Update lastActivityAt from the most recent event
+      const lastEvent = events.at(-1);
+      if (lastEvent) {
+        session.lastActivityAt = new Date(lastEvent.timestamp);
       }
 
       this.sessions.set(sessionId, session);

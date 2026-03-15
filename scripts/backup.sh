@@ -38,12 +38,10 @@ container_running() {
   docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null | grep -q true
 }
 
-# Detect which ping-mem app container is running (ping-mem or ping-mem-rest)
+# Detect the ping-mem app container
 detect_app_container() {
   if container_running "ping-mem"; then
     echo "ping-mem"
-  elif container_running "ping-mem-rest"; then
-    echo "ping-mem-rest"
   else
     echo ""
   fi
