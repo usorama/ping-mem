@@ -331,6 +331,14 @@ export class SSEPingMemServer {
   }
 
   /**
+   * Hydrate session state from EventStore before accepting requests.
+   * Delegates to PingMemServer which owns the SessionManager.
+   */
+  async hydrateSessionState(): Promise<void> {
+    await this.toolServer.hydrateSessionState();
+  }
+
+  /**
    * Start the SSE server
    */
   async start(): Promise<void> {

@@ -131,6 +131,9 @@ export async function startHTTPServer(): Promise<void> {
     });
   }
 
+  // Hydrate sessions from persisted events before accepting requests
+  await serverInstance.hydrateSessionState();
+
   // Start the server
   await serverInstance.start();
   healthMonitor.start();
