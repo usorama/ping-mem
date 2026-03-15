@@ -6,11 +6,13 @@ on:
       - 'src/diagnostics/**'
       - 'src/ingest/**'
       - 'src/graph/**'
+      - '.github/workflows/performance.yml'
   push:
     branches: ["main", "develop"]
     paths:
       - 'src/diagnostics/**'
       - 'src/ingest/**'
+      - '.github/workflows/performance.yml'
 
 jobs:
   benchmark:
