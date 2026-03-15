@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for ping-mem
 # Stage 1: Build
-FROM oven/bun:1.2.5-alpine AS builder
+FROM oven/bun:1.3.5-alpine AS builder
 
 WORKDIR /build
 
@@ -17,7 +17,7 @@ COPY . .
 RUN bun run build
 
 # Stage 2: Runtime
-FROM oven/bun:1.2.5-alpine AS runtime
+FROM oven/bun:1.3.5-alpine AS runtime
 
 WORKDIR /app
 
