@@ -393,6 +393,6 @@ describe("nightly-improvement.sh", () => {
     expect(content).toContain("--dry-run");
     expect(content).toContain("docker compose");
     expect(content).toContain("ping-mem-green");
-    expect(content).toContain("git checkout");
+    expect(content).toContain("git stash push");
   });
 });

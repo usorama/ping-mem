@@ -116,13 +116,13 @@ log "Step 6: Verifying tests..."
 cd "$PROJECT_DIR"
 if ! bun run typecheck 2>&1 | tee -a "$LOG_FILE"; then
   log "DISCARD: typecheck failed after improvement"
-  git checkout -- . 2>/dev/null || true
+  git stash push -m "nightly-improvement-discard-$(date +%Y%m%d)" 2>/dev/null || true
   cd "$PROJECT_DIR" && bun run src/eval/improvement-loop.ts record-result discard "typecheck failed" 2>&1
   exit 0
 fi
 if ! bun test 2>&1 | tee -a "$LOG_FILE"; then
   log "DISCARD: tests failed after improvement"
-  git checkout -- . 2>/dev/null || true
+  git stash push -m "nightly-improvement-discard-$(date +%Y%m%d)" 2>/dev/null || true
   cd "$PROJECT_DIR" && bun run src/eval/improvement-loop.ts record-result discard "tests failed" 2>&1
   exit 0
 fi
@@ -147,7 +147,7 @@ Eval delta: see .ai/eval/improvements/improvements.tsv"
 else
   log "DISCARD: No improvement or regression detected"
   cd "$PROJECT_DIR"
-  git checkout -- . 2>/dev/null || true
+  git stash push -m "nightly-improvement-discard-$(date +%Y%m%d)" 2>/dev/null || true
 fi
 
 log "=== Nightly Improvement Run Complete ==="

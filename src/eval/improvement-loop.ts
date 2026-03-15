@@ -14,6 +14,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import type { EvalRunResult } from "./types.js";
+import { EvalSuite, type SearchAdapter } from "./suite.js";
 
 // ============================================================================
 // Constants
@@ -248,12 +249,79 @@ function ensureDir(dirPath: string): void {
 }
 
 // ============================================================================
+// HTTP Search Adapter
+// ============================================================================
+
+/**
+ * SearchAdapter that calls the ping-mem REST API for code search.
+ * Used by the CLI to run real eval against a running instance.
+ */
+export class HttpSearchAdapter implements SearchAdapter {
+  private readonly baseUrl: string;
+
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl.replace(/\/+$/, "");
+  }
+
+  async search(query: string, _mode: string, limit: number): Promise<Array<{ id: string; content: string }>> {
+    const params = new URLSearchParams({
+      query,
+      limit: String(limit),
+    });
+    const url = `${this.baseUrl}/api/v1/codebase/search?${params.toString()}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Search request failed: ${response.status} ${response.statusText}`);
+    }
+    const body = (await response.json()) as {
+      data: { results: Array<{ chunkId: string; content: string; filePath: string }> };
+    };
+    return body.data.results.map((r) => ({
+      id: r.filePath ?? r.chunkId,
+      content: r.content,
+    }));
+  }
+}
+
+// ============================================================================
 // CLI Entry Point
 // ============================================================================
 
 const command = process.argv[2];
 const IMPROVEMENTS_DIR = join(process.cwd(), ".ai", "eval", "improvements");
 const TSV_PATH = join(IMPROVEMENTS_DIR, "improvements.tsv");
+
+function parseSearchUrl(): string {
+  const idx = process.argv.indexOf("--search-url");
+  if (idx !== -1 && process.argv[idx + 1]) {
+    return process.argv[idx + 1]!;
+  }
+  return "http://localhost:3000";
+}
+
+async function runEvalAndSave(phase: "baseline" | "post"): Promise<void> {
+  const searchUrl = parseSearchUrl();
+  const adapter = new HttpSearchAdapter(searchUrl);
+  const labeledQueriesPath = join(process.cwd(), ".ai", "eval", "labeled-queries.jsonl");
+  const suite = new EvalSuite(adapter, undefined, {
+    labeledQueriesPath,
+    runsDir: join(process.cwd(), ".ai", "eval", "runs"),
+    k: 10,
+  });
+  const result = await suite.run();
+
+  if (phase === "baseline") {
+    saveBaseline(IMPROVEMENTS_DIR, result);
+  } else {
+    savePostRun(IMPROVEMENTS_DIR, result);
+  }
+
+  console.log(`meanRecallAt10: ${result.aggregate.meanRecallAt10.toFixed(4)}`);
+  console.log(`meanNdcgAt10: ${result.aggregate.meanNdcgAt10.toFixed(4)}`);
+  console.log(`meanMrrAt10: ${result.aggregate.meanMrrAt10.toFixed(4)}`);
+  console.log(`meanLatencyMs: ${result.aggregate.meanLatencyMs.toFixed(1)}`);
+  console.log(`${phase === "baseline" ? "Baseline" : "Post-improvement"} eval saved`);
+}
 
 if (command === "check-budget") {
   const budget = checkBudget(TSV_PATH);
@@ -264,13 +332,9 @@ if (command === "check-budget") {
     console.log(`Budget OK: $${budget.remaining.toFixed(2)} remaining`);
   }
 } else if (command === "run-baseline") {
-  // In real usage, this would run the eval suite.
-  // For now, output format expected by the shell script.
-  console.log("meanRecallAt10: 0.8500");
-  console.log("Baseline eval saved");
+  await runEvalAndSave("baseline");
 } else if (command === "run-post") {
-  console.log("meanRecallAt10: 0.8700");
-  console.log("Post-improvement eval saved");
+  await runEvalAndSave("post");
 } else if (command === "compare") {
   const baseline = loadBaseline(IMPROVEMENTS_DIR);
   const post = loadPostRun(IMPROVEMENTS_DIR);
