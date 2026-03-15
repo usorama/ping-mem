@@ -14,6 +14,7 @@
 | `PING_MEM_PORT` | `3000` | HTTP server port |
 | `PING_MEM_TRANSPORT` | `streamable-http` | Transport mode: `sse`, `rest`, or `streamable-http` |
 | `PING_MEM_DB_PATH` | `:memory:` | SQLite database path. Use a file path for persistence (e.g., `~/.ping-mem/memory.db`) |
+| `PING_MEM_MAX_AGENTS` | `100` | Maximum number of registered agents |
 | `NODE_ENV` | — | Node environment (`production`, `development`) |
 
 ### Authentication
@@ -215,6 +216,10 @@ PING_MEM_ADMIN_DB_PATH=~/.ping-mem/admin.db
 | `start:mcp` | `bun run dist/mcp/cli.js` | Start MCP server (stdio) |
 | `setup` | `bash scripts/setup.sh` | Full local setup |
 | `setup:docker` | `docker compose up -d` | Start Docker services |
+| `setup:docker-only` | `bash scripts/setup.sh --docker-only` | Start Docker services only |
+| `ingest` | `bash scripts/ingest-project.sh` | Ingest a project |
+| `install:client` | `bash scripts/install-client.sh` | Install client locally |
+| `install:client:global` | `bash scripts/install-client.sh --global` | Install client globally |
 | `diagnostics:tsc-sarif` | `bun run src/diagnostics/tsc-sarif.ts` | Generate TypeScript SARIF |
 | `diagnostics:eslint-sarif` | `bun run src/diagnostics/eslint-sarif.ts` | Generate ESLint SARIF |
 | `diagnostics:prettier-sarif` | `bun run src/diagnostics/prettier-sarif.ts` | Generate Prettier SARIF |

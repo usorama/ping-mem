@@ -1,8 +1,8 @@
 # ping-mem API Reference
 
-> Complete reference for all 32 MCP tools and REST API endpoints.
+> Complete reference for all 44 MCP tools and REST API endpoints.
 
-**Version**: 1.4.0
+**Version**: 2.0.1
 **Transport**: MCP (stdio), REST (HTTP), SSE (streaming)
 
 ---
@@ -20,6 +20,10 @@
   - [Diagnostics](#diagnostics)
   - [Worklog](#worklog)
   - [Memory Intelligence](#memory-intelligence)
+  - [Causal Analysis](#causal-analysis)
+  - [Agent Management](#agent-management)
+  - [Knowledge Store](#knowledge-store)
+  - [PubSub](#pubsub)
   - [Project Management](#project-management)
   - [Health](#health)
 - [REST API](#rest-api)
@@ -28,6 +32,10 @@
   - [Context Endpoints](#context-endpoints)
   - [Codebase Endpoints](#codebase-endpoints)
   - [Diagnostics Endpoints](#diagnostics-endpoints)
+  - [Agent Endpoints](#agent-endpoints)
+  - [Knowledge Endpoints](#knowledge-endpoints)
+  - [Ingestion Queue Endpoints](#ingestion-queue-endpoints)
+  - [Events Endpoints](#events-endpoints)
   - [Admin Endpoints](#admin-endpoints)
 
 ---
@@ -1044,6 +1052,176 @@ Archive stale memories into digest entries. Groups by channel/category, creates 
 
 ---
 
+### Causal Analysis
+
+#### `search_causes`
+
+Search for causes of a given effect in the causal graph.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `effect` | string | Yes | The effect to find causes for |
+| `limit` | number | No | Maximum results |
+
+---
+
+#### `search_effects`
+
+Search for effects of a given cause in the causal graph.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `cause` | string | Yes | The cause to find effects for |
+| `limit` | number | No | Maximum results |
+
+---
+
+#### `get_causal_chain`
+
+Get the full causal chain between two entities.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `from` | string | Yes | Starting entity |
+| `to` | string | Yes | Target entity |
+
+---
+
+#### `trigger_causal_discovery`
+
+Trigger LLM-based causal discovery on stored memories.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `query` | string | Yes | Query to guide causal discovery |
+
+---
+
+### Agent Management
+
+#### `agent_register`
+
+Register or update an agent identity with quota and TTL.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `agentId` | string | Yes | Unique agent identifier |
+| `role` | string | Yes | Agent role description |
+| `admin` | boolean | No | Admin privileges |
+| `ttlMs` | number | No | Time-to-live in milliseconds |
+| `quotaBytes` | number | No | Storage quota in bytes |
+| `quotaCount` | number | No | Maximum memory count |
+
+---
+
+#### `agent_quota_status`
+
+Get quota usage for a registered agent.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `agentId` | string | Yes | Agent identifier |
+
+---
+
+#### `agent_deregister`
+
+Remove an agent registration and release resources.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `agentId` | string | Yes | Agent identifier |
+
+---
+
+### Knowledge Store
+
+#### `knowledge_ingest`
+
+Ingest a knowledge entry (upsert by projectId + title).
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `projectId` | string | Yes | Project identifier |
+| `title` | string | Yes | Knowledge entry title |
+| `solution` | string | Yes | Solution or content |
+| `symptoms` | string | No | Related symptoms |
+| `rootCause` | string | No | Root cause analysis |
+| `tags` | string[] | No | Tags for categorization |
+
+---
+
+#### `knowledge_search`
+
+Full-text search across knowledge entries with FTS5.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `query` | string | Yes | Search query |
+| `projectId` | string | No | Filter by project |
+| `crossProject` | boolean | No | Search across all projects |
+| `tags` | string[] | No | Filter by tags |
+| `limit` | number | No | Maximum results |
+
+---
+
+### PubSub
+
+#### `memory_subscribe`
+
+Subscribe to real-time memory change events.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `channel` | string | No | Channel to subscribe to |
+
+---
+
+#### `memory_unsubscribe`
+
+Unsubscribe from memory events.
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `channel` | string | No | Channel to unsubscribe from |
+
+---
+
+#### `memory_compress`
+
+Compress memories into digest facts (heuristic or LLM).
+
+**Parameters:**
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `channel` | string | No | Channel to compress |
+| `useLLM` | boolean | No | Use LLM for compression |
+
+---
+
 ### Project Management
 
 #### `project_delete`
@@ -1134,6 +1312,7 @@ curl -u admin:password \
 | POST | `/api/v1/session/end` | End session |
 | GET | `/api/v1/session/list?limit=10` | List sessions |
 | GET | `/api/v1/status` | Get system status |
+| GET | `/api/v1/stats` | Get system statistics |
 
 ---
 
@@ -1161,6 +1340,7 @@ All codebase endpoints return **503** if Neo4j/Qdrant is not configured.
 | POST | `/api/v1/codebase/verify` | Verify manifest |
 | GET | `/api/v1/codebase/search?query=...&projectId=...&type=...&limit=10` | Search code |
 | GET | `/api/v1/codebase/timeline?projectId=...&filePath=...&limit=100` | Code history |
+| GET | `/api/v1/codebase/staleness` | Check ingestion staleness |
 
 ---
 
@@ -1174,6 +1354,51 @@ All codebase endpoints return **503** if Neo4j/Qdrant is not configured.
 | GET | `/api/v1/diagnostics/summary/:analysisId` | Summary by severity |
 | POST | `/api/v1/diagnostics/diff` | Compare analyses |
 | POST | `/api/v1/diagnostics/summarize/:analysisId` | LLM summary |
+
+---
+
+### Agent Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/agents/register` | Register or update agent |
+| GET | `/api/v1/agents/quotas` | Get quota status |
+| DELETE | `/api/v1/agents/:agentId` | Deregister agent |
+
+---
+
+### Knowledge Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/knowledge/search` | Search knowledge entries |
+| POST | `/api/v1/knowledge/ingest` | Ingest knowledge entry |
+
+---
+
+### Ingestion Queue Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/v1/ingestion/enqueue` | Enqueue ingestion job |
+| GET | `/api/v1/ingestion/queue` | List queued jobs |
+| GET | `/api/v1/ingestion/run/:runId` | Get ingestion run status |
+
+---
+
+### Events Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/events/stream` | SSE stream of real-time memory events |
+
+---
+
+### Observability Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/observability/status` | System observability status |
 
 ---
 

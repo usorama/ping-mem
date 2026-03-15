@@ -202,4 +202,4 @@ Ensure `PING_MEM_DB_PATH` points to a file on disk, not `:memory:`:
 
 ## Available Tools
 
-See [API Reference](../api-reference.md) for the complete list of 32 MCP tools with parameters and examples.
+See [API Reference](../api-reference.md) for the complete list of 44 MCP tools with parameters and examples.

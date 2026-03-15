@@ -108,7 +108,7 @@ docker compose --profile rest-api up -d
 
 | Service | Heap | Pagecache |
 |---------|------|-----------|
-| Neo4j | 512MB initial, 1GB max | 512MB |
+| Neo4j | 512MB initial, 2GB max | 1GB |
 
 ---
 

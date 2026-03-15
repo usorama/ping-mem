@@ -70,20 +70,25 @@ All three must pass before submitting a PR:
 
 ```
 src/
-├── mcp/          # MCP server (stdio transport)
-├── http/         # HTTP server (REST/SSE)
-├── client/       # Client SDK
-├── memory/       # Memory CRUD operations
-├── session/      # Session lifecycle
-├── storage/      # SQLite event store
-├── ingest/       # Code ingestion pipeline
-├── graph/        # Neo4j knowledge graph
-├── search/       # Qdrant vector search
-├── diagnostics/  # SARIF diagnostics tracking
-├── admin/        # Admin panel and API key management
-├── config/       # Runtime configuration
-├── types/        # TypeScript type definitions
-└── validation/   # Input validation (Zod schemas)
+├── mcp/            # MCP server (stdio transport)
+├── http/           # HTTP server (REST/SSE)
+├── client/         # Client SDK
+├── memory/         # Memory CRUD operations + RelevanceEngine
+├── session/        # Session lifecycle
+├── storage/        # SQLite event store + WriteLockManager
+├── ingest/         # Code ingestion pipeline
+├── graph/          # Neo4j knowledge graph + causal graph
+├── search/         # Qdrant vector search
+├── diagnostics/    # SARIF diagnostics tracking
+├── admin/          # Admin panel and API key management
+├── knowledge/      # KnowledgeStore (FTS5 knowledge entries)
+├── pubsub/         # MemoryPubSub (real-time event bus)
+├── integration/    # CcMemoryBridge and cross-system bridges
+├── observability/  # Health monitoring and probes
+├── config/         # Runtime configuration
+├── types/          # TypeScript type definitions
+├── util/           # Logger, auth utilities, path safety
+└── validation/     # Input validation (Zod schemas)
 ```
 
 ---
@@ -160,18 +165,13 @@ Open a PR against `main`. Include:
 
 ### High Priority
 
-See the [Roadmap](CLAUDE.md#roadmap--pending-work) for current priorities:
-
-- **Security fixes**: SQL injection, command injection, timing attacks
-- **Test coverage**: HTTP endpoints, admin panel, ingestion pipeline
-- **Input validation**: Zod schemas for all API request bodies
+Check the [CLAUDE.md](CLAUDE.md) for current priorities and architecture details.
 
 ### Feature Work
 
 - Differential code queries ("What changed between commit A and B?")
-- MemoryManager hydration from EventStore on startup
-- Structured logging (replace `console.log`)
 - PostgreSQL storage backend
+- Additional language support for code chunking
 
 ### Documentation
 

@@ -237,23 +237,19 @@ Verify `PING_MEM_DB_PATH` is set to a file path (not `:memory:`):
 
 Once configured, these tools are available in Claude Code (prefixed with your server name):
 
-| Tool | Purpose |
-|------|---------|
-| `context_session_start` | Start a new memory session |
-| `context_session_end` | End current session |
-| `context_save` | Save memory with category and priority |
-| `context_get` | Retrieve memory by key |
-| `context_search` | Semantic search across memories |
-| `context_delete` | Delete a memory |
-| `context_checkpoint` | Create checkpoint |
-| `context_status` | Session status and stats |
-| `context_health` | Service health check |
-| `codebase_ingest` | Ingest project code (requires Neo4j + Qdrant) |
-| `codebase_search` | Search code semantically |
-| `codebase_timeline` | Query git history |
-| `diagnostics_ingest` | Ingest SARIF results |
-| `diagnostics_latest` | Latest diagnostics run |
-| `diagnostics_diff` | Compare two runs |
-| `worklog_record` | Record worklog event |
+ping-mem exposes 44 MCP tools across 9 modules. Key tools include:
+
+| Category | Tools |
+|----------|-------|
+| **Session** | `context_session_start`, `context_session_end`, `context_session_list`, `context_status` |
+| **Memory** | `context_save`, `context_get`, `context_search`, `context_delete`, `context_checkpoint` |
+| **Graph** | `context_query_relationships`, `context_hybrid_search`, `context_get_lineage`, `context_query_evolution`, `context_health` |
+| **Codebase** | `codebase_ingest`, `codebase_verify`, `codebase_search`, `codebase_timeline`, `codebase_list_projects`, `project_delete` |
+| **Diagnostics** | `diagnostics_ingest`, `diagnostics_latest`, `diagnostics_list`, `diagnostics_diff`, `diagnostics_summary`, `diagnostics_compare_tools`, `diagnostics_by_symbol`, `diagnostics_summarize` |
+| **Worklog** | `worklog_record`, `worklog_list` |
+| **Memory Intelligence** | `memory_stats`, `memory_consolidate`, `memory_subscribe`, `memory_unsubscribe`, `memory_compress` |
+| **Causal** | `search_causes`, `search_effects`, `get_causal_chain`, `trigger_causal_discovery` |
+| **Knowledge** | `knowledge_ingest`, `knowledge_search` |
+| **Agents** | `agent_register`, `agent_quota_status`, `agent_deregister` |
 
 See [API Reference](../api-reference.md) for full parameter details.
