@@ -43,7 +43,7 @@ Full workflow: `~/.claude/ping-mem-agent-workflow.md`
 │  ping-mem Infrastructure                                   │
 │  ┌──────────┐  ┌──────────┐  ┌─────────┐  ┌──────────┐   │
 │  │ REST API │  │ MCP      │  │ Neo4j   │  │ Qdrant   │   │
-│  │ :3003    │  │ (stdio)  │  │ :7687   │  │ :6333    │   │
+│  │ :3000    │  │ (stdio)  │  │ :7687   │  │ :6333    │   │
 │  └──────────┘  └──────────┘  └─────────┘  └──────────┘   │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -122,8 +122,8 @@ The path-independent projectId ensures Neo4j graph nodes and Qdrant vectors crea
 For any project integrating with ping-mem:
 
 1. **Register**: Add project path to `~/.ping-mem/registered-projects.txt`
-2. **Verify ingestion**: `curl http://localhost:3003/api/v1/codebase/search?query=test&limit=1`
-3. **Check health**: `curl http://localhost:3003/health`
+2. **Verify ingestion**: `curl http://localhost:3000/api/v1/codebase/search?query=test&limit=1`
+3. **Check health**: `curl http://localhost:3000/health`
 4. **If 503**: Ensure Docker containers are running (`docker ps | grep ping-mem`)
 5. **Force reingest**: `bun run scripts/force-ingest.ts /path/to/project`
 
@@ -134,7 +134,7 @@ For any project integrating with ping-mem:
 | 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem` container |
 | Empty search results | Project not ingested into Qdrant | Run force-ingest script |
 | Wrong projectId | Path mismatch (Docker vs local) | Verify git remote URL is consistent |
-| Connection refused :3003 | REST container down | `docker-compose up -d ping-mem` (with `PING_MEM_TRANSPORT=rest`) |
+| Connection refused :3000 | ping-mem container down | `docker-compose up -d ping-mem` |
 | ECONNREFUSED :6333 | Qdrant down | `docker restart ping-mem-qdrant` |
 
 ---
@@ -966,7 +966,7 @@ ping-mem/
 |---------|-------|-----|
 | 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem` container |
 | Empty search results | Project not ingested | Run force-ingest script |
-| Connection refused :3003 | REST container down | `docker-compose up -d ping-mem` (with `PING_MEM_TRANSPORT=rest`) |
+| Connection refused :3000 | ping-mem container down | `docker-compose up -d ping-mem` |
 | ECONNREFUSED :6333 | Qdrant down | `docker restart ping-mem-qdrant` |
 
 ---

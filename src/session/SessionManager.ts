@@ -159,6 +159,13 @@ export class SessionManager {
       }
 
       this.sessions.set(sessionId, session);
+
+      // Restore auto-checkpoint timers for active sessions (startSession() sets these up,
+      // but hydrate() must do it too or restored sessions lose their checkpoint safety net)
+      if (session.status === "active" && this.config.autoCheckpointInterval > 0) {
+        this.setupAutoCheckpoint(sessionId);
+      }
+
       restoredCount++;
     }
 

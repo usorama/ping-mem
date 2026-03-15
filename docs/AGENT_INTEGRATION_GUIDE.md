@@ -96,7 +96,7 @@ Tools are available as `context_*`, `codebase_*`, `diagnostics_*`, `worklog_*`.
 
 Base URLs:
 - **SSE server**: `http://localhost:3000` (primary, supports SSE streaming)
-- **REST server**: `http://localhost:3003` (Docker, REST-only clients)
+- **REST server**: `http://localhost:3000` (Docker, set `PING_MEM_TRANSPORT=rest`)
 
 Headers:
 ```
@@ -537,7 +537,7 @@ docker restart ping-mem      # Restart to re-initialize
 
 **Cause 1**: Project not ingested yet.
 ```bash
-curl "http://localhost:3003/api/v1/codebase/search?query=test&limit=1"
+curl "http://localhost:3000/api/v1/codebase/search?query=test&limit=1"
 # If empty, ingest first
 ```
 
@@ -581,7 +581,7 @@ docker compose up -d                # Ensure all services up
 | `ECONNREFUSED :7687` | Neo4j | `docker restart ping-mem-neo4j` |
 | `ECONNREFUSED :6333` | Qdrant | `docker restart ping-mem-qdrant` |
 | `ECONNREFUSED :3000` | ping-mem SSE | `docker compose up -d` |
-| `ECONNREFUSED :3003` | ping-mem REST | `docker compose --profile rest-api up -d` |
+| `ECONNREFUSED :3000` | ping-mem | `docker compose up -d ping-mem` |
 
 ---
 
