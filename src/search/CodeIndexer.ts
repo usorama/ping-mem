@@ -12,14 +12,20 @@
 
 import { QdrantClientWrapper } from "./QdrantClient.js";
 import { DeterministicVectorizer } from "./DeterministicVectorizer.js";
+import type { CodeChunkStore } from "./CodeChunkStore.js";
 import { createLogger } from "../util/logger.js";
+import { sanitizeHealthError } from "../observability/health-probes.js";
 import type { IngestionResult, CodeFileResult, ChunkWithId } from "../ingest/index.js";
 
 const log = createLogger("CodeIndexer");
 
+/** RRF constant (k parameter) — same as HybridSearchEngine */
+const RRF_K = 60;
+
 export interface CodeIndexerOptions {
   qdrantClient: QdrantClientWrapper;
   vectorizer?: DeterministicVectorizer;
+  codeChunkStore?: CodeChunkStore;
 }
 
 export interface ChunkSearchResult {
@@ -36,10 +42,12 @@ export interface ChunkSearchResult {
 export class CodeIndexer {
   private readonly qdrant: QdrantClientWrapper;
   private readonly vectorizer: DeterministicVectorizer;
+  private readonly codeChunkStore: CodeChunkStore | undefined;
 
   constructor(options: CodeIndexerOptions) {
     this.qdrant = options.qdrantClient;
     this.vectorizer = options.vectorizer ?? new DeterministicVectorizer();
+    this.codeChunkStore = options.codeChunkStore;
   }
 
   /**
@@ -54,24 +62,64 @@ export class CodeIndexer {
       const collectionName = this.qdrant.getCollectionName();
 
       // Batch upsert to avoid oversized requests (Qdrant 400 for large payloads)
+      // Per-batch retry with 3 attempts (EVAL PERF-3 fix)
       const BATCH_SIZE = 200;
       for (let i = 0; i < points.length; i += BATCH_SIZE) {
         const batch = points.slice(i, i + BATCH_SIZE);
-        try {
-          await qdrantClient.upsert(collectionName, {
-            wait: true,
-            points: batch.map((p) => ({
-              id: p.id,
-              vector: p.vector,
-              payload: p.payload,
-            })),
-          });
-        } catch (error: unknown) {
-          const batchIndex = Math.floor(i / BATCH_SIZE);
-          const message = error instanceof Error ? error.message : String(error);
+        const batchIndex = Math.floor(i / BATCH_SIZE);
+        let lastErr: Error | undefined;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await qdrantClient.upsert(collectionName, {
+              wait: true,
+              points: batch.map((p) => ({
+                id: p.id,
+                vector: p.vector,
+                payload: p.payload,
+              })),
+            });
+            lastErr = undefined;
+            break;
+          } catch (error: unknown) {
+            lastErr = error instanceof Error ? error : new Error(String(error));
+            if (attempt < 2) {
+              const delay = 2000 * Math.pow(2, attempt) + Math.random() * 1000;
+              log.warn(`Qdrant upsert batch ${batchIndex} attempt ${attempt + 1} failed, retrying`, {
+                error: sanitizeHealthError(lastErr),
+              });
+              await new Promise(r => setTimeout(r, delay));
+            }
+          }
+        }
+        if (lastErr) {
           throw new Error(
-            `Qdrant upsert batch ${batchIndex} failed (points ${i}-${i + batch.length - 1} of ${points.length}): ${message}`
+            `Qdrant upsert batch ${batchIndex} failed (points ${i}-${i + batch.length - 1} of ${points.length}): ${lastErr.message}`
           );
+        }
+      }
+    }
+
+    // Index into FTS5 CodeChunkStore if available
+    if (this.codeChunkStore) {
+      for (const fileResult of result.codeFiles) {
+        for (const chunk of fileResult.chunks) {
+          // Map chunk type to CodeChunkStore ChunkType
+          const storeType = (chunk.type === "function" || chunk.type === "class" || chunk.type === "file" || chunk.type === "block")
+            ? chunk.type
+            : "block" as const;
+          const codeChunk: import("./CodeChunkStore.js").CodeChunk = {
+            chunkId: chunk.chunkId,
+            projectId: result.projectId,
+            filePath: fileResult.filePath,
+            content: chunk.content,
+            startLine: chunk.lineStart ?? chunk.start,
+            endLine: chunk.lineEnd ?? chunk.end,
+            chunkType: storeType,
+          };
+          if (fileResult.filePath.endsWith(".ts")) {
+            codeChunk.language = "typescript";
+          }
+          this.codeChunkStore.addChunk(codeChunk);
         }
       }
     }
@@ -79,6 +127,10 @@ export class CodeIndexer {
 
   /**
    * Search for chunks by semantic/keyword similarity.
+   *
+   * When CodeChunkStore is configured, uses Reciprocal Rank Fusion (RRF)
+   * to merge BM25 (FTS5) results with Qdrant vector results:
+   *   score(d) = 1/(k + rank_bm25(d)) + 1/(k + rank_qdrant(d)), k=60
    */
   async search(
     query: string,
@@ -88,6 +140,105 @@ export class CodeIndexer {
       type?: "code" | "comment" | "docstring";
       limit?: number;
     } = {}
+  ): Promise<ChunkSearchResult[]> {
+    // If CodeChunkStore is available, do RRF merge
+    if (this.codeChunkStore) {
+      return this.searchWithRRF(query, options);
+    }
+
+    return this.searchQdrantOnly(query, options);
+  }
+
+  private async searchWithRRF(
+    query: string,
+    options: {
+      projectId?: string;
+      filePath?: string;
+      type?: "code" | "comment" | "docstring";
+      limit?: number;
+    },
+  ): Promise<ChunkSearchResult[]> {
+    const clampedLimit = Math.max(1, Math.min(Math.floor(options.limit ?? 10), 1000));
+    // Fetch more candidates from each source for better fusion
+    const fetchLimit = Math.min(clampedLimit * 3, 100);
+
+    // Run BM25 and Qdrant in parallel
+    const [bm25Results, qdrantResults] = await Promise.all([
+      Promise.resolve(
+        this.codeChunkStore!.search(query, options.projectId, fetchLimit),
+      ),
+      this.searchQdrantOnly(query, { ...options, limit: fetchLimit }).catch((err) => {
+        log.warn("Qdrant search failed during RRF, using BM25 only", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return [] as ChunkSearchResult[];
+      }),
+    ]);
+
+    // Build rank maps (chunkId -> rank, 0-indexed)
+    const bm25Ranks = new Map<string, number>();
+    bm25Results.forEach((r, i) => bm25Ranks.set(r.chunkId, i));
+
+    const qdrantRanks = new Map<string, number>();
+    qdrantResults.forEach((r, i) => qdrantRanks.set(r.chunkId, i));
+
+    // Collect all unique chunk IDs
+    const allChunkIds = new Set([...bm25Ranks.keys(), ...qdrantRanks.keys()]);
+
+    // Build result lookup
+    const resultLookup = new Map<string, ChunkSearchResult>();
+    for (const r of bm25Results) {
+      resultLookup.set(r.chunkId, {
+        chunkId: r.chunkId,
+        projectId: r.projectId,
+        filePath: r.filePath,
+        type: "code",
+        content: r.content,
+        lineStart: r.startLine,
+        lineEnd: r.endLine,
+        score: 0,
+      });
+    }
+    for (const r of qdrantResults) {
+      if (!resultLookup.has(r.chunkId)) {
+        resultLookup.set(r.chunkId, r);
+      }
+    }
+
+    // RRF scoring
+    const rrfScores: Array<{ chunkId: string; score: number }> = [];
+    for (const chunkId of allChunkIds) {
+      const bm25Rank = bm25Ranks.get(chunkId);
+      const qdrantRank = qdrantRanks.get(chunkId);
+
+      let score = 0;
+      if (bm25Rank !== undefined) {
+        score += 1 / (RRF_K + bm25Rank + 1);
+      }
+      if (qdrantRank !== undefined) {
+        score += 1 / (RRF_K + qdrantRank + 1);
+      }
+
+      rrfScores.push({ chunkId, score });
+    }
+
+    // Sort by RRF score descending
+    rrfScores.sort((a, b) => b.score - a.score);
+
+    return rrfScores.slice(0, clampedLimit).map((s) => {
+      const r = resultLookup.get(s.chunkId)!;
+      return { ...r, score: s.score };
+    });
+  }
+
+  private async searchQdrantOnly(
+    query: string,
+    options: {
+      projectId?: string;
+      filePath?: string;
+      type?: "code" | "comment" | "docstring";
+      limit?: number;
+    },
   ): Promise<ChunkSearchResult[]> {
     const queryVector = this.vectorizer.vectorize(query);
     const qdrantClient = this.qdrant.getClient();
@@ -179,6 +330,11 @@ export class CodeIndexer {
         ],
       },
     });
+
+    // Also clean up CodeChunkStore if available
+    if (this.codeChunkStore) {
+      this.codeChunkStore.removeProject(projectId);
+    }
   }
 
   private buildIndexPoints(result: IngestionResult) {

@@ -1,11 +1,18 @@
 /**
  * SSE (Server-Sent Events) Transport for ping-mem
  *
- * Provides MCP protocol over HTTP using SSE for server-to-client
- * messages and HTTP POST for client-to-server messages.
+ * Provides MCP protocol over HTTP using StreamableHTTPServerTransport.
+ * Supports concurrent client sessions with isolation — each client
+ * (Claude Code, Codex, Cursor, etc.) gets its own transport instance
+ * keyed by Mcp-Session-Id header.
+ *
+ * Session lifecycle:
+ * - Creation: POST without Mcp-Session-Id → new transport + session
+ * - Routing: POST/GET with Mcp-Session-Id → existing transport
+ * - Cleanup: DELETE with Mcp-Session-Id → close transport + remove session
  *
  * @module http/sse-server
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -15,6 +22,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import * as crypto from "crypto";
 import { createLogger } from "../util/logger.js";
 import { timingSafeStringEqual } from "../util/auth-utils.js";
+import { SessionRegistry } from "../mcp/SessionRegistry.js";
 
 const log = createLogger("SSE Server");
 
@@ -24,23 +32,30 @@ import type { SSEServerConfig } from "./types.js";
 import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
 import { TOOLS } from "../mcp/PingMemServer.js";
 
+/** Per-session transport + server pair */
+interface SessionTransport {
+  server: Server;
+  transport: StreamableHTTPServerTransport;
+}
+
 // ============================================================================
 // SSE Server Class
 // ============================================================================
 
 /**
- * SSE-based MCP server for ping-mem
+ * Multi-client MCP server for ping-mem
  *
- * Uses StreamableHTTPServerTransport to provide MCP protocol over HTTP
- * with SSE streaming support.
+ * Each concurrent client gets an isolated StreamableHTTPServerTransport
+ * instance keyed by Mcp-Session-Id header. Supports up to maxSessions
+ * concurrent clients (default 20) with 1-hour TTL.
  */
 export class SSEPingMemServer {
-  private server: Server;
-  private transport: StreamableHTTPServerTransport;
-  private config: SSEServerConfig & PingMemServerConfig;
+  private readonly transports = new Map<string, SessionTransport>();
+  private readonly sessionRegistry: SessionRegistry;
+  private readonly config: SSEServerConfig & PingMemServerConfig;
 
-  // Delegate tool execution to PingMemServer
-  private toolServer: PingMemServer;
+  // Delegate tool execution to PingMemServer (shared across sessions)
+  private readonly toolServer: PingMemServer;
 
   constructor(config: SSEServerConfig & PingMemServerConfig) {
     this.config = {
@@ -65,11 +80,21 @@ export class SSEPingMemServer {
       qdrantClient: config.qdrantClient,
     });
 
-    // Initialize MCP server
-    this.server = new Server(
+    this.sessionRegistry = new SessionRegistry({
+      maxSessions: config.maxSessions ?? 20,
+      ttlMs: config.sessionTtlMs ?? 3_600_000,
+      sessionIdGenerator: config.sessionIdGenerator ?? (() => crypto.randomUUID()),
+    });
+  }
+
+  /**
+   * Create a new MCP server + transport pair for a session.
+   */
+  private createSessionTransport(sessionId: string): SessionTransport {
+    const server = new Server(
       {
         name: "ping-mem-sse-server",
-        version: "1.0.0",
+        version: "2.0.0",
       },
       {
         capabilities: {
@@ -78,29 +103,32 @@ export class SSEPingMemServer {
       }
     );
 
-    // Initialize StreamableHTTP transport
-    this.transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: this.config.sessionIdGenerator ?? (() => crypto.randomUUID()),
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => sessionId,
     });
 
-    // Set up MCP tool handlers first
-    this.setupHandlers();
+    // Set up MCP tool handlers
+    this.setupHandlers(server);
 
     // Connect server to transport
-    this.server.connect(this.transport as Parameters<typeof this.server.connect>[0]);
+    server.connect(transport as Parameters<typeof server.connect>[0]);
+
+    const st: SessionTransport = { server, transport };
+    this.transports.set(sessionId, st);
+    return st;
   }
 
   /**
-   * Set up MCP request handlers
+   * Set up MCP request handlers on a server instance
    */
-  private setupHandlers(): void {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+  private setupHandlers(server: Server): void {
+    server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: TOOLS,
       };
     });
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
 
       try {
@@ -125,7 +153,11 @@ export class SSEPingMemServer {
   }
 
   /**
-   * Handle incoming HTTP requests (both GET and POST)
+   * Handle incoming HTTP requests with session routing.
+   *
+   * - No Mcp-Session-Id header → create new session + transport
+   * - With Mcp-Session-Id header → route to existing transport
+   * - DELETE method → close session and transport
    */
   async handleRequest(
     req: IncomingMessage,
@@ -143,34 +175,64 @@ export class SSEPingMemServer {
     }
 
     // Validate API key if configured
-    // Auth is required only when: (apiKeyManager has seed key) OR (explicit apiKey is set non-empty)
-    // Supports both X-API-Key header and Authorization: Bearer <token> header
-    const authRequired = this.config.apiKeyManager
-      ? this.config.apiKeyManager.hasSeedKey()
-      : (this.config.apiKey && this.config.apiKey.trim().length > 0);
-
-    if (authRequired) {
-      // Check X-API-Key header first, then fall back to Authorization: Bearer
-      let apiKey = req.headers["x-api-key"] as string | undefined;
-      if (!apiKey) {
-        const authHeader = req.headers["authorization"] as string | undefined;
-        if (authHeader?.startsWith("Bearer ")) {
-          apiKey = authHeader.slice(7);
-        }
-      }
-      const isValid = this.config.apiKeyManager
-        ? this.config.apiKeyManager.isValid(apiKey)
-        : (this.config.apiKey ? timingSafeStringEqual(apiKey ?? "", this.config.apiKey) : false);
-      if (!isValid) {
-        res.writeHead(401, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Unauthorized", message: "Invalid or missing API key. Use X-API-Key header or Authorization: Bearer <token>." }));
-        return;
-      }
+    if (!this.validateAuth(req, res)) {
+      return;
     }
 
+    const sessionId = req.headers["mcp-session-id"] as string | undefined;
+
     try {
-      // Delegate to transport
-      await this.transport.handleRequest(req, res, parsedBody);
+      // DELETE — close and remove session
+      if (req.method === "DELETE") {
+        if (sessionId) {
+          await this.closeSession(sessionId);
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      // Route to existing session or create new one
+      let st: SessionTransport | undefined;
+
+      if (sessionId) {
+        // Look up existing session
+        const session = this.sessionRegistry.get(sessionId);
+        if (!session) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            error: "Session Not Found",
+            message: `No active session with ID ${sessionId}. Create a new session by sending a request without Mcp-Session-Id header.`,
+          }));
+          return;
+        }
+        st = this.transports.get(sessionId);
+      }
+
+      if (!st) {
+        // Create new session
+        const clientName = SessionRegistry.detectClient(
+          req.headers["user-agent"],
+          req.headers["x-client-name"] as string | undefined,
+        );
+        const session = this.sessionRegistry.create(clientName);
+        if (!session) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            error: "Service Unavailable",
+            message: "Maximum concurrent sessions reached. Try again later.",
+          }));
+          return;
+        }
+        st = this.createSessionTransport(session.sessionId);
+        log.info("New session transport created", {
+          sessionId: session.sessionId,
+          client: clientName,
+        });
+      }
+
+      // Delegate to the session's transport
+      await st.transport.handleRequest(req, res, parsedBody);
     } catch (error) {
       log.error("Request handling error", { error: error instanceof Error ? error.message : String(error) });
       if (!res.headersSent) {
@@ -183,6 +245,62 @@ export class SSEPingMemServer {
         );
       }
     }
+  }
+
+  /**
+   * Validate API key authentication. Returns true if valid (or auth not required).
+   */
+  private validateAuth(req: IncomingMessage, res: ServerResponse): boolean {
+    const authRequired = this.config.apiKeyManager
+      ? this.config.apiKeyManager.hasSeedKey()
+      : (this.config.apiKey && this.config.apiKey.trim().length > 0);
+
+    if (!authRequired) {
+      return true;
+    }
+
+    let apiKey = req.headers["x-api-key"] as string | undefined;
+    if (!apiKey) {
+      const authHeader = req.headers["authorization"] as string | undefined;
+      if (authHeader?.startsWith("Bearer ")) {
+        apiKey = authHeader.slice(7);
+      }
+    }
+
+    const isValid = this.config.apiKeyManager
+      ? this.config.apiKeyManager.isValid(apiKey)
+      : (this.config.apiKey ? timingSafeStringEqual(apiKey ?? "", this.config.apiKey) : false);
+
+    if (!isValid) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        error: "Unauthorized",
+        message: "Invalid or missing API key. Use X-API-Key header or Authorization: Bearer <token>.",
+      }));
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Close a session and its transport.
+   */
+  private async closeSession(sessionId: string): Promise<void> {
+    const st = this.transports.get(sessionId);
+    if (st) {
+      try {
+        await st.transport.close();
+      } catch (error) {
+        log.warn("Error closing transport", {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      this.transports.delete(sessionId);
+    }
+    this.sessionRegistry.remove(sessionId);
+    log.info("Session closed", { sessionId });
   }
 
   /**
@@ -205,46 +323,37 @@ export class SSEPingMemServer {
       res.setHeader("Access-Control-Allow-Credentials", "true");
     }
 
-    res.setHeader("Access-Control-Allow-Methods", (corsConfig.methods ?? ["GET", "POST", "OPTIONS"]).join(", "));
+    res.setHeader("Access-Control-Allow-Methods", (corsConfig.methods ?? ["GET", "POST", "DELETE", "OPTIONS"]).join(", "));
     res.setHeader(
       "Access-Control-Allow-Headers",
-      (corsConfig.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID", "Authorization"]).join(", ")
+      (corsConfig.headers ?? ["Content-Type", "X-API-Key", "X-Session-ID", "Mcp-Session-Id", "Authorization"]).join(", ")
     );
   }
 
   /**
    * Start the SSE server
-   *
-   * Note: StreamableHTTPServerTransport doesn't need to be started manually.
-   * It handles connections per-request. The start() method is a no-op.
    */
   async start(): Promise<void> {
-    // Transport doesn't need explicit start for StreamableHTTP
-    // It manages connections per-request
-    log.info("Ready (waiting for HTTP requests)");
+    log.info("Ready (waiting for HTTP requests, multi-session enabled)");
   }
 
   /**
-   * Stop the SSE server
+   * Stop the SSE server — closes all sessions
    */
   async stop(): Promise<void> {
-    await this.transport.close();
+    const sessions = this.sessionRegistry.list();
+    for (const session of sessions) {
+      await this.closeSession(session.sessionId);
+    }
     await this.toolServer.close();
     log.info("Stopped");
   }
 
   /**
-   * Get the current session ID (if in stateful mode)
+   * Get the session registry (for inspection/admin endpoints)
    */
-  get sessionId(): string | undefined {
-    return this.transport.sessionId;
-  }
-
-  /**
-   * Get the underlying MCP server instance
-   */
-  getMcpServer(): Server {
-    return this.server;
+  getSessionRegistry(): SessionRegistry {
+    return this.sessionRegistry;
   }
 
   /**
@@ -252,6 +361,13 @@ export class SSEPingMemServer {
    */
   getToolServer(): PingMemServer {
     return this.toolServer;
+  }
+
+  /**
+   * Get transport for a specific session (for testing)
+   */
+  getSessionTransport(sessionId: string): SessionTransport | undefined {
+    return this.transports.get(sessionId);
   }
 }
 

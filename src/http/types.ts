@@ -115,6 +115,10 @@ export interface SSEServerConfig extends HTTPServerConfig {
   sseEndpoint?: string;
   /** Endpoint for POST messages (default: /messages) */
   messageEndpoint?: string;
+  /** Maximum concurrent client sessions (default: 20) */
+  maxSessions?: number;
+  /** Session TTL in milliseconds (default: 3600000 = 1 hour) */
+  sessionTtlMs?: number;
 }
 
 // ============================================================================

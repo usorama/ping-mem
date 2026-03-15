@@ -8,6 +8,9 @@ export { CodeChunker } from "./CodeChunker.js";
 export { GitHistoryReader } from "./GitHistoryReader.js";
 export { IngestionOrchestrator } from "./IngestionOrchestrator.js";
 export { SymbolExtractor } from "./SymbolExtractor.js";
+export { SemanticChunker } from "./SemanticChunker.js";
+export { IngestionQueue } from "./IngestionQueue.js";
+export { IngestionEventEmitter } from "./IngestionEventEmitter.js";
 
 export type {
   FileHashEntry,
@@ -33,3 +36,11 @@ export type {
 export type { ChunkType, TextChunk } from "./CodeChunker.js";
 
 export type { ExtractedSymbol, SymbolKind } from "./SymbolExtractor.js";
+
+export type { SemanticChunk } from "./SemanticChunker.js";
+
+export type {
+  IngestionRun,
+  IngestionRunStatus,
+  QueueStatus,
+} from "./IngestionQueue.js";

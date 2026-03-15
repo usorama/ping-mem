@@ -24,6 +24,20 @@ const DEFAULT_IGNORE_DIRS = new Set([
   ".claude",
   ".vscode",
   ".idea",
+  // Phase 1.2: Extended ignore dirs
+  ".overstory",
+  ".ai",
+  "coverage",
+  "tmp",
+  "temp",
+  "out",
+  ".turbo",
+  ".parcel-cache",
+  ".swc",
+  "vendor",
+  ".terraform",
+  ".serverless",
+  "e2e-tests",
 ]);
 
 const DEFAULT_EXCLUDE_EXTENSIONS = new Set([
@@ -43,15 +57,21 @@ const DEFAULT_EXCLUDE_EXTENSIONS = new Set([
   ".db", ".sqlite", ".sqlite3",
   // Lock files (large, not meaningful to chunk)
   ".lock",
+  // Phase 1.3: Extended exclude extensions
+  ".d.ts", ".map", ".min.js", ".min.css", ".snap",
+  ".csv", ".log", ".sql", ".wasm",
 ]);
 
 const MANIFEST_SCHEMA_VERSION = 1;
+
+const DEFAULT_MAX_FILE_SIZE_BYTES = 1_048_576; // 1MB
 
 export interface ProjectScanOptions {
   ignoreDirs?: Set<string>;
   includeExtensions?: Set<string>;
   excludeExtensions?: Set<string>;
   useGitLsFiles?: boolean;
+  maxFileSizeBytes?: number; // Phase 1.6: default 1MB
 }
 
 export class ProjectScanner {
@@ -59,12 +79,14 @@ export class ProjectScanner {
   private readonly includeExtensions: Set<string> | null;
   private readonly excludeExtensions: Set<string>;
   private readonly useGitLsFiles: boolean;
+  private readonly maxFileSizeBytes: number;
 
   constructor(options: ProjectScanOptions = {}) {
     this.ignoreDirs = options.ignoreDirs ?? DEFAULT_IGNORE_DIRS;
     this.includeExtensions = options.includeExtensions ?? null;
     this.excludeExtensions = options.excludeExtensions ?? DEFAULT_EXCLUDE_EXTENSIONS;
     this.useGitLsFiles = options.useGitLsFiles ?? true;
+    this.maxFileSizeBytes = options.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES;
   }
 
   async scanProject(projectDir: string, previousManifest?: ProjectManifest): Promise<ProjectScanResult> {
@@ -72,18 +94,25 @@ export class ProjectScanner {
     // (which always resolves symlinks). macOS: /var → /private/var.
     const rootPath = fs.realpathSync(path.resolve(projectDir));
     const files = await this.collectFiles(rootPath);
-    // Filter out files returned by git ls-files that no longer exist on disk
-    // (tracked but locally deleted, or stale index entries).
-    const existingFiles = files.filter((f) => {
-      try { fs.accessSync(f, fs.constants.R_OK); return true; }
-      catch { return false; }
-    });
-    if (existingFiles.length < files.length) {
-      log.info(`Skipped ${files.length - existingFiles.length} missing files from git index`);
+
+    // Phase 1.1: Combined validation + hashing (EVAL PERF-1 fix)
+    // Single read per file instead of separate stat+validate+hash
+    const fileEntries: FileHashEntry[] = [];
+    const skipped: { path: string; reason: string }[] = [];
+    for (const f of files) {
+      const result = this.hashAndValidateFile(rootPath, f);
+      if (result.valid) {
+        fileEntries.push(result.entry);
+      } else {
+        skipped.push({ path: path.relative(rootPath, f), reason: result.reason });
+      }
     }
-    const fileEntries = existingFiles.map((filePath) =>
-      this.hashFile(rootPath, filePath)
-    );
+    if (skipped.length > 0) {
+      log.info(`Skipped ${skipped.length} files`, { reasons: this.summarizeSkipReasons(skipped) });
+    }
+
+    // Phase 1.7: Warn about previously-indexed .env files
+    this.warnAboutEnvFiles(fileEntries);
 
     const treeHash = this.computeTreeHash(fileEntries);
     const projectId = await this.computeProjectId(rootPath);
@@ -103,6 +132,79 @@ export class ProjectScanner {
     return { manifest, hasChanges };
   }
 
+  /**
+   * Phase 1.1: Combined validation + hashing — single read per file (EVAL PERF-1 fix).
+   * Replaces the separate filter + hashFile pattern.
+   */
+  private hashAndValidateFile(
+    rootPath: string, filePath: string
+  ): { entry: FileHashEntry; valid: true } | { valid: false; reason: string } {
+    // 1. stat check — size limit + isFile guard
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
+      return { valid: false, reason: "missing or inaccessible" };
+    }
+    if (!stat.isFile()) {
+      return { valid: false, reason: "not a regular file (directory/gitlink)" };
+    }
+    if (stat.size > this.maxFileSizeBytes) {
+      return { valid: false, reason: `size ${stat.size} > ${this.maxFileSizeBytes}` };
+    }
+
+    // 2. .env check (covers git-ls-files path which lacks walkDirectory's .env filter)
+    const basename = path.basename(filePath);
+    if (basename === ".env" || basename.startsWith(".env.")) {
+      return { valid: false, reason: ".env file" };
+    }
+
+    // 3. Read file ONCE — use for both binary detection and SHA-256 hash
+    const content = fs.readFileSync(filePath);
+
+    // 4. Binary detection — check first 8KB for null bytes
+    const checkLength = Math.min(content.length, 8192);
+    for (let i = 0; i < checkLength; i++) {
+      if (content[i] === 0) {
+        return { valid: false, reason: "binary file (null bytes detected)" };
+      }
+    }
+
+    // 5. Hash from the already-read buffer
+    const sha256 = crypto.createHash("sha256").update(content).digest("hex");
+    const relPath = this.normalizePath(path.relative(rootPath, filePath));
+    return {
+      valid: true,
+      entry: { path: relPath, sha256, bytes: content.length },
+    };
+  }
+
+  /**
+   * Phase 1.1: Summarize skip reasons for logging (EVAL G-08 fix).
+   */
+  private summarizeSkipReasons(skipped: { path: string; reason: string }[]): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const s of skipped) {
+      counts[s.reason] = (counts[s.reason] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  /**
+   * Phase 1.7: Warn if any .env files were previously indexed (EVAL H3 fix).
+   */
+  private warnAboutEnvFiles(entries: FileHashEntry[]): void {
+    const envFiles = entries.filter(e => {
+      const basename = path.basename(e.path);
+      return basename === ".env" || basename.startsWith(".env.");
+    });
+    if (envFiles.length > 0) {
+      log.warn(`Found ${envFiles.length} .env file(s) in scan results — these should have been filtered. ` +
+        `If previously indexed, run cleanup to remove from vector store.`,
+        { files: envFiles.map(e => e.path) });
+    }
+  }
+
   private async collectFiles(rootPath: string): Promise<string[]> {
     if (this.useGitLsFiles) {
       const gitFiles = await this.tryGitLsFiles(rootPath);
@@ -111,6 +213,9 @@ export class ProjectScanner {
         return gitFiles
           .filter(f => {
             const ext = path.extname(f).toLowerCase();
+            // Phase 1.3: Check compound extensions like .d.ts, .min.js, .min.css
+            const compoundExt = this.getCompoundExtension(f);
+            if (compoundExt && this.excludeExtensions.has(compoundExt)) return false;
             if (this.excludeExtensions.has(ext)) return false;
             if (this.includeExtensions && !this.includeExtensions.has(ext)) return false;
             return true;
@@ -133,9 +238,24 @@ export class ProjectScanner {
     }
   }
 
+  // Phase 1.5: Circular symlink protection via visited inode tracking
   private walkDirectory(rootPath: string): string[] {
     const results: string[] = [];
+    const visitedDirs = new Set<string>();
     const walk = (current: string) => {
+      // Resolve to real path to detect circular symlinks
+      let realPath: string;
+      try {
+        realPath = fs.realpathSync(current);
+      } catch {
+        return; // Broken symlink — skip
+      }
+      if (visitedDirs.has(realPath)) {
+        log.warn(`Circular symlink detected, skipping: ${current}`);
+        return;
+      }
+      visitedDirs.add(realPath);
+
       const entries = fs.readdirSync(current, { withFileTypes: true });
       const sorted = entries.sort((a, b) => a.name.localeCompare(b.name));
       for (const entry of sorted) {
@@ -157,9 +277,20 @@ export class ProjectScanner {
           if (this.ignoreDirs.has(entry.name)) {
             continue;
           }
+          // Phase 1.4: Nested git repo detection — skip directories containing .git
+          try {
+            fs.accessSync(path.join(fullPath, ".git"));
+            log.info(`Skipping nested git repo: ${entry.name}/`);
+            continue;
+          } catch { /* not a git repo, continue */ }
           walk(fullPath);
         } else if (entry.isFile()) {
           const ext = path.extname(entry.name).toLowerCase();
+          // Phase 1.3: Check compound extensions like .d.ts, .min.js, .min.css
+          const compoundExt = this.getCompoundExtension(entry.name);
+          if (compoundExt && this.excludeExtensions.has(compoundExt)) {
+            continue;
+          }
           if (this.excludeExtensions.has(ext)) {
             continue;
           }
@@ -176,15 +307,15 @@ export class ProjectScanner {
     return results.sort();
   }
 
-  private hashFile(rootPath: string, filePath: string): FileHashEntry {
-    const content = fs.readFileSync(filePath);
-    const sha256 = crypto.createHash("sha256").update(content).digest("hex");
-    const relPath = this.normalizePath(path.relative(rootPath, filePath));
-    return {
-      path: relPath,
-      sha256,
-      bytes: content.length,
-    };
+  /**
+   * Extract compound extension for files like .d.ts, .min.js, .min.css
+   */
+  private getCompoundExtension(fileName: string): string | null {
+    const lower = fileName.toLowerCase();
+    if (lower.endsWith(".d.ts")) return ".d.ts";
+    if (lower.endsWith(".min.js")) return ".min.js";
+    if (lower.endsWith(".min.css")) return ".min.css";
+    return null;
   }
 
   private computeTreeHash(entries: FileHashEntry[]): string {

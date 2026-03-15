@@ -27,6 +27,7 @@ import type { CausalDiscoveryAgent } from "../../graph/CausalDiscoveryAgent.js";
 import type { MemoryPubSub } from "../../pubsub/index.js";
 import type { KnowledgeStore } from "../../knowledge/index.js";
 import type { QdrantClientWrapper } from "../../search/QdrantClient.js";
+import type { CcMemoryBridge } from "../../integration/CcMemoryBridge.js";
 
 /**
  * Mutable session state shared across all ToolModules by reference.
@@ -56,6 +57,7 @@ export interface SessionState {
   readonly pubsub: MemoryPubSub | null;
   readonly knowledgeStore: KnowledgeStore | null;
   readonly qdrantClient: QdrantClientWrapper | null;
+  readonly ccMemoryBridge: CcMemoryBridge | null;
 }
 
 /**

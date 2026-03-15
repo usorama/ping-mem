@@ -90,6 +90,25 @@ export const CodebaseIngestSchema = z.object({
 export type CodebaseIngestInput = z.infer<typeof CodebaseIngestSchema>;
 
 /**
+ * Request body for POST /api/v1/ingestion/enqueue
+ */
+export const IngestionEnqueueSchema = z.object({
+  projectDir: z
+    .string()
+    .min(1, "projectDir is required")
+    .max(4096)
+    .trim()
+    .refine((p) => !p.includes(".."), {
+      message: "path traversal not allowed",
+    }),
+  forceReingest: z.boolean().optional().default(false),
+  maxCommits: z.number().int().min(1).max(10000).optional(),
+  maxCommitAgeDays: z.number().int().min(1).max(3650).optional(),
+});
+
+export type IngestionEnqueueInput = z.infer<typeof IngestionEnqueueSchema>;
+
+/**
  * Request body for POST /api/v1/codebase/verify
  */
 export const CodebaseVerifySchema = z.object({

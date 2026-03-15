@@ -33,6 +33,7 @@ import { registerWorklogPartialRoutes } from "./partials/worklog.js";
 import { registerCodebaseRoutes } from "./codebase.js";
 import { registerChatRoutes } from "./chat-api.js";
 import { registerHealthPartialRoute } from "./partials/health.js";
+import { registerEvalRoutes } from "./eval.js";
 
 export interface UIDependencies {
   eventStore: EventStore;
@@ -114,6 +115,9 @@ export function registerUIRoutes(app: Hono<AppEnv>, deps: UIDependencies): void 
   // Chat API
   const chatRoutes = registerChatRoutes(deps);
   app.post("/ui/api/chat", chatRoutes.chat);
+
+  // Eval Dashboard
+  app.get("/ui/eval", registerEvalRoutes());
 
   // Health dot partial
   app.get("/ui/partials/health", registerHealthPartialRoute(deps));
