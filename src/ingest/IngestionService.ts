@@ -9,6 +9,8 @@
  * 5. Verify integrity
  */
 
+import * as crypto from "crypto";
+import * as path from "path";
 import { IngestionOrchestrator, type IngestionResult } from "./IngestionOrchestrator.js";
 import { TemporalCodeGraph } from "../graph/TemporalCodeGraph.js";
 import { CodeIndexer } from "../search/CodeIndexer.js";
@@ -16,12 +18,22 @@ import { Neo4jClient } from "../graph/Neo4jClient.js";
 import { QdrantClientWrapper } from "../search/QdrantClient.js";
 import type { ProjectInfo } from "./types.js";
 import { createLogger } from "../util/logger.js";
+import type { EventStore } from "../storage/EventStore.js";
+import type { SessionId, IngestionEventData, WorklogEventData } from "../types/index.js";
+import { IngestionEventEmitter } from "./IngestionEventEmitter.js";
+import { sanitizeHealthError } from "../observability/health-probes.js";
+import type { HealthMonitor } from "../observability/HealthMonitor.js";
 
 const log = createLogger("IngestionService");
+
+/** System session ID for ingestion events (EVAL G-04 fix) */
+const SYSTEM_SESSION_ID = "system-ingestion" as SessionId;
 
 export interface IngestionServiceOptions {
   neo4jClient: Neo4jClient;
   qdrantClient: QdrantClientWrapper;
+  eventStore?: EventStore;
+  healthMonitor?: HealthMonitor;
 }
 
 export interface IngestProjectOptions {
@@ -68,6 +80,9 @@ export class IngestionService {
   private readonly orchestrator: IngestionOrchestrator;
   private readonly codeGraph: TemporalCodeGraph;
   private readonly codeIndexer: CodeIndexer;
+  private readonly eventStore: EventStore | null;
+  private readonly healthMonitor: HealthMonitor | null;
+  readonly ingestionEmitter: IngestionEventEmitter;
 
   constructor(options: IngestionServiceOptions) {
     this.orchestrator = new IngestionOrchestrator();
@@ -77,6 +92,9 @@ export class IngestionService {
     this.codeIndexer = new CodeIndexer({
       qdrantClient: options.qdrantClient,
     });
+    this.eventStore = options.eventStore ?? null;
+    this.healthMonitor = options.healthMonitor ?? null;
+    this.ingestionEmitter = new IngestionEventEmitter();
   }
 
   /**
@@ -106,55 +124,116 @@ export class IngestionService {
       log.info("maxCommitAgeDays not specified — defaulting to 30 days (older commits will not be ingested)");
     }
 
-    const ingestionResult = await this.orchestrator.ingest(options.projectDir, ingestOptions);
+    // Phase 2: skipManifestSave — defer manifest until after Neo4j + Qdrant succeed
+    ingestOptions.skipManifestSave = true;
 
-    if (!ingestionResult) {
-      return null; // No changes
-    }
+    const startTime = Date.now();
+    const runId = crypto.randomUUID();
+    let currentPhase = "scanning";
+    let activeProjectId: string | null = null;
 
-    // Persist to Neo4j
+    // Phase 3: Emit ingestion started event
+    await this.emitIngestionEvent("CODEBASE_INGESTION_STARTED", {
+      runId,
+      projectDir: options.projectDir,
+    });
+
     try {
-      await this.codeGraph.persistIngestion(ingestionResult);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      log.error("ingestProject: Neo4j persist failed", {
-        projectId: ingestionResult.projectId,
-        error: message,
-      });
-      throw new Error(
-        `Ingestion failed for project "${ingestionResult.projectId}": ` +
-        `Neo4j persist failed: ${message}`
-      );
-    }
+      const ingestionResult = await this.orchestrator.ingest(options.projectDir, ingestOptions);
 
-    // Index vectors in Qdrant
-    try {
-      await this.codeIndexer.indexIngestion(ingestionResult);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      log.error("ingestProject: Qdrant indexing failed after Neo4j persist succeeded", {
-        projectId: ingestionResult.projectId,
-        error: message,
-      });
-      throw new Error(
-        `Ingestion partially failed for project "${ingestionResult.projectId}": ` +
-        `Neo4j persist succeeded but Qdrant indexing failed. ` +
-        `Run force reingest to recover: ${message}`
-      );
-    }
+      if (!ingestionResult) {
+        return null; // No changes
+      }
 
-    return {
-      projectId: ingestionResult.projectId,
-      treeHash: ingestionResult.projectManifest.treeHash,
-      filesIndexed: ingestionResult.codeFiles.length,
-      chunksIndexed: ingestionResult.codeFiles.reduce(
-        (sum, f) => sum + f.chunks.length,
-        0
-      ),
-      commitsIndexed: ingestionResult.gitHistory.commits.length,
-      ingestedAt: ingestionResult.ingestedAt,
-      hadChanges: true,
-    };
+      // Suppress HealthMonitor drift alerts during Neo4j+Qdrant writes (EVAL G-06 fix)
+      activeProjectId = ingestionResult.projectId;
+      this.healthMonitor?.suppressDuringIngestion(activeProjectId);
+
+      // Persist to Neo4j
+      currentPhase = "persisting_neo4j";
+      try {
+        await this.codeGraph.persistIngestion(ingestionResult);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        log.error("ingestProject: Neo4j persist failed", {
+          projectId: ingestionResult.projectId,
+          error: message,
+        });
+        throw new Error(
+          `Ingestion failed for project "${ingestionResult.projectId}": ` +
+          `Neo4j persist failed: ${message}`
+        );
+      }
+
+      // Index vectors in Qdrant
+      currentPhase = "indexing_qdrant";
+      try {
+        await this.codeIndexer.indexIngestion(ingestionResult);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        log.error("ingestProject: Qdrant indexing failed after Neo4j persist succeeded", {
+          projectId: ingestionResult.projectId,
+          error: message,
+        });
+        throw new Error(
+          `Ingestion partially failed for project "${ingestionResult.projectId}": ` +
+          `Neo4j persist succeeded but Qdrant indexing failed. ` +
+          `Run force reingest to recover: ${message}`
+        );
+      }
+
+      // Resume HealthMonitor drift checking after both Neo4j+Qdrant succeed
+      this.healthMonitor?.resumeAfterIngestion(ingestionResult.projectId);
+
+      // Phase 2: Save manifest ONLY after both Neo4j and Qdrant succeed
+      this.orchestrator.saveManifest(options.projectDir, ingestionResult.projectManifest);
+
+      const result: IngestProjectResult = {
+        projectId: ingestionResult.projectId,
+        treeHash: ingestionResult.projectManifest.treeHash,
+        filesIndexed: ingestionResult.codeFiles.length,
+        chunksIndexed: ingestionResult.codeFiles.reduce(
+          (sum, f) => sum + f.chunks.length,
+          0
+        ),
+        commitsIndexed: ingestionResult.gitHistory.commits.length,
+        ingestedAt: ingestionResult.ingestedAt,
+        hadChanges: true,
+      };
+
+      const durationMs = Date.now() - startTime;
+
+      // Phase 3: Emit ingestion completed event
+      await this.emitIngestionEvent("CODEBASE_INGESTION_COMPLETED", {
+        runId,
+        projectDir: options.projectDir,
+        projectId: result.projectId,
+        filesIndexed: result.filesIndexed,
+        chunksIndexed: result.chunksIndexed,
+        commitsIndexed: result.commitsIndexed,
+        durationMs,
+      });
+
+      // Phase 3: Record worklog entry (EVAL G-09: sessionId required)
+      await this.recordWorklog(options.projectDir, result, durationMs);
+
+      return result;
+    } catch (error) {
+      // Resume HealthMonitor if suppressed (even on failure)
+      if (activeProjectId) {
+        this.healthMonitor?.resumeAfterIngestion(activeProjectId);
+      }
+      const durationMs = Date.now() - startTime;
+      // Phase 3: Emit ingestion failed event
+      await this.emitIngestionEvent("CODEBASE_INGESTION_FAILED", {
+        runId,
+        projectDir: options.projectDir,
+        phase: currentPhase,
+        error: sanitizeHealthError(error),
+        durationMs,
+      });
+      throw error;
+    }
   }
 
   /**
@@ -313,6 +392,57 @@ export class IngestionService {
 
       // Re-throw - let caller decide how to handle
       throw error;
+    }
+  }
+
+  /**
+   * Phase 3: Emit an ingestion event to both EventStore and IngestionEventEmitter.
+   */
+  private async emitIngestionEvent(
+    eventType: "CODEBASE_INGESTION_STARTED" | "CODEBASE_INGESTION_COMPLETED" | "CODEBASE_INGESTION_FAILED",
+    data: IngestionEventData
+  ): Promise<void> {
+    // Emit to typed emitter (for SSE streaming)
+    this.ingestionEmitter.emitIngestion({ ...data, eventType });
+
+    // Persist to EventStore (if available)
+    try {
+      await this.eventStore?.createEvent(SYSTEM_SESSION_ID, eventType, data as unknown as Record<string, unknown>);
+    } catch (err) {
+      log.warn("Failed to persist ingestion event to EventStore", {
+        eventType,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Phase 3: Record a worklog entry for completed ingestion (EVAL G-09).
+   */
+  private async recordWorklog(
+    projectDir: string,
+    result: IngestProjectResult,
+    durationMs: number
+  ): Promise<void> {
+    if (!this.eventStore) return;
+
+    const worklogData: WorklogEventData = {
+      sessionId: SYSTEM_SESSION_ID,
+      kind: "tool",
+      title: `Ingested ${path.basename(projectDir)}`,
+      toolName: "codebase-ingest",
+      projectId: result.projectId,
+      treeHash: result.treeHash,
+      status: "success",
+      durationMs,
+    };
+
+    try {
+      await this.eventStore.createEvent(SYSTEM_SESSION_ID, "TOOL_RUN_RECORDED", worklogData);
+    } catch (err) {
+      log.warn("Failed to record ingestion worklog", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

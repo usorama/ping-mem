@@ -97,8 +97,33 @@ export class HealthMonitor {
   private lastQualityTickAt: string | null = null;
   private baselineQdrantCount: number | null = null;
   private readonly dedupWindowMs = 15 * 60 * 1000;
+  private readonly activeIngestions = new Set<string>();
 
   constructor(private readonly deps: HealthMonitorDeps) {}
+
+  /**
+   * Suppress Qdrant drift alerts during active ingestion (EVAL G-06 fix).
+   * Growth is expected while ingesting — false positives waste operator attention.
+   */
+  suppressDuringIngestion(projectId: string): void {
+    this.activeIngestions.add(projectId);
+  }
+
+  /**
+   * Resume drift checking after ingestion completes.
+   * Resets baseline so the new post-ingestion count becomes the reference.
+   */
+  resumeAfterIngestion(projectId: string): void {
+    this.activeIngestions.delete(projectId);
+    this.baselineQdrantCount = null;
+  }
+
+  /**
+   * Check if any ingestion is currently active.
+   */
+  isIngestionActive(): boolean {
+    return this.activeIngestions.size > 0;
+  }
 
   start(): void {
     if (this.fastTimer || this.qualityTimer) {
@@ -326,7 +351,7 @@ export class HealthMonitor {
       if (this.stopping) return;
 
       const qdrantClient = this.deps.services.qdrantClient;
-      if (qdrantClient && qdrantClient.getCircuitState() !== "open") {
+      if (qdrantClient && qdrantClient.getCircuitState() !== "open" && !this.isIngestionActive()) {
         try {
           const stats = await qdrantClient.getStats();
           const pointCount = stats.totalVectors;

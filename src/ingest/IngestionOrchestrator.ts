@@ -13,6 +13,7 @@
 import { ProjectScanner, ProjectScanOptions } from "./ProjectScanner.js";
 import { ManifestStore } from "./ManifestStore.js";
 import { CodeChunker, TextChunk } from "./CodeChunker.js";
+import { SemanticChunker, type SemanticChunk } from "./SemanticChunker.js";
 import { GitHistoryReader, GitHistoryResult } from "./GitHistoryReader.js";
 import { SymbolExtractor, ExtractedSymbol } from "./SymbolExtractor.js";
 import type { ProjectManifest, FileHashEntry } from "./types.js";
@@ -32,12 +33,18 @@ export interface CodeFileResult {
 
 export interface ChunkWithId {
   chunkId: string; // Deterministic: hash(filePath + chunkType + startOffset + content)
-  type: "code" | "comment" | "docstring";
+  type: "code" | "comment" | "docstring" | "function" | "class" | "file" | "block";
   start: number;
   end: number;
   lineStart: number;
   lineEnd: number;
   content: string;
+  /** Parent chunk ID for hierarchical chunks (e.g., method -> class) */
+  parentChunkId?: string;
+  /** Number of overlap lines with adjacent chunks */
+  overlapLines?: number;
+  /** Symbol/file name for semantic chunks */
+  chunkName?: string;
 }
 
 export interface IngestionResult {
@@ -53,12 +60,14 @@ export interface IngestionOptions {
   forceReingest?: boolean; // Ignore cached manifest
   maxCommits?: number; // Max git commits to ingest (default 200)
   maxCommitAgeDays?: number; // Only include commits from last N days
+  skipManifestSave?: boolean; // Defer manifest save to caller (Phase 2 manifest fix)
 }
 
 export class IngestionOrchestrator {
   private readonly scanner: ProjectScanner;
   private readonly manifestStore: ManifestStore;
   private readonly chunker: CodeChunker;
+  private readonly semanticChunker: SemanticChunker;
   private readonly gitReader: GitHistoryReader;
   private readonly symbolExtractor: SymbolExtractor;
 
@@ -66,8 +75,9 @@ export class IngestionOrchestrator {
     this.scanner = new ProjectScanner();
     this.manifestStore = new ManifestStore();
     this.chunker = new CodeChunker();
-    this.gitReader = new GitHistoryReader();
     this.symbolExtractor = new SymbolExtractor();
+    this.semanticChunker = new SemanticChunker(this.symbolExtractor);
+    this.gitReader = new GitHistoryReader();
   }
 
   /**
@@ -108,8 +118,10 @@ export class IngestionOrchestrator {
       Object.keys(gitHistoryOptions).length > 0 ? gitHistoryOptions : undefined
     );
 
-    // Step 4: Save manifest
-    this.manifestStore.save(projectPath, scanResult.manifest);
+    // Step 4: Save manifest (unless caller defers it)
+    if (!options.skipManifestSave) {
+      this.manifestStore.save(projectPath, scanResult.manifest);
+    }
 
     return {
       projectId: scanResult.manifest.projectId,
@@ -149,6 +161,15 @@ export class IngestionOrchestrator {
   }
 
   /**
+   * Explicitly save a manifest. Used when skipManifestSave=true to defer
+   * manifest persistence until after Neo4j + Qdrant succeed (Phase 2).
+   */
+  saveManifest(projectDir: string, manifest: ProjectManifest): void {
+    const projectPath = path.resolve(projectDir);
+    this.manifestStore.save(projectPath, manifest);
+  }
+
+  /**
    * Load the stored manifest for a project directory.
    * Returns null if no manifest exists.
    */
@@ -167,13 +188,15 @@ export class IngestionOrchestrator {
       try {
         const fullPath = path.join(projectRoot, entry.path);
         const content = fs.readFileSync(fullPath, "utf-8");
-        const rawChunks = this.chunker.chunkFile(entry.path, content);
-        const chunksWithIds = rawChunks.map((chunk) =>
-          this.buildChunkWithMetadata(entry.path, entry.sha256, content, chunk)
-        );
 
         // Extract symbols from the file
         const symbols = this.symbolExtractor.extractFromFile(entry.path, content);
+
+        // Use semantic chunking — produces hierarchical function/class/file chunks
+        const semanticChunks = this.semanticChunker.chunkFile(entry.path, content);
+        const chunksWithIds = semanticChunks.map((sc) =>
+          this.semanticChunkToChunkWithId(sc, content)
+        );
 
         results.push({
           filePath: entry.path,
@@ -188,6 +211,48 @@ export class IngestionOrchestrator {
     }
 
     return results;
+  }
+
+  /**
+   * Convert a SemanticChunk to ChunkWithId for pipeline compatibility.
+   */
+  private semanticChunkToChunkWithId(
+    sc: SemanticChunk,
+    fileContent: string,
+  ): ChunkWithId {
+    const lines = fileContent.split("\n");
+    // Compute byte offsets from line numbers
+    const start = this.offsetForLine(lines, sc.startLine);
+    const end = this.offsetForLine(lines, sc.endLine + 1);
+
+    const chunk: ChunkWithId = {
+      chunkId: sc.chunkId,
+      type: sc.chunkType,
+      start,
+      end: Math.min(end, fileContent.length),
+      lineStart: sc.startLine,
+      lineEnd: sc.endLine,
+      content: sc.content,
+      overlapLines: sc.overlapLines,
+      chunkName: sc.name,
+    };
+
+    if (sc.parentChunkId !== undefined) {
+      chunk.parentChunkId = sc.parentChunkId;
+    }
+
+    return chunk;
+  }
+
+  /**
+   * Compute byte offset for a 1-based line number.
+   */
+  private offsetForLine(lines: string[], lineNumber: number): number {
+    let offset = 0;
+    for (let i = 0; i < Math.min(lineNumber - 1, lines.length); i++) {
+      offset += (lines[i]?.length ?? 0) + 1; // +1 for newline
+    }
+    return offset;
   }
 
   private buildChunkWithMetadata(

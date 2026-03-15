@@ -71,10 +71,12 @@ import {
   AgentRegisterSchema,
   KnowledgeSearchSchema,
   KnowledgeIngestSchema,
+  IngestionEnqueueSchema,
 } from "../validation/api-schemas.js";
 import { KnowledgeStore } from "../knowledge/index.js";
 import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
+import { IngestionQueue } from "../ingest/IngestionQueue.js";
 
 /** Maximum SARIF payload size in bytes (5 MB) */
 const MAX_SARIF_BYTES = 5 * 1024 * 1024;
@@ -117,6 +119,7 @@ export class RESTPingMemServer {
   private ownsEventStore: boolean;
   private qdrantClient: QdrantClientWrapper | null = null;
   private healthMonitor: HealthMonitor | null = null;
+  private ingestionQueue: IngestionQueue | null = null;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -167,6 +170,9 @@ export class RESTPingMemServer {
     }
     if (config.healthMonitor) {
       this.healthMonitor = config.healthMonitor;
+    }
+    if (config.ingestionService) {
+      this.ingestionQueue = new IngestionQueue(config.ingestionService);
     }
 
     // Validate PING_MEM_STATIC_DIR at startup — catch misconfigurations early so
@@ -753,6 +759,15 @@ export class RESTPingMemServer {
           );
         }
         const projectDir = path.resolve(parseResult.data.projectDir);
+
+        // Phase 0: Security fix — reject unsafe project directories (EVAL C2)
+        if (!isProjectDirSafe(projectDir)) {
+          return c.json(
+            { error: "Forbidden", message: "Project directory is outside allowed roots" },
+            403
+          );
+        }
+
         const forceReingest = parseResult.data.forceReingest;
 
         const result = await this.config.ingestionService.ingestProject({
@@ -879,6 +894,166 @@ export class RESTPingMemServer {
 
         const results = await this.config.ingestionService.queryTimeline(timelineOptions);
         return c.json({ data: results });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Ingestion Queue Endpoints (Phase 2)
+    // ============================================================================
+
+    this.app.post("/api/v1/ingestion/enqueue", async (c) => {
+      try {
+        if (!this.ingestionQueue) {
+          return c.json(
+            { error: "ServiceUnavailable", message: "Ingestion queue not configured" },
+            503
+          );
+        }
+
+        const parseResult = IngestionEnqueueSchema.safeParse(await c.req.json());
+        if (!parseResult.success) {
+          return c.json(
+            { error: "BadRequest", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const projectDir = path.resolve(parseResult.data.projectDir);
+        if (!isProjectDirSafe(projectDir)) {
+          return c.json(
+            { error: "Forbidden", message: "Project directory is outside allowed roots" },
+            403
+          );
+        }
+
+        const enqueueOpts: import("../ingest/IngestionService.js").IngestProjectOptions = {
+          projectDir,
+          forceReingest: parseResult.data.forceReingest,
+        };
+        if (parseResult.data.maxCommits !== undefined) {
+          enqueueOpts.maxCommits = parseResult.data.maxCommits;
+        }
+        if (parseResult.data.maxCommitAgeDays !== undefined) {
+          enqueueOpts.maxCommitAgeDays = parseResult.data.maxCommitAgeDays;
+        }
+        const runId = await this.ingestionQueue.enqueue(enqueueOpts);
+        return c.json({ runId }, 202);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("queue full")) {
+          return c.json({ error: "TooManyRequests", message }, 429);
+        }
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/ingestion/queue", (c) => {
+      if (!this.ingestionQueue) {
+        return c.json(
+          { error: "ServiceUnavailable", message: "Ingestion queue not configured" },
+          503
+        );
+      }
+      return c.json(this.ingestionQueue.getQueueStatus());
+    });
+
+    this.app.get("/api/v1/ingestion/run/:runId", (c) => {
+      if (!this.ingestionQueue) {
+        return c.json(
+          { error: "ServiceUnavailable", message: "Ingestion queue not configured" },
+          503
+        );
+      }
+      const runId = c.req.param("runId");
+      // UUID v4 format validation
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(runId)) {
+        return c.json({ error: "BadRequest", message: "Invalid runId format" }, 400);
+      }
+      const run = this.ingestionQueue.getRun(runId);
+      if (!run) {
+        return c.json({ error: "NotFound", message: "Run not found" }, 404);
+      }
+      return c.json(run);
+    });
+
+    // ============================================================================
+    // Staleness Detection Endpoint (Phase 5, EVAL PERF-2)
+    // ============================================================================
+
+    this.app.get("/api/v1/codebase/staleness", async (c) => {
+      try {
+        const projectDir = c.req.query("projectDir");
+        if (!projectDir) {
+          return c.json(
+            { error: "BadRequest", message: "projectDir query parameter is required" },
+            400
+          );
+        }
+
+        const resolvedDir = path.resolve(projectDir);
+        if (!isProjectDirSafe(resolvedDir)) {
+          return c.json(
+            { error: "Forbidden", message: "Project directory is outside allowed roots" },
+            403
+          );
+        }
+
+        // Check directory exists
+        if (!fs.existsSync(resolvedDir) || !fs.statSync(resolvedDir).isDirectory()) {
+          return c.json(
+            { error: "NotFound", message: "Project directory does not exist" },
+            404
+          );
+        }
+
+        // Use git status --porcelain for O(1) staleness check (not full re-hash)
+        const { execFileSync } = await import("child_process");
+        let gitDirty = false;
+        let gitStatusOutput = "";
+        try {
+          gitStatusOutput = execFileSync("git", ["status", "--porcelain"], {
+            cwd: resolvedDir,
+            encoding: "utf-8",
+            maxBuffer: 1024 * 1024,
+            timeout: 10_000,
+          }).trim();
+          gitDirty = gitStatusOutput.length > 0;
+        } catch {
+          // Not a git repo or git not available — report as unknown
+          return c.json({
+            projectDir: resolvedDir,
+            stale: false,
+            reason: "not a git repository or git unavailable",
+            hasManifest: false,
+          });
+        }
+
+        // Check if manifest exists
+        const manifestPath = path.join(resolvedDir, ".ping-mem", "manifest.json");
+        const hasManifest = fs.existsSync(manifestPath);
+
+        // Determine staleness reason
+        let stale = false;
+        let reason = "up to date";
+
+        if (!hasManifest) {
+          stale = true;
+          reason = "no manifest found — project has never been ingested";
+        } else if (gitDirty) {
+          const changedFileCount = gitStatusOutput.split("\n").filter(Boolean).length;
+          stale = true;
+          reason = `${changedFileCount} uncommitted change(s) detected`;
+        }
+
+        return c.json({
+          projectDir: resolvedDir,
+          stale,
+          reason,
+          hasManifest,
+          ...(gitDirty ? { changedFiles: gitStatusOutput.split("\n").filter(Boolean).length } : {}),
+        });
       } catch (error) {
         return this.handleError(c, error);
       }

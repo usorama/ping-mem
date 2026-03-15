@@ -36,6 +36,7 @@ import type { ExtractedSymbol } from "../ingest/SymbolExtractor.js";
 import * as crypto from "crypto";
 import * as path from "path";
 import { createLogger } from "../util/logger.js";
+import { sanitizeHealthError } from "../observability/health-probes.js";
 
 const log = createLogger("TemporalCodeGraph");
 
@@ -398,19 +399,35 @@ export class TemporalCodeGraph {
     for (let i = 0; i < total; i += TemporalCodeGraph.BATCH_SIZE) {
       const batch = items.slice(i, i + TemporalCodeGraph.BATCH_SIZE);
       const batchIndex = Math.floor(i / TemporalCodeGraph.BATCH_SIZE);
-      const session = this.neo4j.getSession();
-      try {
-        await session.run(cypher, buildParams(batch));
-        if (batchIndex > 0 && batchIndex % 10 === 0) {
-          log.info(`${label}: ${Math.min(i + batch.length, total)}/${total}`);
+
+      // Per-batch retry with 3 attempts (EVAL PERF-3 fix)
+      let lastErr: Error | undefined;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const session = this.neo4j.getSession();
+        try {
+          await session.run(cypher, buildParams(batch));
+          lastErr = undefined;
+          if (batchIndex > 0 && batchIndex % 10 === 0) {
+            log.info(`${label}: ${Math.min(i + batch.length, total)}/${total}`);
+          }
+          break;
+        } catch (error) {
+          lastErr = error instanceof Error ? error : new Error(String(error));
+          if (attempt < 2) {
+            const delay = 2000 * Math.pow(2, attempt) + Math.random() * 1000;
+            log.warn(`${label} batch ${batchIndex} attempt ${attempt + 1} failed, retrying`, {
+              error: sanitizeHealthError(lastErr),
+            });
+            await new Promise(r => setTimeout(r, delay));
+          }
+        } finally {
+          await session.close();
         }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+      }
+      if (lastErr) {
         throw new Error(
-          `Neo4j batch ${batchIndex} failed (items ${i}-${i + batch.length - 1} of ${total}): ${message}`
+          `Neo4j batch ${batchIndex} failed (items ${i}-${i + batch.length - 1} of ${total}): ${lastErr.message}`
         );
-      } finally {
-        await session.close();
       }
     }
   }

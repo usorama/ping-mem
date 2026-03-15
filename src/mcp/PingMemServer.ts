@@ -65,6 +65,7 @@ import { CAUSAL_TOOLS } from "./handlers/CausalToolModule.js";
 import { KNOWLEDGE_TOOLS } from "./handlers/KnowledgeToolModule.js";
 import { AGENT_TOOLS } from "./handlers/AgentToolModule.js";
 import { KnowledgeStore } from "../knowledge/index.js";
+import { CcMemoryBridge } from "../integration/CcMemoryBridge.js";
 import { MemoryPubSub } from "../pubsub/index.js";
 
 // ============================================================================
@@ -214,7 +215,18 @@ export class PingMemServer {
       pubsub: new MemoryPubSub(),
       knowledgeStore: new KnowledgeStore(this.eventStore.getDatabase()),
       qdrantClient: config.qdrantClient ?? null,
+      ccMemoryBridge: null, // Initialized below after state is fully built
     };
+
+    // Initialize CcMemoryBridge with the knowledge store and event store
+    const knowledgeStore = this.state.knowledgeStore;
+    if (knowledgeStore) {
+      (this.state as { ccMemoryBridge: CcMemoryBridge | null }).ccMemoryBridge =
+        new CcMemoryBridge({
+          knowledgeStore,
+          eventStore: this.eventStore,
+        });
+    }
 
     // Register modules
     this.modules = [

@@ -503,6 +503,37 @@ export class ContextToolModule implements ToolModule {
       result.entityIds = entityIds ?? [];
     }
 
+    // CcMemoryBridge write-through enrichment
+    if (this.state.ccMemoryBridge) {
+      try {
+        // Derive projectId from session metadata or args
+        const session = this.state.currentSessionId
+          ? await this.state.sessionManager.getSession(this.state.currentSessionId)
+          : null;
+        const projectId = (session?.projectDir ?? args.projectId as string | undefined) ?? "default";
+        const tags = (args.metadata as Record<string, unknown> | undefined)?.tags as string[] | undefined;
+        const enrichment = this.state.ccMemoryBridge.enrich(
+          args.key as string,
+          value,
+          category,
+          projectId,
+          tags,
+        );
+        if (enrichment.entities.length > 0) {
+          result.enrichment = {
+            entities: enrichment.entities.length,
+            relationships: enrichment.relationships.length,
+            crossProjectMatches: enrichment.crossProjectMatches.length,
+            propagatedTo: enrichment.propagatedTo,
+          };
+        }
+      } catch (error) {
+        log.warn("CcMemoryBridge enrichment failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     // Proactive recall: surface related memories (unless explicitly skipped)
     // Combines same-session (in-memory) and cross-session (SQLite) results
     if (args.skipProactiveRecall !== true) {

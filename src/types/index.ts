@@ -290,7 +290,10 @@ export type EventType =
   | "GIT_OPERATION_RECORDED"
   | "AGENT_TASK_STARTED"
   | "AGENT_TASK_SUMMARY"
-  | "AGENT_TASK_COMPLETED";
+  | "AGENT_TASK_COMPLETED"
+  | "CODEBASE_INGESTION_STARTED"
+  | "CODEBASE_INGESTION_COMPLETED"
+  | "CODEBASE_INGESTION_FAILED";
 
 /**
  * Event payload for session events
@@ -341,6 +344,21 @@ export interface WorklogEventData {
   durationMs?: number | undefined;
   summary?: string | undefined;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Event payload for codebase ingestion events (Phase 3)
+ */
+export interface IngestionEventData {
+  runId: string;
+  projectDir: string;
+  projectId?: string;
+  phase?: string;
+  filesIndexed?: number;
+  chunksIndexed?: number;
+  commitsIndexed?: number;
+  durationMs?: number;
+  error?: string; // always sanitized via sanitizeHealthError()
 }
 
 // ============================================================================
