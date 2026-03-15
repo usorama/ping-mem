@@ -78,4 +78,27 @@ describe("SessionManager.hydrate() — restart survival", () => {
     await sm.close();
     await es.close();
   });
+
+  it("does not hydrate ended sessions", async () => {
+    const dbPath = createTmpDbPath();
+
+    const es1 = new EventStore({ dbPath, walMode: true });
+    const sm1 = new SessionManager({ eventStore: es1 });
+    const active = await sm1.startSession({ name: "active-session" });
+    const ended = await sm1.startSession({ name: "ended-session" });
+    await sm1.endSession(ended.id);
+    await sm1.close();
+    await es1.close();
+
+    // Restart: only active session should be hydrated
+    const es2 = new EventStore({ dbPath, walMode: true });
+    const sm2 = new SessionManager({ eventStore: es2 });
+    await sm2.hydrate();
+
+    expect(sm2.getSession(active.id)).toBeDefined();
+    expect(sm2.getSession(ended.id)).toBeNull();
+
+    await sm2.close();
+    await es2.close();
+  });
 });

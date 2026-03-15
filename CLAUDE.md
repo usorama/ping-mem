@@ -131,10 +131,10 @@ For any project integrating with ping-mem:
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem-rest` container |
+| 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem` container |
 | Empty search results | Project not ingested into Qdrant | Run force-ingest script |
 | Wrong projectId | Path mismatch (Docker vs local) | Verify git remote URL is consistent |
-| Connection refused :3003 | REST container down | `docker-compose up -d ping-mem-rest` |
+| Connection refused :3003 | REST container down | `docker-compose up -d ping-mem` (with `PING_MEM_TRANSPORT=rest`) |
 | ECONNREFUSED :6333 | Qdrant down | `docker restart ping-mem-qdrant` |
 
 ---
@@ -964,9 +964,9 @@ ping-mem/
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem-rest` container |
+| 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem` container |
 | Empty search results | Project not ingested | Run force-ingest script |
-| Connection refused :3003 | REST container down | `docker-compose up -d ping-mem-rest` |
+| Connection refused :3003 | REST container down | `docker-compose up -d ping-mem` (with `PING_MEM_TRANSPORT=rest`) |
 | ECONNREFUSED :6333 | Qdrant down | `docker restart ping-mem-qdrant` |
 
 ---

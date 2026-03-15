@@ -36,8 +36,7 @@ This guide covers deploying ping-mem using Docker and Docker Compose.
 
 | Service | Port | Description |
 |---------|------|-------------|
-| ping-mem-sse | 3000 | SSE transport server |
-| ping-mem-rest | 3001 | REST API server |
+| ping-mem | 3000 | Main server (transport set via `PING_MEM_TRANSPORT`) |
 | ping-mem-neo4j | 7474, 7687 | Neo4j knowledge graph |
 | ping-mem-qdrant | 6333, 6334 | Qdrant vector database |
 
@@ -107,19 +106,14 @@ See `.env.example` for complete list.
 
 ### Transport Selection
 
-Run SSE transport:
+Run SSE transport (default):
 ```bash
-PING_MEM_TRANSPORT=sse docker-compose up ping-mem-sse
+docker-compose up ping-mem
 ```
 
 Run REST transport:
 ```bash
-PING_MEM_TRANSPORT=rest docker-compose up ping-mem-rest
-```
-
-Both transports simultaneously:
-```bash
-docker-compose up ping-mem-sse ping-mem-rest
+PING_MEM_TRANSPORT=rest docker-compose up ping-mem
 ```
 
 ## Data Persistence

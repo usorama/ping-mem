@@ -268,9 +268,10 @@ export class HealthMonitor {
       try {
         const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
         if (walSize > 2_000_000) {
-          // TRUNCATE mode: safe with single container (no concurrent writers from another process).
-          // Lowered from 50MB to 2MB to keep WAL bounded — aligns with 1MB startup recovery threshold.
-          this.deps.eventStore.walCheckpoint("TRUNCATE");
+          // PASSIVE mode: never blocks concurrent readers/writers (backup scripts, CLI tools, MCP stdio).
+          // TRUNCATE is only used at startup where no concurrent access exists.
+          // Threshold lowered from 50MB to 2MB to keep WAL bounded.
+          this.deps.eventStore.walCheckpoint("PASSIVE");
         }
         // Clear prior failure alert whenever the WAL probe block succeeds — even when
         // walSize dropped below the checkpoint threshold (e.g., after VACUUM). Without

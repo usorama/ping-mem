@@ -85,11 +85,10 @@ export class SessionManager {
     // Clear existing in-memory state before rebuilding
     this.sessions.clear();
 
-    // Get all SESSION_STARTED events
-    const sessionEvents = await this.eventStore.listSessions();
+    // Get all session IDs (bounded by EventStore's LIMIT 10000)
+    const sessionIds = await this.eventStore.listSessions();
 
-    for (const sessionId of sessionEvents) {
-      // Get session details from first event
+    for (const sessionId of sessionIds) {
       const events = await this.eventStore.getBySession(sessionId);
       const startEvent = events.find((e) => e.eventType === "SESSION_STARTED");
 
@@ -97,22 +96,27 @@ export class SessionManager {
         continue;
       }
 
+      // Skip ended sessions — they cannot be resumed and loading them wastes memory.
+      // A long-running deployment may accumulate thousands of ended sessions.
+      const endEvent = events.find((e) => e.eventType === "SESSION_ENDED");
+      if (endEvent) {
+        continue;
+      }
+
       const payload = startEvent.payload as SessionEventData;
       const config = payload.config;
 
-      // Reconstruct session from event (only include defined optional fields)
       const session: Session = {
         id: sessionId,
         name: payload.name ?? "unknown",
-        status: "active", // Assume active (can be updated by SESSION_ENDED events)
+        status: "active",
         startedAt: new Date(startEvent.timestamp),
         lastActivityAt: new Date(startEvent.timestamp),
-        memoryCount: 0, // Will be accurate after MemoryManager hydration
+        memoryCount: 0,
         eventCount: events.length,
         metadata: config?.metadata ?? {},
       };
 
-      // Add optional fields only if they're defined
       if (config?.projectDir !== undefined) {
         session.projectDir = config.projectDir;
       }
@@ -121,13 +125,6 @@ export class SessionManager {
       }
       if (config?.continueFrom !== undefined) {
         session.parentSessionId = config.continueFrom;
-      }
-
-      // Check for SESSION_ENDED event
-      const endEvent = events.find((e) => e.eventType === "SESSION_ENDED");
-      if (endEvent) {
-        session.status = "ended";
-        session.endedAt = new Date(endEvent.timestamp);
       }
 
       this.sessions.set(sessionId, session);
