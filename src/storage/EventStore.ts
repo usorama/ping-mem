@@ -221,6 +221,24 @@ export class EventStore {
     // Initialize schema
     this.initializeSchema();
 
+    // WAL recovery: if WAL file is oversized from a prior crash, force a TRUNCATE checkpoint.
+    // On startup there are no concurrent writers, so TRUNCATE is safe and effective.
+    if (this.config.walMode && this.config.dbPath !== ":memory:") {
+      const walSize = this.getWalSizeBytes();
+      if (walSize > 1_048_576) {
+        log.info("WAL file oversized, running TRUNCATE checkpoint", { walSize });
+        try {
+          this.db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+          log.info("WAL recovery complete", { newWalSize: this.getWalSizeBytes() });
+        } catch (err) {
+          log.error("WAL recovery failed — HealthMonitor will attempt PASSIVE checkpoints at runtime", {
+            error: err instanceof Error ? err.message : String(err),
+            walSize,
+          });
+        }
+      }
+    }
+
     // Prepare statements (bun:sqlite uses $name for parameters)
     this.stmtInsertEvent = this.db.prepare(`
       INSERT INTO events (

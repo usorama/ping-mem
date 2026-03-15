@@ -70,8 +70,6 @@ detect_compose_file() {
 detect_app_container() {
   if container_exists "ping-mem"; then
     echo "ping-mem"
-  elif container_exists "ping-mem-rest"; then
-    echo "ping-mem-rest"
   else
     echo "ping-mem"
   fi
@@ -202,7 +200,7 @@ main() {
     docker compose -f "$COMPOSE_FILE" --project-directory "$COMPOSE_PROJECT_DIR" stop 2>/dev/null || true
   else
     # Stop containers individually
-    for c in ping-mem ping-mem-rest ping-mem-neo4j ping-mem-qdrant; do
+    for c in ping-mem ping-mem-neo4j ping-mem-qdrant; do
       if container_exists "$c"; then
         docker stop "$c" 2>/dev/null || true
       fi
@@ -465,7 +463,7 @@ main() {
   if [[ -n "$COMPOSE_FILE" ]]; then
     docker compose -f "$COMPOSE_FILE" --project-directory "$COMPOSE_PROJECT_DIR" up -d 2>/dev/null || true
   else
-    for c in ping-mem-neo4j ping-mem-qdrant ping-mem ping-mem-rest; do
+    for c in ping-mem-neo4j ping-mem-qdrant ping-mem; do
       if container_exists "$c"; then
         docker start "$c" 2>/dev/null || true
       fi

@@ -85,34 +85,55 @@ export class SessionManager {
     // Clear existing in-memory state before rebuilding
     this.sessions.clear();
 
-    // Get all SESSION_STARTED events
-    const sessionEvents = await this.eventStore.listSessions();
+    // Get all session IDs (bounded by EventStore's LIMIT 10000)
+    const sessionIds = await this.eventStore.listSessions();
+    let restoredCount = 0;
+    let skippedEndedCount = 0;
+    let skippedInvalidCount = 0;
 
-    for (const sessionId of sessionEvents) {
-      // Get session details from first event
+    for (const sessionId of sessionIds) {
       const events = await this.eventStore.getBySession(sessionId);
       const startEvent = events.find((e) => e.eventType === "SESSION_STARTED");
 
       if (!startEvent) {
+        log.warn("Session has events but no SESSION_STARTED event — skipping hydration", {
+          sessionId,
+          eventCount: events.length,
+        });
+        skippedInvalidCount++;
         continue;
       }
 
-      const payload = startEvent.payload as SessionEventData;
+      // Skip ended sessions — they cannot be resumed and loading them wastes memory.
+      const endEvent = events.find((e) => e.eventType === "SESSION_ENDED");
+      if (endEvent) {
+        skippedEndedCount++;
+        continue;
+      }
+
+      const rawPayload = startEvent.payload;
+      if (!rawPayload || typeof rawPayload !== "object" || !("name" in rawPayload)) {
+        log.warn("Session START event has invalid payload — skipping hydration", {
+          sessionId,
+          payloadType: typeof rawPayload,
+        });
+        skippedInvalidCount++;
+        continue;
+      }
+      const payload = rawPayload as SessionEventData;
       const config = payload.config;
 
-      // Reconstruct session from event (only include defined optional fields)
       const session: Session = {
         id: sessionId,
         name: payload.name ?? "unknown",
-        status: "active", // Assume active (can be updated by SESSION_ENDED events)
+        status: "active",
         startedAt: new Date(startEvent.timestamp),
         lastActivityAt: new Date(startEvent.timestamp),
-        memoryCount: 0, // Will be accurate after MemoryManager hydration
+        memoryCount: 0,
         eventCount: events.length,
         metadata: config?.metadata ?? {},
       };
 
-      // Add optional fields only if they're defined
       if (config?.projectDir !== undefined) {
         session.projectDir = config.projectDir;
       }
@@ -123,15 +144,37 @@ export class SessionManager {
         session.parentSessionId = config.continueFrom;
       }
 
-      // Check for SESSION_ENDED event
-      const endEvent = events.find((e) => e.eventType === "SESSION_ENDED");
-      if (endEvent) {
-        session.status = "ended";
-        session.endedAt = new Date(endEvent.timestamp);
+      // Restore pause state (last PAUSED/RESUMED event wins)
+      const lastPauseEvent = events
+        .filter((e) => e.eventType === "SESSION_PAUSED" || e.eventType === "SESSION_RESUMED")
+        .at(-1);
+      if (lastPauseEvent?.eventType === "SESSION_PAUSED") {
+        session.status = "paused";
+      }
+
+      // Update lastActivityAt from the most recent event
+      const lastEvent = events.at(-1);
+      if (lastEvent) {
+        session.lastActivityAt = new Date(lastEvent.timestamp);
       }
 
       this.sessions.set(sessionId, session);
+
+      // Restore auto-checkpoint timers for active sessions (startSession() sets these up,
+      // but hydrate() must do it too or restored sessions lose their checkpoint safety net)
+      if (session.status === "active" && this.config.autoCheckpointInterval > 0) {
+        this.setupAutoCheckpoint(sessionId);
+      }
+
+      restoredCount++;
     }
+
+    log.info("Session hydration complete", {
+      restored: restoredCount,
+      skippedEnded: skippedEndedCount,
+      skippedInvalid: skippedInvalidCount,
+      totalScanned: sessionIds.length,
+    });
   }
 
   /**

@@ -91,61 +91,6 @@ services:
       start_period: 15s
     restart: unless-stopped
 
-  # ping-mem REST API Server (optional second instance for REST-only clients)
-  # WARNING: Do not run simultaneously with ping-mem SSE container — they share SQLite
-  ping-mem-rest:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ping-mem-rest
-    ports:
-      - "3003:3003"
-    deploy:
-      resources:
-        limits:
-          memory: 4G
-    environment:
-      - PING_MEM_HOST=0.0.0.0
-      - PING_MEM_PORT=3003
-      - PING_MEM_TRANSPORT=rest
-      - BUN_JSC_jitMemoryReservationSize=2147483648
-      - PING_MEM_DB_PATH=/data/ping-mem.db
-      - PING_MEM_DIAGNOSTICS_DB_PATH=/data/ping-mem-diagnostics.db
-      - PING_MEM_ADMIN_DB_PATH=/data/ping-mem-admin.db
-      - PING_MEM_API_KEY=${PING_MEM_API_KEY:-}
-      - PING_MEM_SECRET_KEY=${PING_MEM_SECRET_KEY:-}
-      - PING_MEM_ADMIN_USER=${PING_MEM_ADMIN_USER:-}
-      - PING_MEM_ADMIN_PASS=${PING_MEM_ADMIN_PASS:-}
-      - NEO4J_URI=bolt://ping-mem-neo4j:7687
-      - NEO4J_USERNAME=neo4j
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=neo4j_password
-      - QDRANT_URL=http://ping-mem-qdrant:6333
-      - QDRANT_COLLECTION_NAME=ping-mem-vectors
-      - QDRANT_VECTOR_DIMENSIONS=768
-      - NODE_ENV=production
-      # Multi-agent memory settings (v2)
-      - PING_MEM_MAX_AGENTS=${PING_MEM_MAX_AGENTS:-100}
-    volumes:
-      - ping-mem-data:/data
-      - /Users/umasankr/Projects:/projects:rw
-    networks:
-      - ping-mem-network
-    depends_on:
-      ping-mem-neo4j:
-        condition: service_healthy
-      ping-mem-qdrant:
-        condition: service_started
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
-    restart: unless-stopped
-    profiles:
-      - rest-api
-
 networks:
   ping-mem-network:
     driver: bridge

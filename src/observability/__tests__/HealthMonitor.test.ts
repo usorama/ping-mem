@@ -313,12 +313,32 @@ describe("HealthMonitor", () => {
     internals.tickRunning = false;
   });
 
-  test("WAL checkpoint is triggered when wal_size_bytes exceeds 50MB", async () => {
+  test("WAL checkpoint is triggered when wal_size_bytes exceeds 2MB", async () => {
+    let checkpointMode: string | null = null;
+    const fakeEventStore = {
+      getDatabase: () => ({}),
+      ping: async () => true,
+      getWalSizeBytes: () => 2_500_000,
+      getFreelistRatio: () => 0,
+      getIntegrityOk: () => 1,
+      walCheckpoint: (mode: string) => { checkpointMode = mode; },
+      isAgentActive: () => false,
+      close: async () => {},
+    };
+    const monitor = createHealthMonitor({
+      services: {},
+      eventStore: fakeEventStore as unknown as import("../../storage/EventStore.js").EventStore,
+    });
+    await getInternals(monitor).tick();
+    expect(checkpointMode).toBe("PASSIVE");
+  });
+
+  test("WAL checkpoint is NOT triggered when wal_size_bytes is under 2MB", async () => {
     let checkpointCalled = false;
     const fakeEventStore = {
       getDatabase: () => ({}),
       ping: async () => true,
-      getWalSizeBytes: () => 60_000_000,
+      getWalSizeBytes: () => 1_500_000,
       getFreelistRatio: () => 0,
       getIntegrityOk: () => 1,
       walCheckpoint: (_mode: string) => { checkpointCalled = true; },
@@ -330,7 +350,7 @@ describe("HealthMonitor", () => {
       eventStore: fakeEventStore as unknown as import("../../storage/EventStore.js").EventStore,
     });
     await getInternals(monitor).tick();
-    expect(checkpointCalled).toBe(true);
+    expect(checkpointCalled).toBe(false);
   });
 
   test("WAL checkpoint failure sets sqlite:wal_checkpoint_failed alert", async () => {

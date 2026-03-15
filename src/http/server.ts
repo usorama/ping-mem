@@ -131,6 +131,16 @@ export async function startHTTPServer(): Promise<void> {
     });
   }
 
+  // Hydrate sessions from persisted events before accepting requests.
+  // If hydration fails (corrupt DB, I/O error), start with empty sessions rather than crashing.
+  try {
+    await serverInstance.hydrateSessionState();
+  } catch (err) {
+    log.error("Session hydration failed — starting with empty session state", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   // Start the server
   await serverInstance.start();
   healthMonitor.start();

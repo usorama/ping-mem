@@ -36,8 +36,7 @@ This guide covers deploying ping-mem using Docker and Docker Compose.
 
 | Service | Port | Description |
 |---------|------|-------------|
-| ping-mem-sse | 3000 | SSE transport server |
-| ping-mem-rest | 3001 | REST API server |
+| ping-mem | 3000 | Main server (transport set via `PING_MEM_TRANSPORT`) |
 | ping-mem-neo4j | 7474, 7687 | Neo4j knowledge graph |
 | ping-mem-qdrant | 6333, 6334 | Qdrant vector database |
 
@@ -52,7 +51,7 @@ docker-compose build
 docker-compose up -d
 
 # Start specific service
-docker-compose up -d ping-mem-sse
+docker-compose up -d ping-mem
 ```
 
 ### Stop and Cleanup
@@ -76,7 +75,7 @@ docker-compose logs
 docker-compose logs -f
 
 # View specific service logs
-docker-compose logs -f ping-mem-sse
+docker-compose logs -f ping-mem
 
 # Check health status
 docker-compose ps
@@ -85,7 +84,7 @@ docker-compose ps
 ### Exec into Container
 ```bash
 # Access ping-mem container
-docker-compose exec ping-mem-sse sh
+docker-compose exec ping-mem sh
 
 # Access Neo4j
 docker-compose exec ping-mem-neo4j cypher-shell -u neo4j -p your_password
@@ -107,19 +106,14 @@ See `.env.example` for complete list.
 
 ### Transport Selection
 
-Run SSE transport:
+Run SSE transport (default):
 ```bash
-PING_MEM_TRANSPORT=sse docker-compose up ping-mem-sse
+docker-compose up ping-mem
 ```
 
 Run REST transport:
 ```bash
-PING_MEM_TRANSPORT=rest docker-compose up ping-mem-rest
-```
-
-Both transports simultaneously:
-```bash
-docker-compose up ping-mem-sse ping-mem-rest
+PING_MEM_TRANSPORT=rest docker-compose up ping-mem
 ```
 
 ## Data Persistence
@@ -163,7 +157,7 @@ curl http://localhost:6333/health
 
 1. Verify network: `docker network ls | grep ping-mem`
 2. Check service health: `docker-compose ps`
-3. Test connectivity: `docker-compose exec ping-mem-sse ping ping-mem-neo4j`
+3. Test connectivity: `docker-compose exec ping-mem ping ping-mem-neo4j`
 
 ### Database initialization
 

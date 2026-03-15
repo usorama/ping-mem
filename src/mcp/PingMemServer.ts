@@ -329,6 +329,11 @@ export class PingMemServer {
     return this.state.currentSessionId;
   }
 
+  /** Hydrate session state from EventStore (call before accepting requests) */
+  async hydrateSessionState(): Promise<void> {
+    await this.sessionManager.hydrate();
+  }
+
   /** Close all resources */
   async close(): Promise<void> {
     // Close all memory managers

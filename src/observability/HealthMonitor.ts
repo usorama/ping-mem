@@ -267,8 +267,10 @@ export class HealthMonitor {
       // degraded database while health status is unknown.
       try {
         const walSize = this.lastSnapshot?.components.sqlite.metrics?.wal_size_bytes ?? 0;
-        if (walSize > 50_000_000) {
-          // PASSIVE mode never blocks writers - SQLite WAL checkpoint is atomic
+        if (walSize > 2_000_000) {
+          // PASSIVE mode: never blocks concurrent readers/writers (backup scripts, CLI tools, MCP stdio).
+          // TRUNCATE is only used at startup where no concurrent access exists.
+          // Threshold lowered from 50MB to 2MB to keep WAL bounded.
           this.deps.eventStore.walCheckpoint("PASSIVE");
         }
         // Clear prior failure alert whenever the WAL probe block succeeds — even when

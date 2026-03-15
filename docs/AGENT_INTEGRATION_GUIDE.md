@@ -96,7 +96,7 @@ Tools are available as `context_*`, `codebase_*`, `diagnostics_*`, `worklog_*`.
 
 Base URLs:
 - **SSE server**: `http://localhost:3000` (primary, supports SSE streaming)
-- **REST server**: `http://localhost:3003` (Docker, REST-only clients)
+- **REST server**: `http://localhost:3000` (Docker, set `PING_MEM_TRANSPORT=rest`)
 
 Headers:
 ```
@@ -447,8 +447,7 @@ Because projectId uses `SHA-256(gitRemoteUrl + "::" + relativeToGitRoot)`, the s
 | Neo4j Bolt | `ping-mem-neo4j` | 7687 | Bolt |
 | Qdrant HTTP | `ping-mem-qdrant` | 6333 | HTTP |
 | Qdrant gRPC | `ping-mem-qdrant` | 6334 | gRPC |
-| ping-mem SSE | `ping-mem` | 3000 | HTTP/SSE |
-| ping-mem REST | `ping-mem-rest` | 3003 | HTTP |
+| ping-mem | `ping-mem` | 3000 | HTTP (transport via `PING_MEM_TRANSPORT`) |
 
 ### Symlink Handling (macOS)
 
@@ -532,14 +531,13 @@ DETACH DELETE p, n
 ```bash
 docker compose up -d        # Ensure all containers running
 docker restart ping-mem      # Restart to re-initialize
-docker restart ping-mem-rest # If using REST container
 ```
 
 ### Search Returns No Results
 
 **Cause 1**: Project not ingested yet.
 ```bash
-curl "http://localhost:3003/api/v1/codebase/search?query=test&limit=1"
+curl "http://localhost:3000/api/v1/codebase/search?query=test&limit=1"
 # If empty, ingest first
 ```
 
@@ -583,7 +581,7 @@ docker compose up -d                # Ensure all services up
 | `ECONNREFUSED :7687` | Neo4j | `docker restart ping-mem-neo4j` |
 | `ECONNREFUSED :6333` | Qdrant | `docker restart ping-mem-qdrant` |
 | `ECONNREFUSED :3000` | ping-mem SSE | `docker compose up -d` |
-| `ECONNREFUSED :3003` | ping-mem REST | `docker compose --profile rest-api up -d` |
+| `ECONNREFUSED :3000` | ping-mem | `docker compose up -d ping-mem` |
 
 ---
 

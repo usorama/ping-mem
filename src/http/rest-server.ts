@@ -2269,6 +2269,14 @@ export class RESTPingMemServer {
   }
 
   /**
+   * Hydrate session state from EventStore before accepting requests.
+   * Must be called before start() to restore sessions from prior runs.
+   */
+  async hydrateSessionState(): Promise<void> {
+    await this.sessionManager.hydrate();
+  }
+
+  /**
    * Start the REST server
    */
   async start(): Promise<void> {
@@ -2283,12 +2291,16 @@ export class RESTPingMemServer {
     if (this.pubsub) {
       this.pubsub.destroy();
     }
-    // Close event store (SQLite)
-    await this.eventStore.close();
+    // Close SessionManager before EventStore — checkpoint timers depend on EventStore
+    await this.sessionManager.close();
+    // Close event store only if we own it (not injected externally — caller closes it)
+    if (this.ownsEventStore) {
+      await this.eventStore.close();
+    }
     // Clear cached memory managers
     this.memoryManagers.clear();
     this.managerPromises.clear();
-    console.log("[REST Server] Stopped");
+    log.info("Stopped");
   }
 
   /**

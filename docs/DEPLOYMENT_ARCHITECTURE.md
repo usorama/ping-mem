@@ -197,8 +197,7 @@ bun run diagnostics:collect --projectDir $CI_PROJECT_DIR
 
 | Port | Service | Protocol | Purpose |
 |------|---------|----------|---------|
-| 3000 | ping-mem | HTTP/SSE | Primary API |
-| 3003 | ping-mem-rest | HTTP | REST-only (optional, profile: rest-api) |
+| 3000 | ping-mem | HTTP/SSE/REST | Primary API (transport set via `PING_MEM_TRANSPORT`) |
 | 6333 | Qdrant | HTTP | Vector operations |
 | 6334 | Qdrant | gRPC | Vector operations |
 | 7474 | Neo4j | HTTP | Browser UI |
