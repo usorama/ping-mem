@@ -69,6 +69,14 @@ export {
 } from "./LineageEngine.js";
 
 export {
+  StructuralAnalyzer,
+  type StructuralEdge,
+  type StructuralEdgeKind,
+  type StructuralAnalysisResult,
+  type ProjectStructuralResult,
+} from "./StructuralAnalyzer.js";
+
+export {
   EvolutionEngine,
   EvolutionEngineConfig,
   EvolutionEngineError,

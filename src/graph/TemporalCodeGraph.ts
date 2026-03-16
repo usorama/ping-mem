@@ -33,6 +33,7 @@ import type {
   ProjectInfo,
 } from "../ingest/index.js";
 import type { ExtractedSymbol } from "../ingest/SymbolExtractor.js";
+import type { StructuralEdge } from "./StructuralAnalyzer.js";
 import * as crypto from "crypto";
 import * as path from "path";
 import { createLogger } from "../util/logger.js";
@@ -708,6 +709,137 @@ export class TemporalCodeGraph {
     return hash.digest("hex");
   }
 
+  // ==========================================================================
+  // Structural edge persistence and queries (IMPORTS_FROM, CALLS, EXPORTS)
+  // ==========================================================================
+
+  async persistStructuralEdges(
+    projectId: string,
+    edges: StructuralEdge[],
+    ingestedAt: string,
+  ): Promise<void> {
+    if (edges.length === 0) return;
+    const items = edges.map((e) => ({
+      edgeId: e.edgeId, kind: e.kind,
+      sourceFileId: this.computeFileId(e.sourceFile),
+      targetFileId: this.computeFileId(e.targetFile),
+      sourceFile: e.sourceFile, targetFile: e.targetFile,
+      symbolName: e.symbolName, line: e.line, isExternal: e.isExternal,
+    }));
+    await this.runBatched(items,
+      `UNWIND $items AS item
+       MATCH (src:File { fileId: item.sourceFileId })
+       MERGE (tgt:File { fileId: item.targetFileId })
+       ON CREATE SET tgt.path = item.targetFile, tgt.isExternal = item.isExternal
+       MERGE (src)-[r:STRUCTURAL_EDGE { edgeId: item.edgeId }]->(tgt)
+       SET r.kind = item.kind, r.symbolName = item.symbolName, r.line = item.line,
+           r.isExternal = item.isExternal, r.projectId = $projectId, r.ingestedAt = $ingestedAt`,
+      (batch) => ({ items: batch, projectId, ingestedAt }),
+      "Structural edges"
+    );
+  }
+
+  async deleteStructuralEdges(projectId: string): Promise<void> {
+    const session = this.neo4j.getSession();
+    try {
+      await session.run(
+        `MATCH ()-[r:STRUCTURAL_EDGE { projectId: $projectId }]->() DELETE r`,
+        { projectId }
+      );
+    } finally { await session.close(); }
+  }
+
+  async queryImportsOf(projectId: string, filePath: string): Promise<Array<{ targetFile: string; symbolName: string; line: number; isExternal: boolean }>> {
+    const session = this.neo4j.getSession();
+    try {
+      const fileId = this.computeFileId(filePath);
+      const result = await session.run(
+        `MATCH (src:File { fileId: $fileId })-[r:STRUCTURAL_EDGE { projectId: $projectId, kind: 'IMPORTS_FROM' }]->(tgt:File)
+         RETURN tgt.path AS targetFile, r.symbolName AS symbolName, r.line AS line, r.isExternal AS isExternal
+         ORDER BY r.line`,
+        { fileId, projectId }
+      );
+      return result.records.map((r) => ({
+        targetFile: r.get("targetFile") as string, symbolName: r.get("symbolName") as string,
+        line: typeof r.get("line") === "object" ? (r.get("line") as { toNumber: () => number }).toNumber() : (r.get("line") as number),
+        isExternal: r.get("isExternal") as boolean,
+      }));
+    } finally { await session.close(); }
+  }
+
+  async queryImportedBy(projectId: string, filePath: string): Promise<Array<{ sourceFile: string; symbolName: string; line: number }>> {
+    const session = this.neo4j.getSession();
+    try {
+      const fileId = this.computeFileId(filePath);
+      const result = await session.run(
+        `MATCH (src:File)-[r:STRUCTURAL_EDGE { projectId: $projectId, kind: 'IMPORTS_FROM' }]->(tgt:File { fileId: $fileId })
+         RETURN src.path AS sourceFile, r.symbolName AS symbolName, r.line AS line ORDER BY src.path`,
+        { fileId, projectId }
+      );
+      return result.records.map((r) => ({
+        sourceFile: r.get("sourceFile") as string, symbolName: r.get("symbolName") as string,
+        line: typeof r.get("line") === "object" ? (r.get("line") as { toNumber: () => number }).toNumber() : (r.get("line") as number),
+      }));
+    } finally { await session.close(); }
+  }
+
+  async queryImpact(projectId: string, filePath: string, maxDepth: number = 5): Promise<Array<{ file: string; depth: number; via: string[] }>> {
+    const session = this.neo4j.getSession();
+    try {
+      const fileId = this.computeFileId(filePath);
+      const d = Math.min(maxDepth, 10);
+      const result = await session.run(
+        `MATCH path = (src:File)-[:STRUCTURAL_EDGE*1..${d}]->(tgt:File { fileId: $fileId })
+         WHERE ALL(r IN relationships(path) WHERE r.projectId = $projectId AND r.kind = 'IMPORTS_FROM')
+         WITH src, length(path) AS depth, [n IN nodes(path) | n.path] AS via
+         RETURN DISTINCT src.path AS file, min(depth) AS depth, via ORDER BY depth, src.path`,
+        { fileId, projectId }
+      );
+      return result.records.map((r) => ({
+        file: r.get("file") as string,
+        depth: typeof r.get("depth") === "object" ? (r.get("depth") as { toNumber: () => number }).toNumber() : (r.get("depth") as number),
+        via: r.get("via") as string[],
+      }));
+    } finally { await session.close(); }
+  }
+
+  async queryBlastRadius(projectId: string, filePath: string, maxDepth: number = 5): Promise<Array<{ file: string; depth: number }>> {
+    const session = this.neo4j.getSession();
+    try {
+      const fileId = this.computeFileId(filePath);
+      const d = Math.min(maxDepth, 10);
+      const result = await session.run(
+        `MATCH path = (src:File { fileId: $fileId })-[:STRUCTURAL_EDGE*1..${d}]->(tgt:File)
+         WHERE ALL(r IN relationships(path) WHERE r.projectId = $projectId AND r.kind = 'IMPORTS_FROM')
+         WITH tgt, length(path) AS depth
+         RETURN DISTINCT tgt.path AS file, min(depth) AS depth ORDER BY depth, tgt.path`,
+        { fileId, projectId }
+      );
+      return result.records.map((r) => ({
+        file: r.get("file") as string,
+        depth: typeof r.get("depth") === "object" ? (r.get("depth") as { toNumber: () => number }).toNumber() : (r.get("depth") as number),
+      }));
+    } finally { await session.close(); }
+  }
+
+  async queryDependencyMap(projectId: string, includeExternal: boolean = false): Promise<Array<{ sourceFile: string; targetFile: string; symbolName: string; isExternal: boolean }>> {
+    const session = this.neo4j.getSession();
+    try {
+      const extFilter = includeExternal ? "" : "AND r.isExternal = false";
+      const result = await session.run(
+        `MATCH (src:File)-[r:STRUCTURAL_EDGE { projectId: $projectId, kind: 'IMPORTS_FROM' }]->(tgt:File)
+         WHERE true ${extFilter}
+         RETURN src.path AS sourceFile, tgt.path AS targetFile, r.symbolName AS symbolName, r.isExternal AS isExternal
+         ORDER BY src.path, tgt.path`,
+        { projectId }
+      );
+      return result.records.map((r) => ({
+        sourceFile: r.get("sourceFile") as string, targetFile: r.get("targetFile") as string,
+        symbolName: r.get("symbolName") as string, isExternal: r.get("isExternal") as boolean,
+      }));
+    } finally { await session.close(); }
+  }
+
   /**
    * Ensure Neo4j constraints exist for Project nodes.
    * Idempotent: safe to call multiple times.
@@ -715,8 +847,6 @@ export class TemporalCodeGraph {
   async ensureConstraints(): Promise<void> {
     const session = this.neo4j.getSession();
     try {
-      // Uniqueness constraint (Community Edition compatible)
-      // Also prevents null since unique index requires non-null values
       await session.run(
         "CREATE CONSTRAINT project_id_unique IF NOT EXISTS FOR (p:Project) REQUIRE p.projectId IS UNIQUE"
       );
