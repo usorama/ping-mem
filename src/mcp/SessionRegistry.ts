@@ -42,6 +42,8 @@ export interface SessionRegistryOptions {
   ttlMs?: number;
   /** Custom session ID generator */
   sessionIdGenerator?: () => string;
+  /** Callback invoked when a session is evicted by TTL cleanup */
+  onEvict?: (sessionId: string) => void;
 }
 
 export class SessionRegistry {
@@ -49,11 +51,13 @@ export class SessionRegistry {
   private readonly maxSessions: number;
   private readonly ttlMs: number;
   private readonly generateId: () => string;
+  private readonly onEvict: ((sessionId: string) => void) | undefined;
 
   constructor(options: SessionRegistryOptions = {}) {
     this.maxSessions = options.maxSessions ?? 20;
     this.ttlMs = options.ttlMs ?? 3_600_000;
     this.generateId = options.sessionIdGenerator ?? (() => crypto.randomUUID());
+    this.onEvict = options.onEvict;
   }
 
   /**
@@ -103,6 +107,7 @@ export class SessionRegistry {
     // Check TTL
     const lastActivity = new Date(session.lastActivityAt).getTime();
     if (Date.now() - lastActivity > this.ttlMs) {
+      this.onEvict?.(sessionId);
       this.sessions.delete(sessionId);
       log.info("Session expired on access", { sessionId });
       return undefined;
@@ -135,6 +140,7 @@ export class SessionRegistry {
     for (const [sessionId, session] of this.sessions) {
       const lastActivity = new Date(session.lastActivityAt).getTime();
       if (now - lastActivity > this.ttlMs) {
+        this.onEvict?.(sessionId);
         this.sessions.delete(sessionId);
         evicted++;
       }

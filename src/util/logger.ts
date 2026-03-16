@@ -22,12 +22,23 @@ interface LogEntry {
   data?: Record<string, unknown>;
 }
 
+/**
+ * Detect if running as MCP stdio server.
+ * When true, ALL log output MUST go to stderr to avoid corrupting the JSON-RPC protocol on stdout.
+ */
+const isMcpStdio = process.argv.some(
+  (arg) => arg.includes("mcp/cli") || arg.includes("mcp\\cli"),
+);
+
 // ============================================================================
 // Logger Class
 // ============================================================================
 
 /**
  * Structured logger that outputs JSON in production and human-readable text in development.
+ *
+ * IMPORTANT: When running as an MCP stdio server, ALL output goes to stderr.
+ * stdout is reserved exclusively for JSON-RPC messages.
  */
 export class Logger {
   private readonly module: string;
@@ -73,19 +84,20 @@ export class Logger {
       entry.data = data;
     }
     const line = JSON.stringify(entry);
-    if (level === "error") {
-      process.stderr.write(line + "\n");
-    } else if (level === "warn") {
-      process.stderr.write(line + "\n");
-    } else {
-      process.stdout.write(line + "\n");
-    }
+    // MCP stdio mode: ALL output to stderr — stdout is reserved for JSON-RPC
+    process.stderr.write(line + "\n");
   }
 
   private logHuman(level: LogLevel, msg: string, data?: Record<string, unknown>): void {
     const prefix = `[${this.module}]`;
     const dataStr = data !== undefined ? " " + JSON.stringify(data) : "";
     const formatted = `${prefix} ${msg}${dataStr}`;
+
+    // MCP stdio mode: ALL output to stderr — stdout is reserved for JSON-RPC
+    if (isMcpStdio) {
+      process.stderr.write(formatted + "\n");
+      return;
+    }
 
     switch (level) {
       case "error":

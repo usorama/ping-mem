@@ -84,6 +84,14 @@ export class SSEPingMemServer {
       maxSessions: config.maxSessions ?? 20,
       ttlMs: config.sessionTtlMs ?? 3_600_000,
       sessionIdGenerator: config.sessionIdGenerator ?? (() => crypto.randomUUID()),
+      onEvict: (sessionId: string) => {
+        this.closeSession(sessionId).catch((error) => {
+          log.warn("Error during eviction transport cleanup", {
+            sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      },
     });
   }
 
@@ -285,19 +293,21 @@ export class SSEPingMemServer {
 
   /**
    * Close a session and its transport.
+   * Idempotent — safe to call multiple times or when transport is already closed.
    */
   private async closeSession(sessionId: string): Promise<void> {
     const st = this.transports.get(sessionId);
     if (st) {
+      this.transports.delete(sessionId);
       try {
         await st.transport.close();
       } catch (error) {
+        // Transport may already be closed (e.g., client disconnected) — log and continue
         log.warn("Error closing transport", {
           sessionId,
           error: error instanceof Error ? error.message : String(error),
         });
       }
-      this.transports.delete(sessionId);
     }
     this.sessionRegistry.remove(sessionId);
     log.info("Session closed", { sessionId });
