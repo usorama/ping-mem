@@ -45,6 +45,9 @@ import {
   type MemoryCategory,
   type MemoryPriority,
   type MemoryPrivacy,
+  type EventType,
+  type WorklogEventData,
+  type Entity,
 } from "../types/index.js";
 
 import type {
@@ -52,7 +55,7 @@ import type {
   RESTErrorResponse,
   RESTSuccessResponse,
 } from "./types.js";
-import type { PingMemServerConfig } from "../mcp/PingMemServer.js";
+import { TOOLS, type PingMemServerConfig } from "../mcp/PingMemServer.js";
 import { MemoryPubSub } from "../pubsub/index.js";
 import { registerUIRoutes } from "./ui/routes.js";
 import { csrfProtection } from "./middleware/csrf.js";
@@ -72,8 +75,17 @@ import {
   KnowledgeSearchSchema,
   KnowledgeIngestSchema,
   IngestionEnqueueSchema,
+  GraphHybridSearchSchema,
+  CausalDiscoverSchema,
+  WorklogRecordSchema,
+  MemorySubscribeSchema,
+  MemoryUnsubscribeSchema,
+  MemoryCompressSchema,
+  ToolInvokeSchema,
 } from "../validation/api-schemas.js";
 import { KnowledgeStore } from "../knowledge/index.js";
+import { SemanticCompressor } from "../memory/SemanticCompressor.js";
+import type { SearchWeights } from "../search/HybridSearchEngine.js";
 import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import { IngestionQueue } from "../ingest/IngestionQueue.js";
@@ -1859,6 +1871,1046 @@ export class RESTPingMemServer {
         return c.json<RESTSuccessResponse<{ entry: unknown }>>({
           data: { entry },
         });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Graph Endpoints (requires graphManager / hybridSearchEngine / lineageEngine / evolutionEngine)
+    // ============================================================================
+
+    this.app.get("/api/v1/graph/relationships", async (c) => {
+      try {
+        if (!this.graphManager) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "GraphManager not configured" },
+            503
+          );
+        }
+
+        const entityId = c.req.query("entityId");
+        if (!entityId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "entityId query parameter is required" },
+            400
+          );
+        }
+        if (entityId.length > 500) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "entityId exceeds maximum length" }, 400);
+        }
+
+        const rawDepth = c.req.query("depth") ? parseInt(c.req.query("depth") as string, 10) : 1;
+        const depth = Number.isNaN(rawDepth) ? 1 : Math.min(Math.max(rawDepth, 1), 10);
+        const relationshipTypesStr = c.req.query("relationshipTypes");
+        const relationshipTypes = relationshipTypesStr ? relationshipTypesStr.split(",").map(s => s.trim()).filter(Boolean) : undefined;
+        const VALID_DIRECTIONS_REL = new Set(["incoming", "outgoing", "both"]);
+        const dirRaw = c.req.query("direction") ?? "both";
+        const direction = VALID_DIRECTIONS_REL.has(dirRaw) ? dirRaw as "incoming" | "outgoing" | "both" : "both";
+
+        const allRelationships = await this.graphManager.findRelationshipsByEntity(entityId);
+
+        const validRelTypes = relationshipTypes ? new Set(relationshipTypes) : null;
+
+        const filteredRelationships = allRelationships.filter((rel) => {
+          if (direction === "outgoing" && rel.sourceId !== entityId) return false;
+          if (direction === "incoming" && rel.targetId !== entityId) return false;
+          if (validRelTypes && !validRelTypes.has(rel.type)) return false;
+          return true;
+        });
+
+        const relatedEntityIds = new Set<string>();
+        for (const rel of filteredRelationships) {
+          if (rel.sourceId !== entityId) relatedEntityIds.add(rel.sourceId);
+          if (rel.targetId !== entityId) relatedEntityIds.add(rel.targetId);
+        }
+
+        const entities: Entity[] = [];
+        for (const id of relatedEntityIds) {
+          const entity = await this.graphManager.getEntity(id);
+          if (entity) entities.push(entity);
+        }
+
+        return c.json({
+          data: {
+            entities: entities.map((e) => ({
+              id: e.id, type: e.type, name: e.name, properties: e.properties,
+              createdAt: e.createdAt.toISOString(), updatedAt: e.updatedAt.toISOString(),
+            })),
+            relationships: filteredRelationships.map((r) => ({
+              id: r.id, type: r.type, sourceId: r.sourceId, targetId: r.targetId,
+              weight: r.weight, properties: r.properties,
+              createdAt: r.createdAt.toISOString(), updatedAt: r.updatedAt.toISOString(),
+            })),
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.post("/api/v1/graph/hybrid-search", async (c) => {
+      try {
+        if (!this.config.hybridSearchEngine) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "HybridSearchEngine not configured" },
+            503
+          );
+        }
+
+        let rawBody: unknown;
+        try { rawBody = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+
+        const parseResult = GraphHybridSearchSchema.safeParse(rawBody);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const { query, limit, weights, sessionId } = parseResult.data;
+        const searchOptions: {
+          limit?: number;
+          sessionId?: SessionId;
+          weights?: Partial<SearchWeights>;
+        } = {};
+
+        if (limit !== undefined) searchOptions.limit = limit;
+        if (sessionId !== undefined) searchOptions.sessionId = sessionId as SessionId;
+        if (weights !== undefined) {
+          const w: Partial<SearchWeights> = {};
+          if (weights.semantic !== undefined) w.semantic = weights.semantic;
+          if (weights.keyword !== undefined) w.keyword = weights.keyword;
+          if (weights.graph !== undefined) w.graph = weights.graph;
+          searchOptions.weights = w;
+        }
+
+        const results = await this.config.hybridSearchEngine.search(query, searchOptions);
+
+        return c.json({
+          data: {
+            query,
+            count: results.length,
+            results: results.map((r) => ({
+              memoryId: r.memoryId, sessionId: r.sessionId, content: r.content,
+              hybridScore: r.hybridScore, searchModes: r.searchModes,
+              graphContext: r.graphContext, modeScores: r.modeScores,
+            })),
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/graph/lineage/:entity", async (c) => {
+      try {
+        if (!this.config.lineageEngine) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "LineageEngine not configured" },
+            503
+          );
+        }
+
+        const entityId = c.req.param("entity");
+        if (!entityId || entityId.length > 500) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid entity parameter" }, 400);
+        }
+
+        const VALID_DIRECTIONS_LIN = new Set(["upstream", "downstream", "both"]);
+        const dirRawLin = c.req.query("direction") ?? "both";
+        const direction = VALID_DIRECTIONS_LIN.has(dirRawLin) ? dirRawLin as "upstream" | "downstream" | "both" : "both";
+        const rawMaxDepth = c.req.query("maxDepth") ? parseInt(c.req.query("maxDepth") as string, 10) : undefined;
+        const maxDepth = rawMaxDepth !== undefined && !Number.isNaN(rawMaxDepth)
+          ? Math.min(Math.max(rawMaxDepth, 1), 50)
+          : undefined;
+
+        let upstream: Entity[] = [];
+        if (direction === "upstream" || direction === "both") {
+          upstream = await this.config.lineageEngine.getAncestors(entityId, maxDepth);
+        }
+        let downstream: Entity[] = [];
+        if (direction === "downstream" || direction === "both") {
+          downstream = await this.config.lineageEngine.getDescendants(entityId, maxDepth);
+        }
+
+        return c.json({
+          data: {
+            entityId, direction,
+            upstream: upstream.map((e) => ({
+              id: e.id, type: e.type, name: e.name, properties: e.properties,
+              eventTime: e.eventTime.toISOString(),
+            })),
+            downstream: downstream.map((e) => ({
+              id: e.id, type: e.type, name: e.name, properties: e.properties,
+              eventTime: e.eventTime.toISOString(),
+            })),
+            upstreamCount: upstream.length,
+            downstreamCount: downstream.length,
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/graph/evolution", async (c) => {
+      try {
+        if (!this.config.evolutionEngine) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "EvolutionEngine not configured" },
+            503
+          );
+        }
+
+        const entityId = c.req.query("entityId");
+        if (!entityId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "entityId query parameter is required" },
+            400
+          );
+        }
+        if (entityId.length > 500) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "entityId exceeds maximum length" }, 400);
+        }
+
+        const startTimeStr = c.req.query("startTime");
+        const endTimeStr = c.req.query("endTime");
+        const queryOptions: { startTime?: Date; endTime?: Date } = {};
+        if (startTimeStr) {
+          const d = new Date(startTimeStr);
+          if (isNaN(d.getTime())) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid startTime — must be ISO 8601 date string" }, 400);
+          }
+          queryOptions.startTime = d;
+        }
+        if (endTimeStr) {
+          const d = new Date(endTimeStr);
+          if (isNaN(d.getTime())) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid endTime — must be ISO 8601 date string" }, 400);
+          }
+          queryOptions.endTime = d;
+        }
+
+        const evolution = await this.config.evolutionEngine.getEvolution(entityId, queryOptions);
+
+        return c.json({
+          data: {
+            entityId: evolution.entityId,
+            entityName: evolution.entityName,
+            startTime: evolution.startTime.toISOString(),
+            endTime: evolution.endTime.toISOString(),
+            totalChanges: evolution.totalChanges,
+            changes: evolution.changes.map((ch) => ({
+              timestamp: ch.timestamp.toISOString(),
+              changeType: ch.changeType,
+              entityId: ch.entityId,
+              entityName: ch.entityName,
+              previousState: ch.previousState ? {
+                id: ch.previousState.id, type: ch.previousState.type,
+                name: ch.previousState.name, properties: ch.previousState.properties,
+              } : null,
+              currentState: ch.currentState ? {
+                id: ch.currentState.id, type: ch.currentState.type,
+                name: ch.currentState.name, properties: ch.currentState.properties,
+              } : null,
+              metadata: ch.metadata,
+            })),
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/graph/health", async (c) => {
+      try {
+        const snapshot = await probeSystemHealth({
+          eventStore: this.eventStore,
+          ...(this.graphManager ? { graphManager: this.graphManager } : {}),
+          ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
+          diagnosticsStore: this.diagnosticsStore,
+        });
+
+        return c.json({
+          data: {
+            status: snapshot.status === "ok" ? "healthy" : snapshot.status === "degraded" ? "degraded" : "unhealthy",
+            timestamp: new Date().toISOString(),
+            version: "1.0.0",
+            components: snapshot.components,
+            session: {
+              active: this.currentSessionId !== null,
+              sessionId: this.currentSessionId,
+            },
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Causal Endpoints (requires causalGraphManager / causalDiscoveryAgent)
+    // ============================================================================
+
+    this.app.get("/api/v1/causal/causes", async (c) => {
+      try {
+        if (!this.config.causalGraphManager) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "Causal graph not configured" },
+            503
+          );
+        }
+
+        const entityId = c.req.query("entityId");
+        if (!entityId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "entityId query parameter is required" },
+            400
+          );
+        }
+
+        const rawLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : 10;
+        const limit = Number.isNaN(rawLimit) ? 10 : Math.min(Math.max(rawLimit, 1), 100);
+
+        const causes = await this.config.causalGraphManager.getCausesOf(entityId, { limit });
+        return c.json({ data: { entityId, causes } });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/causal/effects", async (c) => {
+      try {
+        if (!this.config.causalGraphManager) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "Causal graph not configured" },
+            503
+          );
+        }
+
+        const entityId = c.req.query("entityId");
+        if (!entityId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "entityId query parameter is required" },
+            400
+          );
+        }
+
+        const rawLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : 10;
+        const limit = Number.isNaN(rawLimit) ? 10 : Math.min(Math.max(rawLimit, 1), 100);
+
+        const effects = await this.config.causalGraphManager.getEffectsOf(entityId, { limit });
+        return c.json({ data: { entityId, effects } });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/causal/chain", async (c) => {
+      try {
+        if (!this.config.causalGraphManager) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "Causal graph not configured" },
+            503
+          );
+        }
+
+        const startEntityId = c.req.query("startEntityId");
+        const endEntityId = c.req.query("endEntityId");
+        if (!startEntityId || !endEntityId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "startEntityId and endEntityId query parameters are required" },
+            400
+          );
+        }
+
+        const chain = await this.config.causalGraphManager.getCausalChain(startEntityId, endEntityId);
+        return c.json({ data: { startEntityId, endEntityId, chain } });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.post("/api/v1/causal/discover", async (c) => {
+      try {
+        if (!this.config.causalDiscoveryAgent) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "Causal discovery agent not configured" },
+            503
+          );
+        }
+
+        let rawBody: unknown;
+        try { rawBody = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+
+        const parseResult = CausalDiscoverSchema.safeParse(rawBody);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const { text, persist } = parseResult.data;
+        if (persist) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "Persistence is not yet supported for causal discovery. Use persist=false." },
+            400
+          );
+        }
+
+        const links = await this.config.causalDiscoveryAgent.discover(text);
+        return c.json({ data: { discovered: links.length, links, persisted: false } });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Worklog Endpoints
+    // ============================================================================
+
+    this.app.post("/api/v1/worklog", async (c) => {
+      try {
+        let rawBody: unknown;
+        try { rawBody = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+
+        const parseResult = WorklogRecordSchema.safeParse(rawBody);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const args = parseResult.data;
+        const sessionId = (args.sessionId ?? this.currentSessionId) as SessionId | null;
+        if (!sessionId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "No active session. Start a session first or provide sessionId in body." },
+            400
+          );
+        }
+
+        const kind = args.kind;
+        const phase = args.phase;
+        let eventType: EventType;
+        switch (kind) {
+          case "tool": eventType = "TOOL_RUN_RECORDED"; break;
+          case "diagnostics": eventType = "DIAGNOSTICS_INGESTED"; break;
+          case "git": eventType = "GIT_OPERATION_RECORDED"; break;
+          case "task":
+            if (phase === "started") eventType = "AGENT_TASK_STARTED";
+            else if (phase === "summary") eventType = "AGENT_TASK_SUMMARY";
+            else if (phase === "completed") eventType = "AGENT_TASK_COMPLETED";
+            else return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Task worklog requires phase: started | summary | completed" }, 400);
+            break;
+          default:
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid worklog kind" }, 400);
+        }
+
+        const payload: WorklogEventData = {
+          sessionId,
+          kind,
+          title: args.title,
+        };
+
+        if (args.status !== undefined) payload.status = args.status;
+        if (args.toolName !== undefined) payload.toolName = args.toolName;
+        if (args.toolVersion !== undefined) payload.toolVersion = args.toolVersion;
+        if (args.configHash !== undefined) payload.configHash = args.configHash;
+        if (args.environmentHash !== undefined) payload.environmentHash = args.environmentHash;
+        if (args.projectId !== undefined) payload.projectId = args.projectId;
+        if (args.treeHash !== undefined) payload.treeHash = args.treeHash;
+        if (args.commitHash !== undefined) payload.commitHash = args.commitHash;
+        if (args.runId !== undefined) payload.runId = args.runId;
+        if (args.command !== undefined) payload.command = args.command;
+        if (args.durationMs !== undefined) payload.durationMs = args.durationMs;
+        if (args.summary !== undefined) payload.summary = args.summary;
+        if (args.metadata !== undefined) payload.metadata = args.metadata;
+
+        const metadata = {
+          kind,
+          projectId: payload.projectId,
+          treeHash: payload.treeHash,
+          commitHash: payload.commitHash,
+          toolName: payload.toolName,
+          toolVersion: payload.toolVersion,
+          runId: payload.runId,
+        };
+
+        const event = await this.eventStore.createEvent(sessionId, eventType, payload, metadata);
+
+        return c.json({
+          data: {
+            success: true,
+            eventId: event.eventId,
+            eventType: event.eventType,
+            timestamp: event.timestamp.toISOString(),
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/worklog", async (c) => {
+      try {
+        const sessionId = (c.req.query("sessionId") ?? this.currentSessionId) as SessionId | null;
+        if (!sessionId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "No active session. Start a session first or provide sessionId query param." },
+            400
+          );
+        }
+
+        const rawLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : 100;
+        const limit = Number.isNaN(rawLimit) ? 100 : Math.min(Math.max(rawLimit, 1), 1000);
+
+        const allowedTypes = new Set([
+          "TOOL_RUN_RECORDED",
+          "DIAGNOSTICS_INGESTED",
+          "GIT_OPERATION_RECORDED",
+          "AGENT_TASK_STARTED",
+          "AGENT_TASK_SUMMARY",
+          "AGENT_TASK_COMPLETED",
+        ]);
+
+        const events = await this.eventStore.getBySession(sessionId);
+        const filtered = events.filter((e) => allowedTypes.has(e.eventType));
+        const selected = filtered.slice(-limit);
+
+        return c.json({
+          data: {
+            sessionId,
+            count: selected.length,
+            events: selected.map((e) => ({
+              eventId: e.eventId,
+              eventType: e.eventType,
+              timestamp: e.timestamp.toISOString(),
+              payload: e.payload,
+              metadata: e.metadata,
+              causedBy: e.causedBy,
+            })),
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Diagnostics — Additional Endpoints (compare, by-symbol)
+    // ============================================================================
+
+    this.app.get("/api/v1/diagnostics/compare", async (c) => {
+      try {
+        const projectId = c.req.query("projectId");
+        const treeHash = c.req.query("treeHash");
+        if (!projectId || !treeHash) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "projectId and treeHash query parameters are required" },
+            400
+          );
+        }
+        if (projectId.length > 128 || treeHash.length > 200) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Query parameter exceeds maximum length" }, 400);
+        }
+
+        const toolNamesStr = c.req.query("toolNames");
+        const toolNames = toolNamesStr
+          ? toolNamesStr.split(",").map(s => s.trim()).filter(Boolean)
+          : ["tsc", "eslint", "prettier"];
+
+        const allRuns: Array<{
+          toolName: string;
+          analysisId: string;
+          status: string;
+          createdAt: string;
+        }> = [];
+
+        for (const toolName of toolNames) {
+          const run = this.diagnosticsStore.getLatestRun({ projectId, treeHash, toolName });
+          if (run) {
+            allRuns.push({
+              toolName: run.tool.name,
+              analysisId: run.analysisId,
+              status: run.status,
+              createdAt: run.createdAt,
+            });
+          }
+        }
+
+        const toolSummaries = allRuns.map(run => {
+          const findings = this.diagnosticsStore.listFindings(run.analysisId);
+          const bySeverity: Record<string, number> = {};
+          const fileSet = new Set<string>();
+          for (const finding of findings) {
+            bySeverity[finding.severity] = (bySeverity[finding.severity] ?? 0) + 1;
+            fileSet.add(finding.filePath);
+          }
+          return {
+            toolName: run.toolName, analysisId: run.analysisId, status: run.status,
+            createdAt: run.createdAt, total: findings.length, bySeverity, affectedFiles: fileSet.size,
+          };
+        });
+
+        const aggregateSeverity: Record<string, number> = {};
+        for (const summary of toolSummaries) {
+          for (const [severity, count] of Object.entries(summary.bySeverity)) {
+            aggregateSeverity[severity] = (aggregateSeverity[severity] ?? 0) + count;
+          }
+        }
+
+        return c.json({
+          data: {
+            projectId, treeHash,
+            toolCount: toolSummaries.length,
+            tools: toolSummaries,
+            aggregateSeverity,
+            totalFindings: toolSummaries.reduce((sum, s) => sum + s.total, 0),
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/diagnostics/by-symbol", async (c) => {
+      try {
+        const analysisId = c.req.query("analysisId");
+        if (!analysisId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "analysisId query parameter is required" },
+            400
+          );
+        }
+        if (!RESTPingMemServer.ANALYSIS_ID_RE.test(analysisId)) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid analysisId" }, 400);
+        }
+
+        const VALID_GROUP_BY = new Set(["symbol", "file"]);
+        const groupByRaw = c.req.query("groupBy") ?? "symbol";
+        const groupBy = VALID_GROUP_BY.has(groupByRaw) ? groupByRaw as "symbol" | "file" : "symbol";
+        const findings = this.diagnosticsStore.listFindings(analysisId);
+
+        if (groupBy === "symbol") {
+          const symbolGroups = new Map<string, {
+            symbolName: string; symbolKind: string; filePath: string;
+            count: number; bySeverity: Record<string, number>;
+          }>();
+
+          for (const finding of findings) {
+            if (!finding.symbolId || !finding.symbolName) continue;
+            if (!symbolGroups.has(finding.symbolId)) {
+              symbolGroups.set(finding.symbolId, {
+                symbolName: finding.symbolName, symbolKind: finding.symbolKind ?? "unknown",
+                filePath: finding.filePath, count: 0, bySeverity: {},
+              });
+            }
+            const group = symbolGroups.get(finding.symbolId)!;
+            group.count += 1;
+            group.bySeverity[finding.severity] = (group.bySeverity[finding.severity] ?? 0) + 1;
+          }
+
+          const symbols = Array.from(symbolGroups.entries())
+            .map(([symbolId, group]) => ({ symbolId, ...group }))
+            .sort((a, b) => b.count - a.count);
+
+          return c.json({
+            data: {
+              analysisId, groupBy: "symbol",
+              symbolCount: symbols.length, symbols,
+              totalAttributed: symbols.reduce((sum, s) => sum + s.count, 0),
+              totalUnattributed: findings.filter(f => !f.symbolId).length,
+            },
+          });
+        } else {
+          const fileGroups = new Map<string, { total: number }>();
+          for (const finding of findings) {
+            if (!fileGroups.has(finding.filePath)) {
+              fileGroups.set(finding.filePath, { total: 0 });
+            }
+            fileGroups.get(finding.filePath)!.total += 1;
+          }
+
+          const files = Array.from(fileGroups.entries())
+            .map(([filePath, group]) => ({ filePath, total: group.total }))
+            .sort((a, b) => b.total - a.total);
+
+          return c.json({
+            data: { analysisId, groupBy: "file", fileCount: files.length, files },
+          });
+        }
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Codebase — Additional Endpoints (list-projects, delete)
+    // ============================================================================
+
+    this.app.get("/api/v1/codebase/projects", async (c) => {
+      try {
+        if (!this.config.ingestionService) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
+
+        const projectId = c.req.query("projectId") ?? undefined;
+        const rawLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : 100;
+        const limit = Number.isNaN(rawLimit) ? 100 : Math.min(Math.max(rawLimit, 1), 1000);
+        const VALID_SORT = new Set(["lastIngestedAt", "filesCount", "rootPath"]);
+        const sortByRaw = c.req.query("sortBy") ?? "lastIngestedAt";
+        const sortBy = VALID_SORT.has(sortByRaw) ? sortByRaw as "lastIngestedAt" | "filesCount" | "rootPath" : "lastIngestedAt";
+
+        const options: { limit: number; sortBy: "lastIngestedAt" | "filesCount" | "rootPath"; projectId?: string } = { limit, sortBy };
+        if (projectId !== undefined) options.projectId = projectId;
+
+        const projects = await this.config.ingestionService.listProjects(options);
+
+        return c.json({
+          data: {
+            count: projects.length,
+            sortBy,
+            projects: projects.map((p) => ({
+              projectId: p.projectId, rootPath: p.rootPath, treeHash: p.treeHash,
+              filesCount: p.filesCount, chunksCount: p.chunksCount, commitsCount: p.commitsCount,
+              lastIngestedAt: p.lastIngestedAt,
+            })),
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.delete("/api/v1/codebase/projects/:id", async (c) => {
+      try {
+        // Destructive operation — require admin credentials when configured
+        const adminUser = process.env.PING_MEM_ADMIN_USER;
+        const adminPass = process.env.PING_MEM_ADMIN_PASS;
+        if (adminUser && adminPass) {
+          const authHeader = c.req.header("Authorization") ?? "";
+          const expected = "Basic " + Buffer.from(`${adminUser}:${adminPass}`).toString("base64");
+          if (authHeader !== expected) {
+            return c.json<RESTErrorResponse>(
+              { error: "Forbidden", message: "Project deletion requires admin credentials (Basic Auth)" },
+              403
+            );
+          }
+        }
+
+        if (!this.config.ingestionService) {
+          return c.json<RESTErrorResponse>(
+            { error: "Service Unavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
+
+        const projectId = c.req.param("id");
+        if (!projectId || projectId.length > 500) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "Invalid project ID" },
+            400
+          );
+        }
+
+        await this.config.ingestionService.deleteProject(projectId);
+
+        // Clean up diagnostics
+        this.diagnosticsStore.deleteProject(projectId);
+
+        return c.json({
+          data: { success: true, projectId },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Memory — Additional Endpoints (subscribe, unsubscribe, compress)
+    // ============================================================================
+
+    this.app.post("/api/v1/memory/subscribe", async (c) => {
+      try {
+        // REST subscriptions redirect to SSE endpoint — subscriptions are stateful
+        return c.json({
+          data: {
+            success: false,
+            message: "REST subscriptions are not supported. Use the SSE endpoint /api/v1/events/stream for real-time events.",
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.post("/api/v1/memory/unsubscribe", async (c) => {
+      try {
+        let rawBody: unknown;
+        try { rawBody = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+
+        const parseResult = MemoryUnsubscribeSchema.safeParse(rawBody);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const { subscriptionId } = parseResult.data;
+        const success = this.pubsub.unsubscribe(subscriptionId);
+
+        return c.json({
+          data: { success, subscriberCount: this.pubsub.subscriberCount },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.post("/api/v1/memory/compress", async (c) => {
+      try {
+        const sessionId = this.getSessionIdFromRequest(c);
+        if (!sessionId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "No active session. Start a session first." },
+            400
+          );
+        }
+
+        let rawBody: unknown;
+        try { rawBody = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+
+        const parseResult = MemoryCompressSchema.safeParse(rawBody);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const { channel, category, maxCount } = parseResult.data;
+        const memoryManager = await this.getMemoryManager(sessionId);
+
+        const listOptions: { limit?: number; category?: MemoryCategory; channel?: string } = {};
+        if (category !== undefined) listOptions.category = category as MemoryCategory;
+        if (channel !== undefined) listOptions.channel = channel;
+        listOptions.limit = maxCount;
+
+        const memories = memoryManager.list(listOptions);
+
+        if (memories.length === 0) {
+          return c.json({
+            data: {
+              result: {
+                facts: [], sourceCount: 0, compressionRatio: 1,
+                strategy: "heuristic", digestSaved: false,
+              },
+            },
+          });
+        }
+
+        const compressor = new SemanticCompressor();
+        const compressionResult = await compressor.compress(memories);
+
+        let digestSaved = false;
+        if (compressionResult.facts.length > 0) {
+          const digestKey = `digest::${channel ?? "all"}::${category ?? "all"}::${new Date().toISOString()}`;
+          const digestValue = compressionResult.facts.join("\n");
+
+          await memoryManager.saveOrUpdate(digestKey, digestValue, {
+            category: "digest" as MemoryCategory,
+            priority: "normal",
+            metadata: {
+              sourceCount: compressionResult.sourceCount,
+              compressionRatio: compressionResult.compressionRatio,
+              strategy: compressionResult.strategy,
+              costEstimate: compressionResult.costEstimate,
+            },
+          });
+          digestSaved = true;
+        }
+
+        return c.json({
+          data: {
+            result: {
+              facts: compressionResult.facts,
+              sourceCount: compressionResult.sourceCount,
+              compressionRatio: compressionResult.compressionRatio,
+              strategy: compressionResult.strategy,
+              costEstimate: compressionResult.costEstimate,
+              digestSaved,
+            },
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Tool Discovery Endpoints
+    // ============================================================================
+
+    this.app.get("/api/v1/tools", (c) => {
+      return c.json({
+        data: {
+          count: TOOLS.length,
+          tools: TOOLS.map((t) => ({
+            name: t.name,
+            description: t.description,
+            inputSchema: t.inputSchema,
+          })),
+        },
+      });
+    });
+
+    this.app.get("/api/v1/tools/:name", (c) => {
+      const name = c.req.param("name");
+      const tool = TOOLS.find((t) => t.name === name);
+      if (!tool) {
+        return c.json<RESTErrorResponse>(
+          { error: "Not Found", message: `Tool '${name}' not found` },
+          404
+        );
+      }
+      return c.json({
+        data: {
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+        },
+      });
+    });
+
+    // Tool invocation requires admin auth — this is an RPC gateway to the full MCP tool surface.
+    // Read-only tool listing (GET /tools, GET /tools/:name) is available to any authenticated user.
+    this.app.post("/api/v1/tools/:name/invoke", async (c) => {
+      try {
+        // Require admin credentials for tool invocation (defense in depth)
+        const adminUser = process.env.PING_MEM_ADMIN_USER;
+        const adminPass = process.env.PING_MEM_ADMIN_PASS;
+        if (adminUser && adminPass) {
+          const authHeader = c.req.header("Authorization") ?? "";
+          const expected = "Basic " + Buffer.from(`${adminUser}:${adminPass}`).toString("base64");
+          if (authHeader !== expected) {
+            return c.json<RESTErrorResponse>(
+              { error: "Forbidden", message: "Tool invocation requires admin credentials (Basic Auth)" },
+              403
+            );
+          }
+        }
+
+        const name = c.req.param("name");
+        const tool = TOOLS.find((t) => t.name === name);
+        if (!tool) {
+          return c.json<RESTErrorResponse>(
+            { error: "Not Found", message: `Tool '${name}' not found` },
+            404
+          );
+        }
+
+        let rawBody: unknown;
+        try { rawBody = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+
+        const parseResult = ToolInvokeSchema.safeParse(rawBody);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        // Validate args against the tool's own input schema (defense in depth)
+        const { z } = await import("zod");
+        if (tool.inputSchema && typeof tool.inputSchema === "object") {
+          const requiredProps = (tool.inputSchema as Record<string, unknown>).required;
+          if (Array.isArray(requiredProps)) {
+            for (const prop of requiredProps) {
+              if (!(prop as string in parseResult.data.args)) {
+                return c.json<RESTErrorResponse>(
+                  { error: "Bad Request", message: `Missing required argument: ${prop}` },
+                  400
+                );
+              }
+            }
+          }
+        }
+
+        // Lazy-import modules (Bun caches after first call)
+        const { GraphToolModule } = await import("../mcp/handlers/GraphToolModule.js");
+        const { CausalToolModule } = await import("../mcp/handlers/CausalToolModule.js");
+        const { WorklogToolModule } = await import("../mcp/handlers/WorklogToolModule.js");
+        const { DiagnosticsToolModule } = await import("../mcp/handlers/DiagnosticsToolModule.js");
+        const { CodebaseToolModule } = await import("../mcp/handlers/CodebaseToolModule.js");
+        const { MemoryToolModule } = await import("../mcp/handlers/MemoryToolModule.js");
+        const { ContextToolModule } = await import("../mcp/handlers/ContextToolModule.js");
+        const { KnowledgeToolModule } = await import("../mcp/handlers/KnowledgeToolModule.js");
+        const { AgentToolModule } = await import("../mcp/handlers/AgentToolModule.js");
+
+        const state = {
+          currentSessionId: this.currentSessionId,
+          memoryManagers: this.memoryManagers,
+          sessionManager: this.sessionManager,
+          eventStore: this.eventStore,
+          vectorIndex: this.vectorIndex,
+          graphManager: this.graphManager,
+          entityExtractor: this.config.entityExtractor ?? null,
+          llmEntityExtractor: this.config.llmEntityExtractor ?? null,
+          hybridSearchEngine: this.config.hybridSearchEngine ?? null,
+          lineageEngine: this.config.lineageEngine ?? null,
+          evolutionEngine: this.config.evolutionEngine ?? null,
+          ingestionService: this.config.ingestionService ?? null,
+          diagnosticsStore: this.diagnosticsStore ?? null,
+          summaryGenerator: this.summaryGenerator,
+          relevanceEngine: this.relevanceEngine,
+          causalGraphManager: this.config.causalGraphManager ?? null,
+          causalDiscoveryAgent: this.config.causalDiscoveryAgent ?? null,
+          pubsub: this.pubsub,
+          knowledgeStore: this.knowledgeStore,
+          qdrantClient: this.qdrantClient,
+          ccMemoryBridge: null,
+        };
+
+        const modules = [
+          new ContextToolModule(state),
+          new GraphToolModule(state),
+          new WorklogToolModule(state),
+          new DiagnosticsToolModule(state),
+          new CodebaseToolModule(state),
+          new MemoryToolModule(state),
+          new CausalToolModule(state),
+          new KnowledgeToolModule(state),
+          new AgentToolModule(state),
+        ];
+
+        const args = parseResult.data.args;
+        for (const mod of modules) {
+          const result = mod.handle(name, args);
+          if (result !== undefined) {
+            const data = await result;
+            return c.json({ data });
+          }
+        }
+
+        return c.json<RESTErrorResponse>(
+          { error: "Not Found", message: `No handler found for tool '${name}'` },
+          404
+        );
       } catch (error) {
         return this.handleError(c, error);
       }
