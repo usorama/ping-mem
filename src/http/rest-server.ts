@@ -1904,7 +1904,9 @@ export class RESTPingMemServer {
         const depth = Number.isNaN(rawDepth) ? 1 : Math.min(Math.max(rawDepth, 1), 10);
         const relationshipTypesStr = c.req.query("relationshipTypes");
         const relationshipTypes = relationshipTypesStr ? relationshipTypesStr.split(",").map(s => s.trim()).filter(Boolean) : undefined;
-        const direction = (c.req.query("direction") as "incoming" | "outgoing" | "both") ?? "both";
+        const VALID_DIRECTIONS_REL = new Set(["incoming", "outgoing", "both"]);
+        const dirRaw = c.req.query("direction") ?? "both";
+        const direction = VALID_DIRECTIONS_REL.has(dirRaw) ? dirRaw as "incoming" | "outgoing" | "both" : "both";
 
         const allRelationships = await this.graphManager.findRelationshipsByEntity(entityId);
 
@@ -2017,7 +2019,9 @@ export class RESTPingMemServer {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid entity parameter" }, 400);
         }
 
-        const direction = (c.req.query("direction") as "upstream" | "downstream" | "both") ?? "both";
+        const VALID_DIRECTIONS_LIN = new Set(["upstream", "downstream", "both"]);
+        const dirRawLin = c.req.query("direction") ?? "both";
+        const direction = VALID_DIRECTIONS_LIN.has(dirRawLin) ? dirRawLin as "upstream" | "downstream" | "both" : "both";
         const rawMaxDepth = c.req.query("maxDepth") ? parseInt(c.req.query("maxDepth") as string, 10) : undefined;
         const maxDepth = rawMaxDepth !== undefined && !Number.isNaN(rawMaxDepth)
           ? Math.min(Math.max(rawMaxDepth, 1), 50)
@@ -2075,8 +2079,20 @@ export class RESTPingMemServer {
         const startTimeStr = c.req.query("startTime");
         const endTimeStr = c.req.query("endTime");
         const queryOptions: { startTime?: Date; endTime?: Date } = {};
-        if (startTimeStr) queryOptions.startTime = new Date(startTimeStr);
-        if (endTimeStr) queryOptions.endTime = new Date(endTimeStr);
+        if (startTimeStr) {
+          const d = new Date(startTimeStr);
+          if (isNaN(d.getTime())) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid startTime — must be ISO 8601 date string" }, 400);
+          }
+          queryOptions.startTime = d;
+        }
+        if (endTimeStr) {
+          const d = new Date(endTimeStr);
+          if (isNaN(d.getTime())) {
+            return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid endTime — must be ISO 8601 date string" }, 400);
+          }
+          queryOptions.endTime = d;
+        }
 
         const evolution = await this.config.evolutionEngine.getEvolution(entityId, queryOptions);
 
@@ -2478,7 +2494,9 @@ export class RESTPingMemServer {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid analysisId" }, 400);
         }
 
-        const groupBy = (c.req.query("groupBy") ?? "symbol") as "symbol" | "file";
+        const VALID_GROUP_BY = new Set(["symbol", "file"]);
+        const groupByRaw = c.req.query("groupBy") ?? "symbol";
+        const groupBy = VALID_GROUP_BY.has(groupByRaw) ? groupByRaw as "symbol" | "file" : "symbol";
         const findings = this.diagnosticsStore.listFindings(analysisId);
 
         if (groupBy === "symbol") {
@@ -2550,7 +2568,9 @@ export class RESTPingMemServer {
         const projectId = c.req.query("projectId") ?? undefined;
         const rawLimit = c.req.query("limit") ? parseInt(c.req.query("limit") as string, 10) : 100;
         const limit = Number.isNaN(rawLimit) ? 100 : Math.min(Math.max(rawLimit, 1), 1000);
-        const sortBy = (c.req.query("sortBy") as "lastIngestedAt" | "filesCount" | "rootPath") ?? "lastIngestedAt";
+        const VALID_SORT = new Set(["lastIngestedAt", "filesCount", "rootPath"]);
+        const sortByRaw = c.req.query("sortBy") ?? "lastIngestedAt";
+        const sortBy = VALID_SORT.has(sortByRaw) ? sortByRaw as "lastIngestedAt" | "filesCount" | "rootPath" : "lastIngestedAt";
 
         const options: { limit: number; sortBy: "lastIngestedAt" | "filesCount" | "rootPath"; projectId?: string } = { limit, sortBy };
         if (projectId !== undefined) options.projectId = projectId;
@@ -2575,6 +2595,20 @@ export class RESTPingMemServer {
 
     this.app.delete("/api/v1/codebase/projects/:id", async (c) => {
       try {
+        // Destructive operation — require admin credentials when configured
+        const adminUser = process.env.PING_MEM_ADMIN_USER;
+        const adminPass = process.env.PING_MEM_ADMIN_PASS;
+        if (adminUser && adminPass) {
+          const authHeader = c.req.header("Authorization") ?? "";
+          const expected = "Basic " + Buffer.from(`${adminUser}:${adminPass}`).toString("base64");
+          if (authHeader !== expected) {
+            return c.json<RESTErrorResponse>(
+              { error: "Forbidden", message: "Project deletion requires admin credentials (Basic Auth)" },
+              403
+            );
+          }
+        }
+
         if (!this.config.ingestionService) {
           return c.json<RESTErrorResponse>(
             { error: "Service Unavailable", message: "Ingestion service not configured" },
@@ -2762,8 +2796,24 @@ export class RESTPingMemServer {
       });
     });
 
+    // Tool invocation requires admin auth — this is an RPC gateway to the full MCP tool surface.
+    // Read-only tool listing (GET /tools, GET /tools/:name) is available to any authenticated user.
     this.app.post("/api/v1/tools/:name/invoke", async (c) => {
       try {
+        // Require admin credentials for tool invocation (defense in depth)
+        const adminUser = process.env.PING_MEM_ADMIN_USER;
+        const adminPass = process.env.PING_MEM_ADMIN_PASS;
+        if (adminUser && adminPass) {
+          const authHeader = c.req.header("Authorization") ?? "";
+          const expected = "Basic " + Buffer.from(`${adminUser}:${adminPass}`).toString("base64");
+          if (authHeader !== expected) {
+            return c.json<RESTErrorResponse>(
+              { error: "Forbidden", message: "Tool invocation requires admin credentials (Basic Auth)" },
+              403
+            );
+          }
+        }
+
         const name = c.req.param("name");
         const tool = TOOLS.find((t) => t.name === name);
         if (!tool) {
@@ -2785,7 +2835,23 @@ export class RESTPingMemServer {
           );
         }
 
-        // Build a minimal SessionState to delegate to ToolModules
+        // Validate args against the tool's own input schema (defense in depth)
+        const { z } = await import("zod");
+        if (tool.inputSchema && typeof tool.inputSchema === "object") {
+          const requiredProps = (tool.inputSchema as Record<string, unknown>).required;
+          if (Array.isArray(requiredProps)) {
+            for (const prop of requiredProps) {
+              if (!(prop as string in parseResult.data.args)) {
+                return c.json<RESTErrorResponse>(
+                  { error: "Bad Request", message: `Missing required argument: ${prop}` },
+                  400
+                );
+              }
+            }
+          }
+        }
+
+        // Lazy-import modules (Bun caches after first call)
         const { GraphToolModule } = await import("../mcp/handlers/GraphToolModule.js");
         const { CausalToolModule } = await import("../mcp/handlers/CausalToolModule.js");
         const { WorklogToolModule } = await import("../mcp/handlers/WorklogToolModule.js");
