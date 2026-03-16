@@ -76,6 +76,50 @@ function computeKnowledgeId(projectId: string, title: string): string {
   return hasher.digest("hex");
 }
 
+/**
+ * Sanitize and tokenize a user query for FTS5 MATCH.
+ *
+ * - Strips FTS5 special operators to prevent injection
+ * - Preserves double-quoted phrases as FTS5 phrase literals
+ * - Splits unquoted text on whitespace and joins with OR
+ * - Returns empty string if query contains no valid terms
+ */
+export function sanitizeFts5Query(raw: string): string {
+  // 1. Extract quoted phrases first, replacing them with placeholders
+  const phrases: string[] = [];
+  const withoutPhrases = raw.replace(/"([^"]+)"/g, (_match, inner: string) => {
+    // Sanitize inside the phrase too
+    const clean = inner.replace(/[*^(){}:]/g, " ").trim();
+    if (clean) {
+      phrases.push('"' + clean.replace(/"/g, '""') + '"');
+    }
+    return " ";
+  });
+
+  // 2. Strip everything except alphanumeric, underscore, hyphen, and whitespace
+  const sanitized = withoutPhrases
+    .replace(/[^a-zA-Z0-9_\-\s]/g, " ")
+    .replace(/\b(AND|OR|NOT|NEAR)\b/gi, " ")
+    .trim();
+
+  // 3. Split into individual terms
+  const terms = sanitized.split(/\s+/).filter((t) => t.length > 0);
+
+  // 4. Combine phrases and individual terms with OR
+  const allParts = [...phrases, ...terms];
+
+  if (allParts.length === 0) {
+    return "";
+  }
+
+  // Single term: no OR wrapper needed
+  if (allParts.length === 1) {
+    return allParts[0]!;
+  }
+
+  return allParts.join(" OR ");
+}
+
 function rowToEntry(row: KnowledgeRow): KnowledgeEntry {
   const entry: KnowledgeEntry = {
     id: row.id,
@@ -247,16 +291,11 @@ export class KnowledgeStore {
     }
 
     sql += ` ORDER BY fts.rank LIMIT $limit`;
-    // Strip FTS5 operators that could alter query semantics
-    const sanitized = options.query
-      .replace(/[*^(){}:]/g, " ")
-      .replace(/\b(AND|OR|NOT|NEAR)\b/gi, " ")
-      .trim();
-    if (!sanitized) {
-      // Query was entirely operators — return empty results rather than re-enabling operators
+    const ftsQuery = sanitizeFts5Query(options.query);
+    if (!ftsQuery) {
       return [];
     }
-    params.$query = '"' + sanitized.replace(/"/g, '""') + '"';
+    params.$query = ftsQuery;
     params.$limit = limit;
 
     const rows = this.db.prepare(sql).all(params) as KnowledgeSearchRow[];

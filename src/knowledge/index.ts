@@ -6,6 +6,7 @@
 
 export {
   KnowledgeStore,
+  sanitizeFts5Query,
   type KnowledgeEntry,
   type KnowledgeSearchOptions,
   type KnowledgeSearchResult,
