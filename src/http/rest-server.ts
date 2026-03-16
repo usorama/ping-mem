@@ -89,16 +89,8 @@ import type { SearchWeights } from "../search/HybridSearchEngine.js";
 import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import { IngestionQueue } from "../ingest/IngestionQueue.js";
-import {
-  registerGraphRoutes,
-  registerCausalRoutes,
-  registerWorklogRoutes,
-  registerDiagnosticsExtraRoutes,
-  registerCodebaseExtraRoutes,
-  registerMemoryExtraRoutes,
-  registerToolDiscoveryRoutes,
-  registerOpenAPIRoute,
-} from "./routes/index.js";
+// Route sub-module imports removed — all routes are currently inline in setupRoutes().
+// Future refactor: split into src/http/routes/*.ts modules.
 
 /** Maximum SARIF payload size in bytes (5 MB) */
 const MAX_SARIF_BYTES = 5 * 1024 * 1024;
