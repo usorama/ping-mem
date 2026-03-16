@@ -12,6 +12,7 @@
 
 import { QdrantClientWrapper } from "./QdrantClient.js";
 import { DeterministicVectorizer } from "./DeterministicVectorizer.js";
+import { BM25Scorer } from "./BM25Scorer.js";
 import type { CodeChunkStore } from "./CodeChunkStore.js";
 import { createLogger } from "../util/logger.js";
 import { sanitizeHealthError } from "../observability/health-probes.js";
@@ -19,13 +20,19 @@ import type { IngestionResult, CodeFileResult, ChunkWithId } from "../ingest/ind
 
 const log = createLogger("CodeIndexer");
 
-/** RRF constant (k parameter) — same as HybridSearchEngine */
+/** Hybrid mode weights: BM25 * 0.6 + dense * 0.4 */
+const BM25_WEIGHT = 0.6;
+const DENSE_WEIGHT = 0.4;
+
+/** RRF constant (k parameter) — used for RRF fallback and Qdrant-only mode */
 const RRF_K = 60;
 
 export interface CodeIndexerOptions {
   qdrantClient: QdrantClientWrapper;
   vectorizer?: DeterministicVectorizer;
   codeChunkStore?: CodeChunkStore;
+  /** BM25Scorer instance for primary ranking. */
+  bm25Scorer?: BM25Scorer;
 }
 
 export interface ChunkSearchResult {
@@ -43,11 +50,13 @@ export class CodeIndexer {
   private readonly qdrant: QdrantClientWrapper;
   private readonly vectorizer: DeterministicVectorizer;
   private readonly codeChunkStore: CodeChunkStore | undefined;
+  private readonly bm25Scorer: BM25Scorer | undefined;
 
   constructor(options: CodeIndexerOptions) {
     this.qdrant = options.qdrantClient;
     this.vectorizer = options.vectorizer ?? new DeterministicVectorizer();
     this.codeChunkStore = options.codeChunkStore;
+    this.bm25Scorer = options.bm25Scorer;
   }
 
   /**
@@ -55,6 +64,19 @@ export class CodeIndexer {
    * Idempotent: can be called multiple times for the same chunkId.
    */
   async indexIngestion(result: IngestionResult): Promise<void> {
+    // Index into BM25Scorer inverted index
+    if (this.bm25Scorer) {
+      const docs: Array<{ chunkId: string; content: string }> = [];
+      for (const fileResult of result.codeFiles) {
+        for (const chunk of fileResult.chunks) {
+          docs.push({ chunkId: chunk.chunkId, content: chunk.content });
+        }
+      }
+      if (docs.length > 0) {
+        this.bm25Scorer.indexDocumentsBatch(docs);
+      }
+    }
+
     const points = this.buildIndexPoints(result);
 
     if (points.length > 0) {
@@ -141,11 +163,56 @@ export class CodeIndexer {
       limit?: number;
     } = {}
   ): Promise<ChunkSearchResult[]> {
-    // If CodeChunkStore is available, do RRF merge
+    // Strategy 1: BM25Scorer is the primary ranker
+    if (this.bm25Scorer) {
+      // BM25-only search (metadata from CodeChunkStore or Qdrant)
+      const clampedLimit = Math.max(1, Math.min(Math.floor(options.limit ?? 10), 1000));
+      const fetchLimit = Math.min(clampedLimit * 3, 300);
+      const bm25Results = this.bm25Scorer.search(query, fetchLimit);
+      let qdrantResults: ChunkSearchResult[] = [];
+      try { qdrantResults = await this.searchQdrantOnly(query, { ...options, limit: fetchLimit }); } catch {}
+      const metaLookup = new Map<string, ChunkSearchResult>();
+      for (const r of qdrantResults) metaLookup.set(r.chunkId, r);
+      if (this.codeChunkStore) {
+        for (const r of this.codeChunkStore.search(query, options.projectId, fetchLimit)) {
+          if (!metaLookup.has(r.chunkId)) {
+            metaLookup.set(r.chunkId, { chunkId: r.chunkId, projectId: r.projectId, filePath: r.filePath, type: "code", content: r.content, lineStart: r.startLine, lineEnd: r.endLine, score: 0 });
+          }
+        }
+      }
+      if (qdrantResults.length > 0) {
+        const bm25S = new Map(bm25Results.map(r => [r.chunkId, r.score]));
+        const denseS = new Map(qdrantResults.map(r => [r.chunkId, r.score]));
+        const bv = [...bm25S.values()]; const bMin = bv.length ? Math.min(...bv) : 0; const bRng = (bv.length ? Math.max(...bv) : 0) - bMin || 1;
+        const dv = [...denseS.values()]; const dMin = dv.length ? Math.min(...dv) : 0; const dRng = (dv.length ? Math.max(...dv) : 0) - dMin || 1;
+        const allIds = new Set([...bm25S.keys(), ...denseS.keys()]);
+        const scored: Array<{ chunkId: string; score: number }> = [];
+        for (const id of allIds) {
+          const m = metaLookup.get(id); if (!m) continue;
+          if (options.projectId && m.projectId !== options.projectId) continue;
+          const bn = bm25S.has(id) ? (bm25S.get(id)! - bMin) / bRng : 0;
+          const dn = denseS.has(id) ? (denseS.get(id)! - dMin) / dRng : 0;
+          scored.push({ chunkId: id, score: bn * BM25_WEIGHT + dn * DENSE_WEIGHT });
+        }
+        scored.sort((a, b) => b.score - a.score);
+        return scored.slice(0, clampedLimit).map(s => ({ ...metaLookup.get(s.chunkId)!, score: s.score }));
+      }
+      const results: ChunkSearchResult[] = [];
+      for (const bm25 of bm25Results) {
+        const meta = metaLookup.get(bm25.chunkId); if (!meta) continue;
+        if (options.projectId && meta.projectId !== options.projectId) continue;
+        results.push({ ...meta, score: bm25.score });
+        if (results.length >= clampedLimit) break;
+      }
+      return results;
+    }
+
+    // Strategy 2: CodeChunkStore FTS5 + Qdrant RRF (legacy)
     if (this.codeChunkStore) {
       return this.searchWithRRF(query, options);
     }
 
+    // Strategy 3: Qdrant only (legacy fallback)
     return this.searchQdrantOnly(query, options);
   }
 

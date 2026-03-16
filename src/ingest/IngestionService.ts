@@ -34,6 +34,8 @@ export interface IngestionServiceOptions {
   qdrantClient: QdrantClientWrapper;
   eventStore?: EventStore;
   healthMonitor?: HealthMonitor;
+  /** BM25Scorer instance for primary ranking. Passed to CodeIndexer. */
+  bm25Scorer?: import("../search/BM25Scorer.js").BM25Scorer;
 }
 
 export interface IngestProjectOptions {
@@ -91,6 +93,7 @@ export class IngestionService {
     });
     this.codeIndexer = new CodeIndexer({
       qdrantClient: options.qdrantClient,
+      ...(options.bm25Scorer ? { bm25Scorer: options.bm25Scorer } : {}),
     });
     this.eventStore = options.eventStore ?? null;
     this.healthMonitor = options.healthMonitor ?? null;
