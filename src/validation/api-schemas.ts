@@ -279,3 +279,125 @@ export const MemoryConsolidateSchema = z.object({
 });
 
 export type MemoryConsolidateInput = z.infer<typeof MemoryConsolidateSchema>;
+
+// ============================================================================
+// Graph Schemas
+// ============================================================================
+
+/**
+ * Query params for GET /api/v1/graph/relationships
+ */
+export const GraphRelationshipsSchema = z.object({
+  entityId: z.string().min(1, "entityId is required").max(500),
+  depth: z.coerce.number().int().min(1).max(10).optional().default(1),
+  relationshipTypes: z.string().max(2000).optional(),
+  direction: z.enum(["incoming", "outgoing", "both"]).optional().default("both"),
+});
+
+export type GraphRelationshipsInput = z.infer<typeof GraphRelationshipsSchema>;
+
+/**
+ * Request body for POST /api/v1/graph/hybrid-search
+ */
+export const GraphHybridSearchSchema = z.object({
+  query: z.string().min(1, "query is required").max(2000).trim(),
+  limit: z.number().int().positive().max(100).optional(),
+  weights: z.object({
+    semantic: z.number().min(0).max(1).optional(),
+    keyword: z.number().min(0).max(1).optional(),
+    graph: z.number().min(0).max(1).optional(),
+  }).optional(),
+  sessionId: z.string().max(500).optional(),
+});
+
+export type GraphHybridSearchInput = z.infer<typeof GraphHybridSearchSchema>;
+
+// ============================================================================
+// Causal Schemas
+// ============================================================================
+
+/**
+ * Request body for POST /api/v1/causal/discover
+ */
+export const CausalDiscoverSchema = z.object({
+  text: z.string().min(1, "text is required").max(50000),
+  persist: z.boolean().optional().default(false),
+});
+
+export type CausalDiscoverInput = z.infer<typeof CausalDiscoverSchema>;
+
+// ============================================================================
+// Worklog Schemas
+// ============================================================================
+
+/**
+ * Request body for POST /api/v1/worklog
+ */
+export const WorklogRecordSchema = z.object({
+  kind: z.enum(["tool", "diagnostics", "git", "task"]),
+  title: z.string().min(1, "title is required").max(1000).trim(),
+  status: z.enum(["success", "failed", "partial"]).optional(),
+  phase: z.enum(["started", "summary", "completed"]).optional(),
+  toolName: z.string().max(200).optional(),
+  toolVersion: z.string().max(200).optional(),
+  configHash: z.string().max(200).optional(),
+  environmentHash: z.string().max(200).optional(),
+  projectId: z.string().max(500).optional(),
+  treeHash: z.string().max(200).optional(),
+  commitHash: z.string().max(200).optional(),
+  runId: z.string().max(200).optional(),
+  command: z.string().max(5000).optional(),
+  durationMs: z.number().nonnegative().optional(),
+  summary: z.string().max(10000).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  sessionId: z.string().max(500).optional(),
+});
+
+export type WorklogRecordInput = z.infer<typeof WorklogRecordSchema>;
+
+// ============================================================================
+// Memory PubSub Schemas
+// ============================================================================
+
+/**
+ * Request body for POST /api/v1/memory/subscribe
+ */
+export const MemorySubscribeSchema = z.object({
+  channel: z.string().max(200).optional(),
+  category: z.string().max(200).optional(),
+});
+
+export type MemorySubscribeInput = z.infer<typeof MemorySubscribeSchema>;
+
+/**
+ * Request body for POST /api/v1/memory/unsubscribe
+ */
+export const MemoryUnsubscribeSchema = z.object({
+  subscriptionId: z.string().min(1, "subscriptionId is required").max(500),
+});
+
+export type MemoryUnsubscribeInput = z.infer<typeof MemoryUnsubscribeSchema>;
+
+/**
+ * Request body for POST /api/v1/memory/compress
+ */
+export const MemoryCompressSchema = z.object({
+  channel: z.string().max(200).optional(),
+  category: z.string().max(200).optional(),
+  maxCount: z.number().int().positive().max(10000).optional().default(100),
+});
+
+export type MemoryCompressInput = z.infer<typeof MemoryCompressSchema>;
+
+// ============================================================================
+// Tool Invoke Schema
+// ============================================================================
+
+/**
+ * Request body for POST /api/v1/tools/:name/invoke
+ */
+export const ToolInvokeSchema = z.object({
+  args: z.record(z.string(), z.unknown()).optional().default({}),
+});
+
+export type ToolInvokeInput = z.infer<typeof ToolInvokeSchema>;
