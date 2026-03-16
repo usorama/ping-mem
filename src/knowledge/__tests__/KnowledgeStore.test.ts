@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { Database } from "bun:sqlite";
-import { KnowledgeStore } from "../KnowledgeStore.js";
+import { KnowledgeStore, sanitizeFts5Query } from "../KnowledgeStore.js";
 import type { KnowledgeEntry } from "../KnowledgeStore.js";
 
 describe("KnowledgeStore", () => {
@@ -251,5 +251,131 @@ describe("KnowledgeStore", () => {
       expect(stats.totalEntries).toBe(0);
       expect(Object.keys(stats.byProject)).toHaveLength(0);
     });
+  });
+
+  describe("multi-word FTS5 search (issue #27)", () => {
+    beforeEach(() => {
+      store.ingest({
+        projectId: "proj-1",
+        title: "Biometric authentication on Android",
+        solution: "Use BiometricPrompt API for fingerprint and face recognition",
+        symptoms: "App crashes on biometric prompt",
+        tags: ["android", "biometric", "auth"],
+      });
+      store.ingest({
+        projectId: "proj-1",
+        title: "OAuth2 authentication flow",
+        solution: "Implement PKCE flow for mobile apps",
+        tags: ["oauth", "auth"],
+      });
+      store.ingest({
+        projectId: "proj-1",
+        title: "Android crash on API 28",
+        solution: "Add backward-compat shim for older Android versions",
+        tags: ["android", "crash"],
+      });
+    });
+
+    it("should return results for multi-word queries using OR semantics", () => {
+      // This was the exact failure case from issue #27
+      const results = store.search({ query: "biometric authentication android" });
+      expect(results.length).toBeGreaterThanOrEqual(1);
+      // The biometric entry should appear (matches all three words)
+      const titles = results.map((r) => r.entry.title);
+      expect(titles).toContain("Biometric authentication on Android");
+    });
+
+    it("should match entries containing any of the query words", () => {
+      const results = store.search({ query: "biometric android" });
+      expect(results.length).toBeGreaterThanOrEqual(2);
+      const titles = results.map((r) => r.entry.title);
+      // Both the biometric entry and the Android crash entry should match
+      expect(titles).toContain("Biometric authentication on Android");
+      expect(titles).toContain("Android crash on API 28");
+    });
+
+    it("should still work with single-word queries", () => {
+      const results = store.search({ query: "Biometric" });
+      expect(results.length).toBe(1);
+      expect(results[0]!.entry.title).toBe("Biometric authentication on Android");
+    });
+
+    it("should support quoted phrases for exact match", () => {
+      // Quoted phrase should match only entries with adjacent words
+      const results = store.search({ query: '"authentication flow"' });
+      expect(results.length).toBe(1);
+      expect(results[0]!.entry.title).toBe("OAuth2 authentication flow");
+    });
+
+    it("should return empty results for empty query", () => {
+      const results = store.search({ query: "" });
+      expect(results.length).toBe(0);
+    });
+
+    it("should return empty results for query with only operators", () => {
+      const results = store.search({ query: "AND OR NOT * ^" });
+      expect(results.length).toBe(0);
+    });
+
+    it("should sanitize FTS5 injection attempts", () => {
+      // These should not throw or cause SQL injection
+      const results1 = store.search({ query: "biometric) OR (1=1" });
+      // Should still find the biometric entry despite injection attempt
+      expect(results1.length).toBeGreaterThanOrEqual(1);
+
+      const results2 = store.search({ query: 'title:biometric' });
+      // Colon is stripped, should still match on "biometric"
+      expect(results2.length).toBeGreaterThanOrEqual(1);
+
+      // NEAR operator should be stripped
+      const results3 = store.search({ query: "biometric NEAR android" });
+      expect(results3.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+});
+
+describe("sanitizeFts5Query", () => {
+  it("should join multiple words with OR", () => {
+    expect(sanitizeFts5Query("foo bar baz")).toBe("foo OR bar OR baz");
+  });
+
+  it("should return single word as-is", () => {
+    expect(sanitizeFts5Query("hello")).toBe("hello");
+  });
+
+  it("should preserve quoted phrases", () => {
+    const result = sanitizeFts5Query('"exact phrase" other');
+    expect(result).toBe('"exact phrase" OR other');
+  });
+
+  it("should handle multiple quoted phrases", () => {
+    const result = sanitizeFts5Query('"phrase one" "phrase two"');
+    expect(result).toBe('"phrase one" OR "phrase two"');
+  });
+
+  it("should strip FTS5 special characters", () => {
+    expect(sanitizeFts5Query("foo*bar^baz")).toBe("foo OR bar OR baz");
+    expect(sanitizeFts5Query("test(){}:")).toBe("test");
+  });
+
+  it("should strip FTS5 reserved words", () => {
+    expect(sanitizeFts5Query("foo AND bar")).toBe("foo OR bar");
+    expect(sanitizeFts5Query("NOT something")).toBe("something");
+    expect(sanitizeFts5Query("a NEAR b")).toBe("a OR b");
+  });
+
+  it("should return empty string for empty input", () => {
+    expect(sanitizeFts5Query("")).toBe("");
+    expect(sanitizeFts5Query("   ")).toBe("");
+  });
+
+  it("should return empty string for operator-only input", () => {
+    expect(sanitizeFts5Query("AND OR NOT")).toBe("");
+    expect(sanitizeFts5Query("* ^ () {}")).toBe("");
+  });
+
+  it("should handle mixed quoted and unquoted terms", () => {
+    const result = sanitizeFts5Query('hello "exact match" world');
+    expect(result).toBe('"exact match" OR hello OR world');
   });
 });
