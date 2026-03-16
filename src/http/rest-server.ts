@@ -89,6 +89,16 @@ import type { SearchWeights } from "../search/HybridSearchEngine.js";
 import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import { IngestionQueue } from "../ingest/IngestionQueue.js";
+import {
+  registerGraphRoutes,
+  registerCausalRoutes,
+  registerWorklogRoutes,
+  registerDiagnosticsExtraRoutes,
+  registerCodebaseExtraRoutes,
+  registerMemoryExtraRoutes,
+  registerToolDiscoveryRoutes,
+  registerOpenAPIRoute,
+} from "./routes/index.js";
 
 /** Maximum SARIF payload size in bytes (5 MB) */
 const MAX_SARIF_BYTES = 5 * 1024 * 1024;
@@ -1069,6 +1079,62 @@ export class RESTPingMemServer {
       } catch (error) {
         return this.handleError(c, error);
       }
+    });
+
+    // Structural Intelligence Endpoints
+    this.app.get("/api/v1/codebase/impact", async (c) => {
+      try {
+        if (!this.config.ingestionService) {
+          return c.json({ error: "ServiceUnavailable", message: "Ingestion service not configured" }, 503);
+        }
+        const projectId = c.req.query("projectId");
+        const filePath = c.req.query("filePath");
+        const maxDepthStr = c.req.query("maxDepth");
+        if (!projectId || !filePath) {
+          return c.json({ error: "BadRequest", message: "projectId and filePath query parameters are required" }, 400);
+        }
+        const maxDepth = maxDepthStr ? Math.max(1, Math.min(parseInt(maxDepthStr, 10) || 5, 10)) : 5;
+        const results = await this.config.ingestionService.queryImpact(projectId, filePath, maxDepth);
+        return c.json({ projectId, filePath, maxDepth, affectedFiles: results.length, results });
+      } catch (error) { return this.handleError(c, error); }
+    });
+
+    this.app.get("/api/v1/codebase/blast-radius", async (c) => {
+      try {
+        if (!this.config.ingestionService) {
+          return c.json({ error: "ServiceUnavailable", message: "Ingestion service not configured" }, 503);
+        }
+        const projectId = c.req.query("projectId");
+        const filePath = c.req.query("filePath");
+        const maxDepthStr = c.req.query("maxDepth");
+        if (!projectId || !filePath) {
+          return c.json({ error: "BadRequest", message: "projectId and filePath query parameters are required" }, 400);
+        }
+        const maxDepth = maxDepthStr ? Math.max(1, Math.min(parseInt(maxDepthStr, 10) || 5, 10)) : 5;
+        const results = await this.config.ingestionService.queryBlastRadius(projectId, filePath, maxDepth);
+        return c.json({ projectId, filePath, maxDepth, dependencyCount: results.length, results });
+      } catch (error) { return this.handleError(c, error); }
+    });
+
+    this.app.get("/api/v1/codebase/dependency-map", async (c) => {
+      try {
+        if (!this.config.ingestionService) {
+          return c.json({ error: "ServiceUnavailable", message: "Ingestion service not configured" }, 503);
+        }
+        const projectId = c.req.query("projectId");
+        const includeExternal = c.req.query("includeExternal") === "true";
+        if (!projectId) {
+          return c.json({ error: "BadRequest", message: "projectId query parameter is required" }, 400);
+        }
+        const results = await this.config.ingestionService.queryDependencyMap(projectId, includeExternal);
+        const adjacencyMap: Record<string, string[]> = {};
+        for (const edge of results) {
+          const list = adjacencyMap[edge.sourceFile];
+          if (list) { if (!list.includes(edge.targetFile)) list.push(edge.targetFile); }
+          else { adjacencyMap[edge.sourceFile] = [edge.targetFile]; }
+        }
+        return c.json({ projectId, includeExternal, edgeCount: results.length, uniqueFiles: Object.keys(adjacencyMap).length, edges: results, adjacencyMap });
+      } catch (error) { return this.handleError(c, error); }
     });
 
     this.app.get("/api/v1/diagnostics/latest", async (c) => {

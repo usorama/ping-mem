@@ -10,9 +10,11 @@
  */
 
 import * as crypto from "crypto";
+import * as fs from "fs";
 import * as path from "path";
 import { IngestionOrchestrator, type IngestionResult } from "./IngestionOrchestrator.js";
 import { TemporalCodeGraph } from "../graph/TemporalCodeGraph.js";
+import { StructuralAnalyzer } from "../graph/StructuralAnalyzer.js";
 import { CodeIndexer } from "../search/CodeIndexer.js";
 import { Neo4jClient } from "../graph/Neo4jClient.js";
 import { QdrantClientWrapper } from "../search/QdrantClient.js";
@@ -34,6 +36,8 @@ export interface IngestionServiceOptions {
   qdrantClient: QdrantClientWrapper;
   eventStore?: EventStore;
   healthMonitor?: HealthMonitor;
+  /** BM25Scorer instance for primary ranking. Passed to CodeIndexer. */
+  bm25Scorer?: import("../search/BM25Scorer.js").BM25Scorer;
 }
 
 export interface IngestProjectOptions {
@@ -79,6 +83,7 @@ export interface TimelineEvent {
 export class IngestionService {
   private readonly orchestrator: IngestionOrchestrator;
   private readonly codeGraph: TemporalCodeGraph;
+  private readonly structuralAnalyzer: StructuralAnalyzer;
   private readonly codeIndexer: CodeIndexer;
   private readonly eventStore: EventStore | null;
   private readonly healthMonitor: HealthMonitor | null;
@@ -89,8 +94,10 @@ export class IngestionService {
     this.codeGraph = new TemporalCodeGraph({
       neo4jClient: options.neo4jClient,
     });
+    this.structuralAnalyzer = new StructuralAnalyzer();
     this.codeIndexer = new CodeIndexer({
       qdrantClient: options.qdrantClient,
+      ...(options.bm25Scorer ? { bm25Scorer: options.bm25Scorer } : {}),
     });
     this.eventStore = options.eventStore ?? null;
     this.healthMonitor = options.healthMonitor ?? null;
@@ -180,6 +187,18 @@ export class IngestionService {
           `Neo4j persist succeeded but Qdrant indexing failed. ` +
           `Run force reingest to recover: ${message}`
         );
+      }
+
+      // Structural analysis: extract import/call/export edges and persist to Neo4j
+      currentPhase = "structural_analysis";
+      try {
+        await this.runStructuralAnalysis(options.projectDir, ingestionResult);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        log.warn("ingestProject: structural analysis failed (non-fatal)", {
+          projectId: ingestionResult.projectId,
+          error: message,
+        });
       }
 
       // Resume HealthMonitor drift checking after both Neo4j+Qdrant succeed
@@ -392,6 +411,49 @@ export class IngestionService {
 
       // Re-throw - let caller decide how to handle
       throw error;
+    }
+  }
+
+  // Structural intelligence queries
+  async queryImpact(projectId: string, filePath: string, maxDepth?: number): Promise<Array<{ file: string; depth: number; via: string[] }>> {
+    return this.codeGraph.queryImpact(projectId, filePath, maxDepth);
+  }
+  async queryBlastRadius(projectId: string, filePath: string, maxDepth?: number): Promise<Array<{ file: string; depth: number }>> {
+    return this.codeGraph.queryBlastRadius(projectId, filePath, maxDepth);
+  }
+  async queryDependencyMap(projectId: string, includeExternal?: boolean): Promise<Array<{ sourceFile: string; targetFile: string; symbolName: string; isExternal: boolean }>> {
+    return this.codeGraph.queryDependencyMap(projectId, includeExternal);
+  }
+  async queryImportsOf(projectId: string, filePath: string): Promise<Array<{ targetFile: string; symbolName: string; line: number; isExternal: boolean }>> {
+    return this.codeGraph.queryImportsOf(projectId, filePath);
+  }
+  async queryImportedBy(projectId: string, filePath: string): Promise<Array<{ sourceFile: string; symbolName: string; line: number }>> {
+    return this.codeGraph.queryImportedBy(projectId, filePath);
+  }
+
+  // Structural analysis pipeline
+  private async runStructuralAnalysis(projectDir: string, ingestionResult: IngestionResult): Promise<void> {
+    const projectPath = path.resolve(projectDir);
+    const allProjectFiles = new Set(ingestionResult.codeFiles.map((f) => f.filePath));
+    const files: Array<{ filePath: string; content: string }> = [];
+    for (const codeFile of ingestionResult.codeFiles) {
+      try {
+        const fullPath = path.join(projectPath, codeFile.filePath);
+        const content = fs.readFileSync(fullPath, "utf-8");
+        files.push({ filePath: codeFile.filePath, content });
+      } catch { /* skip unreadable files */ }
+    }
+    const structuralResult = this.structuralAnalyzer.analyzeProject(files, allProjectFiles);
+    if (structuralResult.edges.length > 0) {
+      await this.codeGraph.deleteStructuralEdges(ingestionResult.projectId);
+      await this.codeGraph.persistStructuralEdges(
+        ingestionResult.projectId, structuralResult.edges, ingestionResult.ingestedAt,
+      );
+      log.info("Structural analysis complete", {
+        projectId: ingestionResult.projectId,
+        edgesFound: structuralResult.edges.length,
+        filesAnalyzed: structuralResult.filesAnalyzed,
+      });
     }
   }
 

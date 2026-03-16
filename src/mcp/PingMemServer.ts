@@ -54,12 +54,14 @@ import {
   CausalToolModule,
   KnowledgeToolModule,
   AgentToolModule,
+  StructuralToolModule,
 } from "./handlers/index.js";
 import { CONTEXT_TOOLS } from "./handlers/ContextToolModule.js";
 import { GRAPH_TOOLS } from "./handlers/GraphToolModule.js";
 import { WORKLOG_TOOLS } from "./handlers/WorklogToolModule.js";
 import { DIAGNOSTICS_TOOLS } from "./handlers/DiagnosticsToolModule.js";
 import { CODEBASE_TOOLS } from "./handlers/CodebaseToolModule.js";
+import { STRUCTURAL_TOOLS } from "./handlers/StructuralToolModule.js";
 import { MEMORY_TOOLS } from "./handlers/MemoryToolModule.js";
 import { CAUSAL_TOOLS } from "./handlers/CausalToolModule.js";
 import { KNOWLEDGE_TOOLS } from "./handlers/KnowledgeToolModule.js";
@@ -118,6 +120,7 @@ export const TOOLS: ToolDefinition[] = [
   ...WORKLOG_TOOLS,
   ...DIAGNOSTICS_TOOLS,
   ...CODEBASE_TOOLS,
+  ...STRUCTURAL_TOOLS,
   ...MEMORY_TOOLS,
   ...CAUSAL_TOOLS,
   ...KNOWLEDGE_TOOLS,
@@ -235,6 +238,7 @@ export class PingMemServer {
       new WorklogToolModule(this.state),
       new DiagnosticsToolModule(this.state),
       new CodebaseToolModule(this.state),
+      new StructuralToolModule(this.state),
       new MemoryToolModule(this.state),
       new CausalToolModule(this.state),
       new KnowledgeToolModule(this.state),
@@ -374,12 +378,19 @@ export async function main(): Promise<void> {
   const services = await createRuntimeServices();
   const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
 
+  // Create BM25Scorer for deterministic search ranking
+  const { BM25Scorer } = await import("../search/BM25Scorer.js");
+  const { Database: BM25Database } = await import("bun:sqlite");
+  const bm25Db = new BM25Database(runtimeConfig.pingMem.dbPath === ":memory:" ? ":memory:" : runtimeConfig.pingMem.dbPath);
+  const bm25Scorer = new BM25Scorer(bm25Db);
+
   // Create IngestionService only when both Neo4j and Qdrant are available
   let ingestionService: IngestionService | undefined;
   if (services.neo4jClient && services.qdrantClient) {
     ingestionService = new IngestionService({
       neo4jClient: services.neo4jClient,
       qdrantClient: services.qdrantClient,
+      bm25Scorer,
     });
     try {
       await ingestionService.ensureConstraints();
