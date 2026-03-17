@@ -23,6 +23,8 @@ import toolsCmd from "./commands/tools.js";
 import serverCmd from "./commands/server.js";
 import authCmd from "./commands/auth.js";
 import configCmd from "./commands/config.js";
+import shellHookCmd from "./commands/shell-hook.js";
+import daemonCmd from "./commands/daemon.js";
 
 function readVersion(): string {
   try {
@@ -56,6 +58,8 @@ const main = defineCommand({
     server: serverCmd,
     auth: authCmd,
     config: configCmd,
+    "shell-hook": shellHookCmd,
+    daemon: daemonCmd,
   },
 });
 

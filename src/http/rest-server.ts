@@ -90,6 +90,7 @@ import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.j
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import { IngestionQueue } from "../ingest/IngestionQueue.js";
 import { registerOpenAPIRoute } from "./routes/openapi.js";
+import { registerShellRoutes } from "./routes/shell.js";
 
 /** Maximum SARIF payload size in bytes (5 MB) */
 const MAX_SARIF_BYTES = 5 * 1024 * 1024;
@@ -2971,6 +2972,14 @@ export class RESTPingMemServer {
       } catch (error) {
         return this.handleError(c, error);
       }
+    });
+
+    // ============================================================================
+    // Shell Event Endpoint
+    // ============================================================================
+    registerShellRoutes(this.app, {
+      eventStore: this.eventStore,
+      getCurrentSessionId: () => this.currentSessionId,
     });
 
     // ============================================================================
