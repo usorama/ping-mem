@@ -84,75 +84,61 @@ export async function startHTTPServer(): Promise<void> {
   log.info(`Starting with transport: ${transport}`);
   log.info(`Listening on ${host}:${port}`);
 
-  // Create server instance based on transport type
-  let serverInstance: SSEPingMemServer | RESTPingMemServer;
+  // Always create REST server (handles /api/v1/*, /health, /ui, /admin, /openapi.json)
+  const restConfig = createDefaultRESTConfig({ port, host });
+  if (apiKey) restConfig.apiKey = apiKey;
+  restConfig.apiKeyManager = apiKeyManager;
+  restConfig.adminStore = adminStore;
 
-  if (transport === "rest") {
-    // REST API mode
-    const restConfig = createDefaultRESTConfig({
-      port,
-      host,
-    });
+  const restServer = new RESTPingMemServer({
+    ...restConfig,
+    dbPath: runtimeConfig.pingMem.dbPath,
+    diagnosticsStore,
+    graphManager: services.graphManager,
+    lineageEngine: services.lineageEngine,
+    evolutionEngine: services.evolutionEngine,
+    ingestionService,
+    qdrantClient: services.qdrantClient,
+    healthMonitor,
+    eventStore,
+  });
 
-    if (apiKey) {
-      restConfig.apiKey = apiKey;
-    }
-    restConfig.apiKeyManager = apiKeyManager;
-    restConfig.adminStore = adminStore;
+  // Always create SSE/MCP server (handles /mcp endpoint for MCP streamable-http)
+  const sseConfig = createDefaultSSEConfig({ port, host, transport: "streamable-http" });
+  if (apiKey) sseConfig.apiKey = apiKey;
+  sseConfig.apiKeyManager = apiKeyManager;
 
-    serverInstance = new RESTPingMemServer({
-      ...restConfig,
-      dbPath: runtimeConfig.pingMem.dbPath,
-      diagnosticsStore,
-      graphManager: services.graphManager,
-      lineageEngine: services.lineageEngine,
-      evolutionEngine: services.evolutionEngine,
-      ingestionService,
-      qdrantClient: services.qdrantClient,
-      healthMonitor,
-      eventStore,
-    });
-  } else {
-    // SSE / Streamable HTTP mode
-    const sseConfig = createDefaultSSEConfig({
-      port,
-      host,
-      transport,
-    });
+  const mcpServer = new SSEPingMemServer({
+    ...sseConfig,
+    dbPath: runtimeConfig.pingMem.dbPath,
+    diagnosticsDbPath,
+    graphManager: services.graphManager,
+    lineageEngine: services.lineageEngine,
+    evolutionEngine: services.evolutionEngine,
+    ingestionService,
+    qdrantClient: services.qdrantClient,
+    eventStore,
+  });
 
-    if (apiKey) {
-      sseConfig.apiKey = apiKey;
-    }
-    sseConfig.apiKeyManager = apiKeyManager;
-
-    serverInstance = new SSEPingMemServer({
-      ...sseConfig,
-      dbPath: runtimeConfig.pingMem.dbPath,
-      diagnosticsDbPath,
-      graphManager: services.graphManager,
-      lineageEngine: services.lineageEngine,
-      evolutionEngine: services.evolutionEngine,
-      ingestionService,
-      qdrantClient: services.qdrantClient,
-      eventStore,
-    });
-  }
+  // Unified server instance for lifecycle management (start/stop/hydrate)
+  const serverInstance = restServer;
 
   // Hydrate sessions from persisted events before accepting requests.
   // If hydration fails (corrupt DB, I/O error), start with empty sessions rather than crashing.
   try {
-    await serverInstance.hydrateSessionState();
+    await restServer.hydrateSessionState();
   } catch (err) {
     log.error("Session hydration failed — starting with empty session state", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
 
-  // Start the server
-  await serverInstance.start();
+  // Start servers
+  await restServer.start();
+  await mcpServer.start();
   healthMonitor.start();
 
-  // Create Node.js HTTP server
+  // Create Node.js HTTP server — routes /mcp to MCP transport, everything else to REST
   const httpServer = createServer((req, res) => {
     handleAdminRequest(req, res, {
       adminStore,
@@ -165,7 +151,12 @@ export async function startHTTPServer(): Promise<void> {
         if (handled) {
           return;
         }
-        return serverInstance.handleRequest(req, res);
+        // Route /mcp requests to MCP streamable-http transport
+        if (req.url === "/mcp" || req.url?.startsWith("/mcp?")) {
+          return mcpServer.handleRequest(req, res);
+        }
+        // Everything else goes to REST
+        return restServer.handleRequest(req, res);
       })
       .catch((error) => {
         log.error("Unhandled error", { error: error instanceof Error ? error.message : String(error) });
@@ -195,11 +186,13 @@ export async function startHTTPServer(): Promise<void> {
 
     const shutdownErrors: string[] = [];
 
-    // Stop the app server first to drain SSE streams and in-flight requests.
+    // Stop both servers to drain SSE streams and in-flight requests.
     // httpServer.close() blocks until all connections end, so stopping SSE streams
     // before closing the HTTP listener prevents indefinite shutdown hangs.
-    try { await serverInstance.stop(); }
-    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`serverInstance: ${msg}`); }
+    try { await mcpServer.stop(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`mcpServer: ${msg}`); }
+    try { await restServer.stop(); }
+    catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`restServer: ${msg}`); }
 
     try { await new Promise<void>((resolve, reject) => { httpServer.close((err) => (err ? reject(err) : resolve())); }); }
     catch (e) { const msg = e instanceof Error ? e.message : String(e); shutdownErrors.push(`httpServer: ${msg}`); }
