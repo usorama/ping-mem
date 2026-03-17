@@ -54,5 +54,7 @@ function generate(): Record<string, unknown> {
   return { openapi: "3.1.0", info: { title: "ping-mem REST API", version: "2.0.0", description: "Universal Memory Layer for AI agents." }, servers: [{ url: "http://localhost:3000", description: "Local" }], paths, components: { securitySchemes: { ApiKeyAuth: { type: "apiKey", in: "header", name: "X-API-Key" }, BearerAuth: { type: "http", scheme: "bearer" } }, schemas: { ErrorResponse: { type: "object", properties: { error: { type: "string" }, message: { type: "string" } }, required: ["error", "message"] } } }, security: [{ ApiKeyAuth: [] }, { BearerAuth: [] }] };
 }
 
+export function generateOpenAPISpec(): Record<string, unknown> { return generate(); }
+
 let cached: Record<string, unknown> | null = null;
 export function registerOpenAPIRoute(app: Hono<AppEnv>): void { app.get("/openapi.json", (c) => { if (!cached) cached = generate(); return c.json(cached); }); }
