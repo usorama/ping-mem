@@ -87,7 +87,7 @@ export interface EmbeddingProvider {
 /**
  * Supported embedding provider types
  */
-export type EmbeddingProviderType = "openai" | "gemini" | "custom";
+export type EmbeddingProviderType = "openai" | "gemini" | "ollama" | "custom";
 
 /**
  * Cache configuration options
@@ -415,7 +415,128 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
 }
 
 // ============================================================================
-// Fallback Embedding Provider
+// Ollama Embedding Provider
+// ============================================================================
+
+/**
+ * Ollama embedding provider using the native /api/embed endpoint.
+ *
+ * Uses nomic-embed-text by default (768 dimensions, matches Gemini/OpenAI default).
+ * Ollama must be running locally — no API key required.
+ */
+export class OllamaEmbeddingProvider implements EmbeddingProvider {
+  private readonly baseUrl: string;
+  private readonly model: string;
+  public readonly dimensions: number;
+  public readonly name = "ollama";
+
+  constructor(options?: { baseUrl?: string; model?: string; dimensions?: number }) {
+    this.baseUrl = (options?.baseUrl ?? "http://localhost:11434").replace(/\/$/, "");
+    this.model = options?.model ?? "nomic-embed-text";
+    this.dimensions = options?.dimensions ?? DEFAULT_CONFIG.dimensions;
+  }
+
+  async embed(text: string): Promise<Float32Array> {
+    if (!text || text.trim().length === 0) {
+      throw new EmbeddingGenerationError("Cannot embed empty text", "EMPTY_TEXT");
+    }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/api/embed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: this.model, input: text }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new EmbeddingGenerationError(
+          `Ollama API error (${response.status}): ${errorBody}`,
+          "API_ERROR"
+        );
+      }
+
+      const data = (await response.json()) as { embeddings?: number[][] };
+      const values = data?.embeddings?.[0];
+
+      if (!values || !Array.isArray(values)) {
+        throw new EmbeddingGenerationError("No embedding returned from Ollama", "NO_EMBEDDING");
+      }
+
+      return new Float32Array(values);
+    } catch (error) {
+      if (error instanceof EmbeddingServiceError) throw error;
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new EmbeddingGenerationError(
+        `Failed to generate Ollama embedding: ${errorMessage}`,
+        "GENERATION_FAILED",
+        error instanceof Error ? error : undefined
+      );
+    }
+  }
+}
+
+// ============================================================================
+// Chained Fallback Provider
+// ============================================================================
+
+/**
+ * Chains multiple providers in priority order.
+ * Tries each in sequence until one succeeds.
+ */
+export class ChainedFallbackProvider implements EmbeddingProvider {
+  private readonly providers: EmbeddingProvider[];
+  private consecutiveFailures: Map<string, number> = new Map();
+  public readonly dimensions: number;
+  public readonly name: string;
+
+  constructor(providers: EmbeddingProvider[]) {
+    if (providers.length === 0) {
+      throw new EmbeddingConfigurationError("At least one provider is required", "NO_PROVIDERS");
+    }
+    const dims = providers[0]!.dimensions;
+    for (const p of providers) {
+      if (p.dimensions !== dims) {
+        throw new EmbeddingConfigurationError(
+          `Dimension mismatch: ${p.name} has ${p.dimensions}, expected ${dims}`,
+          "DIMENSION_MISMATCH"
+        );
+      }
+    }
+    this.providers = providers;
+    this.dimensions = dims;
+    this.name = providers.map(p => p.name).join("→");
+  }
+
+  async embed(text: string): Promise<Float32Array> {
+    let lastError: Error | undefined;
+    for (const provider of this.providers) {
+      try {
+        const result = await provider.embed(text);
+        // Reset failure counter on success
+        this.consecutiveFailures.set(provider.name, 0);
+        return result;
+      } catch (error) {
+        const count = (this.consecutiveFailures.get(provider.name) ?? 0) + 1;
+        this.consecutiveFailures.set(provider.name, count);
+        const msg = error instanceof Error ? error.message : String(error);
+        const level = count > 5 ? "error" : "warn";
+        console[level](
+          `[ChainedFallback] ${provider.name} failed (${count}x): ${msg}. Trying next provider...`
+        );
+        lastError = error instanceof Error ? error : new Error(msg);
+      }
+    }
+    throw new EmbeddingGenerationError(
+      `All ${this.providers.length} providers failed. Last error: ${lastError?.message}`,
+      "ALL_PROVIDERS_FAILED",
+      lastError
+    );
+  }
+}
+
+// ============================================================================
+// Fallback Embedding Provider (legacy 2-provider)
 // ============================================================================
 
 /**
@@ -521,6 +642,13 @@ export class EmbeddingService {
       if (config.dimensions !== undefined) geminiOptions.dimensions = config.dimensions;
 
       this.provider = new GeminiEmbeddingProvider(config.apiKey, geminiOptions);
+    } else if (config.provider === "ollama") {
+      const ollamaOptions: { baseUrl?: string; model?: string; dimensions?: number } = {};
+      if (config.baseUrl !== undefined) ollamaOptions.baseUrl = config.baseUrl;
+      if (config.model !== undefined) ollamaOptions.model = config.model;
+      if (config.dimensions !== undefined) ollamaOptions.dimensions = config.dimensions;
+
+      this.provider = new OllamaEmbeddingProvider(ollamaOptions);
     } else {
       throw new EmbeddingConfigurationError(
         `Unknown provider type: ${config.provider}`,
@@ -652,80 +780,82 @@ export function createOpenAIEmbeddingService(
 }
 
 /**
- * Create an embedding service from environment variables
+ * Create an embedding service from environment variables.
+ *
+ * Provider priority: Ollama (local) → Gemini → OpenAI
+ * Chains all available providers with automatic fallback.
  *
  * Environment variables:
- * - OPENAI_API_KEY: OpenAI API key (used for OpenAI provider)
- * - GEMINI_API_KEY: Gemini API key (used for Gemini provider)
+ * - OLLAMA_URL: Ollama base URL (default: http://localhost:11434)
+ * - OLLAMA_EMBED_MODEL: Ollama embedding model (default: nomic-embed-text)
+ * - GEMINI_API_KEY: Gemini API key
+ * - OPENAI_API_KEY: OpenAI API key
  * - OPENAI_BASE_URL: Optional base URL override for OpenAI
- * - EMBEDDING_MODEL: Model to use (default varies by provider)
+ * - EMBEDDING_MODEL: Model override (applies to OpenAI/Gemini)
  * - EMBEDDING_DIMENSIONS: Embedding dimensions (default: 768)
  *
- * Provider selection:
- * - If both OPENAI_API_KEY and GEMINI_API_KEY are set: FallbackEmbeddingProvider (OpenAI primary, Gemini fallback)
- * - If only OPENAI_API_KEY: OpenAI provider
- * - If only GEMINI_API_KEY: Gemini provider
- * - If neither: throws EmbeddingConfigurationError
+ * Chain construction:
+ * 1. If OLLAMA_URL is set (or defaults to localhost:11434): Ollama is primary
+ * 2. If GEMINI_API_KEY is set: Gemini is first fallback
+ * 3. If OPENAI_API_KEY is set: OpenAI is second fallback
+ * 4. If no providers available: throws EmbeddingConfigurationError
  *
  * @returns Configured EmbeddingService instance
- * @throws {EmbeddingConfigurationError} If no API keys are configured
+ * @throws {EmbeddingConfigurationError} If no providers can be configured
  */
 export function createEmbeddingServiceFromEnv(): EmbeddingService {
-  const openaiKey = process.env["OPENAI_API_KEY"];
+  const ollamaUrl = process.env["OLLAMA_URL"] ?? "http://localhost:11434";
+  const ollamaModel = process.env["OLLAMA_EMBED_MODEL"] ?? "nomic-embed-text";
+  const ollamaEnabled = process.env["OLLAMA_EMBEDDINGS"] !== "false"; // enabled by default
   const geminiKey = process.env["GEMINI_API_KEY"];
-
-  if (!openaiKey && !geminiKey) {
-    throw new EmbeddingConfigurationError(
-      "Missing required environment variable: OPENAI_API_KEY or GEMINI_API_KEY",
-      "MISSING_ENV_VAR"
-    );
-  }
-
-  const baseUrl = process.env["OPENAI_BASE_URL"];
+  const openaiKey = process.env["OPENAI_API_KEY"];
+  const openaiBaseUrl = process.env["OPENAI_BASE_URL"];
   const model = process.env["EMBEDDING_MODEL"];
   const dimensionsStr = process.env["EMBEDDING_DIMENSIONS"];
   const dimensions = dimensionsStr ? parseInt(dimensionsStr, 10) : undefined;
 
-  // Both keys present: create fallback provider (OpenAI primary, Gemini fallback)
-  if (openaiKey && geminiKey) {
-    const openaiOptions: { model?: string; dimensions?: number; baseUrl?: string } = {};
-    if (baseUrl !== undefined) openaiOptions.baseUrl = baseUrl;
-    if (model !== undefined) openaiOptions.model = model;
-    if (dimensions !== undefined) openaiOptions.dimensions = dimensions;
+  // Build provider chain: Ollama → Gemini → OpenAI
+  const providers: EmbeddingProvider[] = [];
 
-    const openaiProvider = new OpenAIEmbeddingProvider(openaiKey, openaiOptions);
-
-    const geminiOptions: { model?: string; dimensions?: number } = {};
-    if (dimensions !== undefined) geminiOptions.dimensions = dimensions;
-
-    const geminiProvider = new GeminiEmbeddingProvider(geminiKey, geminiOptions);
-
-    const fallbackProvider = new FallbackEmbeddingProvider(openaiProvider, geminiProvider);
-
-    return new EmbeddingService({
-      provider: "custom",
-      customProvider: fallbackProvider,
-    });
+  // 1. Ollama (local, no API key needed)
+  if (ollamaEnabled) {
+    const ollamaOpts: { baseUrl?: string; model?: string; dimensions?: number } = {};
+    ollamaOpts.baseUrl = ollamaUrl;
+    ollamaOpts.model = ollamaModel;
+    if (dimensions !== undefined) ollamaOpts.dimensions = dimensions;
+    providers.push(new OllamaEmbeddingProvider(ollamaOpts));
   }
 
-  // Only OpenAI key: existing behavior
+  // 2. Gemini (first cloud fallback)
+  if (geminiKey) {
+    const geminiOpts: { model?: string; dimensions?: number } = {};
+    if (dimensions !== undefined) geminiOpts.dimensions = dimensions;
+    providers.push(new GeminiEmbeddingProvider(geminiKey, geminiOpts));
+  }
+
+  // 3. OpenAI (second cloud fallback)
   if (openaiKey) {
-    const options: { model?: string; dimensions?: number; baseUrl?: string } = {};
-    if (baseUrl !== undefined) options.baseUrl = baseUrl;
-    if (model !== undefined) options.model = model;
-    if (dimensions !== undefined) options.dimensions = dimensions;
-
-    return createOpenAIEmbeddingService(openaiKey, options);
+    const openaiOpts: { model?: string; dimensions?: number; baseUrl?: string } = {};
+    if (openaiBaseUrl !== undefined) openaiOpts.baseUrl = openaiBaseUrl;
+    if (model !== undefined) openaiOpts.model = model;
+    if (dimensions !== undefined) openaiOpts.dimensions = dimensions;
+    providers.push(new OpenAIEmbeddingProvider(openaiKey, openaiOpts));
   }
 
-  // Only Gemini key: create Gemini provider
-  const geminiOptions: { model?: string; dimensions?: number } = {};
-  if (dimensions !== undefined) geminiOptions.dimensions = dimensions;
+  if (providers.length === 0) {
+    throw new EmbeddingConfigurationError(
+      "No embedding providers available. Set OLLAMA_URL (default), GEMINI_API_KEY, or OPENAI_API_KEY.",
+      "NO_PROVIDERS"
+    );
+  }
 
-  const geminiProvider = new GeminiEmbeddingProvider(geminiKey!, geminiOptions);
+  // Single provider: use directly. Multiple: chain with fallback.
+  const provider = providers.length === 1
+    ? providers[0]!
+    : new ChainedFallbackProvider(providers);
 
   return new EmbeddingService({
     provider: "custom",
-    customProvider: geminiProvider,
+    customProvider: provider,
   });
 }

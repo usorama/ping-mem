@@ -69,9 +69,12 @@ services:
       - QDRANT_COLLECTION_NAME=ping-mem-vectors
       - QDRANT_VECTOR_DIMENSIONS=768
       - NODE_ENV=production
-      # Embedding provider — Gemini text-embedding-004 (free tier, no external dependency)
-      # Falls back gracefully: hybrid search returns 503 if no key configured
+      # Embedding provider chain: Ollama (local) → Gemini → OpenAI
+      # Ollama runs on host, accessible via host.docker.internal in OrbStack/Docker Desktop
+      - OLLAMA_URL=http://host.docker.internal:11434
+      - OLLAMA_EMBED_MODEL=nomic-embed-text
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Multi-agent memory settings (v2)
       - PING_MEM_MAX_AGENTS=${PING_MEM_MAX_AGENTS:-100}
     volumes:
