@@ -41,7 +41,7 @@ RUN mkdir -p /data
 # Set environment defaults
 ENV PING_MEM_HOST=0.0.0.0
 ENV PING_MEM_PORT=3000
-ENV PING_MEM_TRANSPORT=sse
+ENV PING_MEM_TRANSPORT=rest
 ENV NODE_ENV=production
 
 # Expose default port
