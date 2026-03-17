@@ -16,6 +16,8 @@ import { LineageEngine } from "../graph/LineageEngine.js";
 import { EvolutionEngine } from "../graph/EvolutionEngine.js";
 import { QdrantClientWrapper } from "../search/QdrantClient.js";
 import type { HealthMonitor } from "../observability/HealthMonitor.js";
+import { HybridSearchEngine, createHybridSearchEngine, createKeywordOnlySearchEngine } from "../search/HybridSearchEngine.js";
+import { createEmbeddingServiceFromEnv, type EmbeddingService } from "../search/EmbeddingService.js";
 import { createLogger } from "../util/logger.js";
 
 const log = createLogger("Runtime");
@@ -47,6 +49,8 @@ export interface RuntimeServices {
   evolutionEngine?: EvolutionEngine;
   qdrantClient?: QdrantClientWrapper;
   healthMonitor?: HealthMonitor;
+  hybridSearchEngine?: HybridSearchEngine;
+  embeddingService?: EmbeddingService;
 }
 
 function getNeo4jUsername(): string | undefined {
@@ -157,6 +161,24 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
     }
   } else {
     log.info("Qdrant not configured (code search disabled)");
+  }
+
+  // Create HybridSearchEngine — uses Gemini or OpenAI for embeddings if API key available,
+  // otherwise falls back to keyword-only BM25 search (no external API calls)
+  try {
+    const embeddingService = createEmbeddingServiceFromEnv();
+    services.embeddingService = embeddingService;
+    const hybridConfig: Parameters<typeof createHybridSearchEngine>[0] = {
+      embeddingService,
+    };
+    if (services.graphManager) hybridConfig.graphManager = services.graphManager;
+    if (services.qdrantClient) hybridConfig.qdrantClient = services.qdrantClient;
+    services.hybridSearchEngine = createHybridSearchEngine(hybridConfig);
+    log.info(`HybridSearchEngine created with ${embeddingService.providerName} embeddings`);
+  } catch {
+    // No API keys configured — create keyword-only engine
+    services.hybridSearchEngine = createKeywordOnlySearchEngine();
+    log.info("HybridSearchEngine created (keyword-only, no embedding API key configured)");
   }
 
   return services;
