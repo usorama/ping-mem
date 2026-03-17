@@ -89,16 +89,7 @@ import type { SearchWeights } from "../search/HybridSearchEngine.js";
 import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import { IngestionQueue } from "../ingest/IngestionQueue.js";
-import {
-  registerGraphRoutes,
-  registerCausalRoutes,
-  registerWorklogRoutes,
-  registerDiagnosticsExtraRoutes,
-  registerCodebaseExtraRoutes,
-  registerMemoryExtraRoutes,
-  registerToolDiscoveryRoutes,
-  registerOpenAPIRoute,
-} from "./routes/index.js";
+import { registerOpenAPIRoute } from "./routes/openapi.js";
 
 /** Maximum SARIF payload size in bytes (5 MB) */
 const MAX_SARIF_BYTES = 5 * 1024 * 1024;
@@ -2981,6 +2972,11 @@ export class RESTPingMemServer {
         return this.handleError(c, error);
       }
     });
+
+    // ============================================================================
+    // OpenAPI Spec Endpoint
+    // ============================================================================
+    registerOpenAPIRoute(this.app);
 
     // ============================================================================
     // Static Files & UI Routes

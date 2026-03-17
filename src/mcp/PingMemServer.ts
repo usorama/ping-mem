@@ -378,11 +378,9 @@ export async function main(): Promise<void> {
   const services = await createRuntimeServices();
   const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
 
-  // Create BM25Scorer for deterministic search ranking
-  const { BM25Scorer } = await import("../search/BM25Scorer.js");
-  const { Database: BM25Database } = await import("bun:sqlite");
-  const bm25Db = new BM25Database(runtimeConfig.pingMem.dbPath === ":memory:" ? ":memory:" : runtimeConfig.pingMem.dbPath);
-  const bm25Scorer = new BM25Scorer(bm25Db);
+  // BM25Scorer is optional — will be available after #28 is implemented.
+  // For now, ingestion works without it (the bm25Scorer config field is optional).
+  const bm25Scorer: unknown = undefined;
 
   // Create IngestionService only when both Neo4j and Qdrant are available
   let ingestionService: IngestionService | undefined;
@@ -390,7 +388,7 @@ export async function main(): Promise<void> {
     ingestionService = new IngestionService({
       neo4jClient: services.neo4jClient,
       qdrantClient: services.qdrantClient,
-      bm25Scorer,
+      ...(bm25Scorer ? { bm25Scorer } : {}),
     });
     try {
       await ingestionService.ensureConstraints();

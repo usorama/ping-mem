@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "ping-mem": "./dist/cli.js",
+    "ping-mem": "./dist/cli/index.js",
     "ping-mem-mcp": "./dist/mcp/cli.js",
     "ping-mem-http": "./dist/http/index.js"
   },
@@ -66,9 +66,10 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.3",
     "@qdrant/js-client-rest": "^1.16.2",
+    "citty": "^0.2.1",
     "cockatiel": "^3.2.1",
-    "neo4j-driver": "^5.28.3",
     "hono": "^4.11.6",
+    "neo4j-driver": "^5.28.3",
     "openai": "^6.16.0",
     "sqlite-vec": "^0.1.7-alpha.2",
     "zod": "^4.3.6"
