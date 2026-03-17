@@ -1,0 +1,25 @@
+{
+  "name": "@ping-gadgets/ping-mem-sdk",
+  "version": "2.0.0",
+  "description": "TypeScript SDK for ping-mem REST API",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "ping-mem",
+    "sdk",
+    "ai",
+    "memory",
+    "agents"
+  ],
+  "license": "MIT",
+  "dependencies": {},
+  "peerDependencies": {}
+}

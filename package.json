@@ -49,7 +49,9 @@
     "diagnostics:tsc-sarif": "bun run src/diagnostics/tsc-sarif.ts",
     "diagnostics:eslint-sarif": "bun run src/diagnostics/eslint-sarif.ts",
     "diagnostics:prettier-sarif": "bun run src/diagnostics/prettier-sarif.ts",
-    "diagnostics:collect": "bun run src/cli.ts collect"
+    "diagnostics:collect": "bun run src/cli.ts collect",
+    "sdk:extract-openapi": "bun run scripts/extract-openapi.ts",
+    "sdk:build": "cd sdk/typescript && bun run build"
   },
   "keywords": [
     "ai",
