@@ -89,8 +89,7 @@ import type { SearchWeights } from "../search/HybridSearchEngine.js";
 import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import { IngestionQueue } from "../ingest/IngestionQueue.js";
-// Route sub-module imports removed — all routes are currently inline in setupRoutes().
-// Future refactor: split into src/http/routes/*.ts modules.
+import { registerOpenAPIRoute } from "./routes/openapi.js";
 
 /** Maximum SARIF payload size in bytes (5 MB) */
 const MAX_SARIF_BYTES = 5 * 1024 * 1024;
@@ -2973,6 +2972,11 @@ export class RESTPingMemServer {
         return this.handleError(c, error);
       }
     });
+
+    // ============================================================================
+    // OpenAPI Spec Endpoint
+    // ============================================================================
+    registerOpenAPIRoute(this.app);
 
     // ============================================================================
     // Static Files & UI Routes
