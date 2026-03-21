@@ -386,4 +386,104 @@ export class CcMemoryBridge {
 
     return propagatedTo;
   }
+
+  // ==========================================================================
+  // Native Memory Export (Issue #58)
+  // ==========================================================================
+
+  /**
+   * Export high-relevance memories to Claude Code native memory files.
+   * Writes markdown files grouped by category to the specified directory.
+   *
+   * @returns Number of memories exported
+   */
+  async exportToNativeMemory(options: {
+    topicsDir: string;
+    eventStore: EventStore;
+    minRelevance?: number;
+    limit?: number;
+  }): Promise<number> {
+    const { topicsDir, eventStore, minRelevance = 0.7, limit = 100 } = options;
+    const db = eventStore.getDatabase();
+
+    // Ensure directory exists
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    fs.mkdirSync(topicsDir, { recursive: true });
+
+    // Query high-relevance memories
+    type MemoryRow = { memory_id: string; score: number; payload: string };
+    const rows = db.prepare(
+      `SELECT mr.memory_id, mr.score, e.payload
+       FROM memory_relevance mr
+       JOIN events e ON e.event_type = 'CONTEXT_SAVED'
+         AND json_extract(e.payload, '$.memoryId') = mr.memory_id
+       WHERE mr.score >= ?
+       ORDER BY mr.score DESC
+       LIMIT ?`
+    ).all(minRelevance, limit) as MemoryRow[];
+
+    if (rows.length === 0) {
+      return 0;
+    }
+
+    // Group by category
+    const grouped = new Map<string, Array<{ key: string; value: string; score: number }>>();
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload) as Record<string, unknown>;
+        const category = (payload.category as string) ?? "general";
+        const key = (payload.key as string) ?? row.memory_id;
+        const value = (payload.value as string) ?? "";
+
+        const group = grouped.get(category);
+        if (group) {
+          group.push({ key, value, score: row.score });
+        } else {
+          grouped.set(category, [{ key, value, score: row.score }]);
+        }
+      } catch {
+        // Skip unparseable payloads
+      }
+    }
+
+    // Write one markdown file per category
+    let exportedCount = 0;
+    const now = new Date().toISOString().split("T")[0];
+
+    for (const [category, memories] of grouped) {
+      const fileName = `ping-mem-${category}.md`;
+      const filePath = path.join(topicsDir, fileName);
+
+      const lines: string[] = [
+        "---",
+        `name: ping-mem ${category} memories`,
+        `type: ${category}`,
+        `exported: ${now}`,
+        `count: ${memories.length}`,
+        "---",
+        "",
+      ];
+
+      for (const mem of memories) {
+        lines.push(`## ${mem.key}`);
+        lines.push("");
+        lines.push(mem.value);
+        lines.push("");
+        lines.push(`_Relevance: ${Math.round(mem.score * 100)}%_`);
+        lines.push("");
+      }
+
+      fs.writeFileSync(filePath, lines.join("\n"), "utf-8");
+      exportedCount += memories.length;
+    }
+
+    log.info("Native memory export complete", {
+      categories: grouped.size,
+      totalExported: exportedCount,
+      dir: topicsDir,
+    });
+
+    return exportedCount;
+  }
 }

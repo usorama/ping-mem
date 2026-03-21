@@ -10,6 +10,7 @@ import type { ToolDefinition, ToolModule } from "../types.js";
 import type { SessionState } from "./shared.js";
 import { getActiveMemoryManager } from "./shared.js";
 import { SemanticCompressor } from "../../memory/SemanticCompressor.js";
+import { MaintenanceRunner } from "../../maintenance/MaintenanceRunner.js";
 import type { MemoryCategory } from "../../types/index.js";
 
 // ============================================================================
@@ -70,6 +71,35 @@ export const MEMORY_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    name: "memory_maintain",
+    description: "Run full maintenance cycle: dedup near-duplicates, consolidate stale memories, prune low-relevance unused memories, vacuum WAL. Supports dryRun preview mode.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        dryRun: { type: "boolean", description: "Preview what would be done without modifying (default: false)" },
+        dedupThreshold: { type: "number", description: "Similarity threshold for dedup (default: 0.95)" },
+        pruneThreshold: { type: "number", description: "Relevance threshold below which memories are pruned (default: 0.2)" },
+        pruneMinAgeDays: { type: "number", description: "Minimum age in days for pruning (default: 30)" },
+        exportDir: { type: "string", description: "Directory to export high-relevance memories as native markdown files" },
+      },
+    },
+  },
+  {
+    name: "memory_conflicts",
+    description: "List or resolve memory contradictions. Lists memories flagged with contradiction metadata, or resolves a specific contradiction by ID.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        action: {
+          type: "string",
+          description: "Action: 'list' (default) to show unresolved contradictions, 'resolve' to mark one as resolved",
+          enum: ["list", "resolve"],
+        },
+        memoryId: { type: "string", description: "Memory ID to resolve (required when action is 'resolve')" },
+      },
+    },
+  },
 ];
 
 // ============================================================================
@@ -99,6 +129,10 @@ export class MemoryToolModule implements ToolModule {
         return this.handleMemoryUnsubscribe(args);
       case "memory_compress":
         return this.handleMemoryCompress(args);
+      case "memory_maintain":
+        return this.handleMemoryMaintain(args);
+      case "memory_conflicts":
+        return this.handleMemoryConflicts(args);
       default:
         return undefined;
     }
@@ -222,5 +256,88 @@ export class MemoryToolModule implements ToolModule {
         digestSaved,
       },
     };
+  }
+
+  private async handleMemoryMaintain(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const runner = new MaintenanceRunner({
+      eventStore: this.state.eventStore,
+      relevanceEngine: this.state.relevanceEngine,
+      ccMemoryBridge: this.state.ccMemoryBridge,
+    });
+
+    const runOpts: import("../../maintenance/MaintenanceRunner.js").MaintenanceOptions = {
+      dryRun: args.dryRun === true,
+    };
+    if (typeof args.dedupThreshold === "number") runOpts.dedupThreshold = args.dedupThreshold;
+    if (typeof args.pruneThreshold === "number") runOpts.pruneThreshold = args.pruneThreshold;
+    if (typeof args.pruneMinAgeDays === "number") runOpts.pruneMinAgeDays = args.pruneMinAgeDays;
+    if (typeof args.exportDir === "string") runOpts.exportDir = args.exportDir;
+
+    const result = await runner.run(runOpts);
+
+    return { success: true, result };
+  }
+
+  private async handleMemoryConflicts(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const action = (args.action as string) ?? "list";
+    const db = this.state.eventStore.getDatabase();
+
+    if (action === "resolve") {
+      const memoryId = args.memoryId as string;
+      if (!memoryId) {
+        throw new Error("memoryId is required for resolve action");
+      }
+
+      type EventRow = { id: string; payload: string };
+      const event = db.prepare(
+        `SELECT event_id as id, payload FROM events
+         WHERE event_type = 'CONTEXT_SAVED'
+         AND json_extract(payload, '$.memoryId') = ?
+         LIMIT 1`
+      ).get(memoryId) as EventRow | null;
+
+      if (!event) {
+        throw new Error(`Memory not found: ${memoryId}`);
+      }
+
+      const payload = JSON.parse(event.payload) as Record<string, unknown>;
+      const metadata = (payload.metadata ?? {}) as Record<string, unknown>;
+      metadata.contradictionResolved = true;
+      payload.metadata = metadata;
+
+      // Parameterized update to prevent SQL injection
+      db.prepare(
+        `UPDATE events SET payload = ? WHERE event_id = ?`
+      ).run(JSON.stringify(payload), event.id);
+
+      return { success: true, memoryId, resolved: true };
+    }
+
+    // List unresolved contradictions
+    type ConflictRow = { id: string; payload: string; created_at: string };
+    const conflicts = db.prepare(
+      `SELECT event_id as id, payload, timestamp as created_at FROM events
+       WHERE event_type = 'CONTEXT_SAVED'
+       AND json_extract(payload, '$.metadata.contradicts') IS NOT NULL
+       AND (json_extract(payload, '$.metadata.contradictionResolved') IS NULL
+            OR json_extract(payload, '$.metadata.contradictionResolved') = 0)
+       ORDER BY created_at DESC
+       LIMIT 50`
+    ).all() as ConflictRow[];
+
+    const items = conflicts.map((row: ConflictRow) => {
+      const payload = JSON.parse(row.payload) as Record<string, unknown>;
+      const metadata = (payload.metadata ?? {}) as Record<string, unknown>;
+      return {
+        memoryId: payload.memoryId ?? row.id,
+        key: payload.key,
+        value: payload.value,
+        contradicts: metadata.contradicts,
+        contradictionMessage: metadata.contradictionMessage,
+        createdAt: row.created_at,
+      };
+    });
+
+    return { conflicts: items, count: items.length };
   }
 }
