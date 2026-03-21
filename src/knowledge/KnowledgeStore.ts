@@ -96,9 +96,10 @@ export function sanitizeFts5Query(raw: string): string {
     return " ";
   });
 
-  // 2. Strip everything except alphanumeric, underscore, hyphen, and whitespace
+  // 2. Strip everything except alphanumeric, underscore, and whitespace
+  // Hyphens are replaced with spaces because FTS5 treats `-` as the NOT operator
   const sanitized = withoutPhrases
-    .replace(/[^a-zA-Z0-9_\-\s]/g, " ")
+    .replace(/[^a-zA-Z0-9_\s]/g, " ")
     .replace(/\b(AND|OR|NOT|NEAR)\b/gi, " ")
     .trim();
 

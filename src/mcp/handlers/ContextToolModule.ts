@@ -581,30 +581,38 @@ export class ContextToolModule implements ToolModule {
     };
 
     // --- Advisory contradiction check (issue #53) ---
+    // Timeout after 3s — contradiction detection is advisory and must not block saves
     if (this.state.contradictionDetector) {
       try {
-        const similar = await memoryManager.recall({
-          semanticQuery: args.value as string,
-          limit: 3,
-        });
-        const contradictions: Array<{ existingKey: string; existingValue: string; type: string }> = [];
-        for (const r of similar) {
-          if (r.memory.id === savedMemory.id) continue;
-          if ((r.score ?? 0) < 0.5) continue;
-          const detection = await this.state.contradictionDetector.detect(
-            args.key as string,
-            r.memory.value,
-            args.value as string
-          );
-          if (detection.isContradiction) {
-            contradictions.push({
-              existingKey: r.memory.key,
-              existingValue: r.memory.value,
-              type: detection.conflict || "semantic",
-            });
+        const contradictionPromise = (async () => {
+          const similar = await memoryManager.recall({
+            semanticQuery: args.value as string,
+            limit: 3,
+          });
+          const contradictions: Array<{ existingKey: string; existingValue: string; type: string }> = [];
+          for (const r of similar) {
+            if (r.memory.id === savedMemory.id) continue;
+            if ((r.score ?? 0) < 0.5) continue;
+            const detection = await this.state.contradictionDetector!.detect(
+              args.key as string,
+              r.memory.value,
+              args.value as string
+            );
+            if (detection.isContradiction) {
+              contradictions.push({
+                existingKey: r.memory.key,
+                existingValue: r.memory.value,
+                type: detection.conflict || "semantic",
+              });
+            }
           }
-        }
-        if (contradictions.length > 0) {
+          return contradictions;
+        })();
+
+        const timeoutPromise = new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000));
+        const contradictions = await Promise.race([contradictionPromise, timeoutPromise]);
+
+        if (contradictions && contradictions.length > 0) {
           result.contradictions = contradictions;
         }
       } catch (contradictionError) {
