@@ -653,6 +653,70 @@ export class MemoryManager {
   }
 
   /**
+   * Supersede an existing memory with a new value.
+   *
+   * If a memory with the same key exists, the old memory is moved to a
+   * superseded key (`key::superseded::id`) and a new active memory is saved.
+   * A MEMORY_SUPERSEDED event is recorded.
+   *
+   * If no existing memory exists, behaves like save() with status=active.
+   */
+  async supersede(key: string, value: string, options: SaveMemoryOptions = {}): Promise<Memory> {
+    const existing = this.memories.get(key);
+
+    if (!existing) {
+      // No existing memory — just save with active status
+      return this.save(key, value, {
+        ...options,
+        metadata: { ...(options.metadata ?? {}), status: "active" },
+      });
+    }
+
+    // Move old memory to superseded key
+    const supersededKey = `${key}::superseded::${existing.id}`;
+
+    // Save superseded copy under new key
+    const supersededMeta = {
+      ...existing.metadata,
+      status: "superseded",
+      originalKey: key,
+    };
+
+    // Remove old from primary key
+    this.memories.delete(key);
+
+    // Store the old memory under superseded key
+    const oldCopy: Memory = { ...existing, key: supersededKey, metadata: supersededMeta };
+    this.memories.set(supersededKey, oldCopy);
+
+    // Save new memory under original key
+    const newMemory = await this.save(key, value, {
+      ...options,
+      metadata: {
+        ...(options.metadata ?? {}),
+        status: "active",
+        supersedes: existing.id,
+      },
+    });
+
+    // Update superseded memory to reference the new one
+    oldCopy.metadata.supersededBy = newMemory.id;
+
+    // Record MEMORY_SUPERSEDED event
+    await this.eventStore.createEvent(this.sessionId, "MEMORY_SUPERSEDED", {
+      memoryId: existing.id,
+      sessionId: this.sessionId,
+      operation: "supersede",
+    }, {
+      originalKey: key,
+      supersededBy: newMemory.id,
+      newMemoryId: newMemory.id,
+    });
+
+    return newMemory;
+  }
+
+  /**
    * Update an existing memory
    */
   async update(key: string, options: UpdateMemoryOptions): Promise<Memory> {
