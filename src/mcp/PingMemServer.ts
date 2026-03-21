@@ -107,6 +107,8 @@ export interface PingMemServerConfig {
   qdrantClient?: QdrantClientWrapper | undefined;
   /** Optional pre-created EventStore to share with the health monitor (avoids dual SQLite connections) */
   eventStore?: import("../storage/EventStore.js").EventStore | undefined;
+  /** Optional ContradictionDetector for advisory contradiction checks on save */
+  contradictionDetector?: import("../graph/ContradictionDetector.js").ContradictionDetector | undefined;
 }
 
 // ============================================================================
@@ -219,6 +221,7 @@ export class PingMemServer {
       knowledgeStore: new KnowledgeStore(this.eventStore.getDatabase()),
       qdrantClient: config.qdrantClient ?? null,
       ccMemoryBridge: null, // Initialized below after state is fully built
+      contradictionDetector: config.contradictionDetector ?? null,
     };
 
     // Initialize CcMemoryBridge with the knowledge store and event store

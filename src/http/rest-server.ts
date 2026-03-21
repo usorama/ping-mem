@@ -3077,6 +3077,7 @@ export class RESTPingMemServer {
           knowledgeStore: this.knowledgeStore,
           qdrantClient: this.qdrantClient,
           ccMemoryBridge: null,
+          contradictionDetector: null,
         };
 
         const modules = [

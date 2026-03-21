@@ -24,8 +24,10 @@ import type {
 import { createAgentId } from "../../types/index.js";
 import { checkEvidenceGate } from "../../validation/evidence-gates.js";
 import { createLogger } from "../../util/logger.js";
+import { JunkFilter } from "../../memory/JunkFilter.js";
 
 const log = createLogger("ContextToolModule");
+const junkFilterInstance = new JunkFilter();
 
 // ============================================================================
 // Tool Schemas
@@ -80,7 +82,7 @@ export const CONTEXT_TOOLS: ToolDefinition[] = [
         metadata: { type: "object", description: "Custom metadata" },
         extractEntities: {
           type: "boolean",
-          description: "When true, extract entities from value and store in knowledge graph",
+          description: "Entity extraction is ON by default. Set false to skip extraction.",
         },
         skipProactiveRecall: {
           type: "boolean",
@@ -200,6 +202,7 @@ export const CONTEXT_TOOLS: ToolDefinition[] = [
 export class ContextToolModule implements ToolModule {
   readonly tools: ToolDefinition[] = CONTEXT_TOOLS;
   private readonly state: SessionState;
+  private readonly junkFilter = junkFilterInstance;
 
   constructor(state: SessionState) {
     this.state = state;
@@ -353,6 +356,12 @@ export class ContextToolModule implements ToolModule {
   private async handleSave(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const memoryManager = getActiveMemoryManager(this.state);
 
+    // --- JunkFilter quality gate (issue #52) ---
+    const junkResult = this.junkFilter.isJunk(args.value as string);
+    if (junkResult.junk) {
+      return { success: false, rejected: true, reason: junkResult.reason };
+    }
+
     // Build save options with only defined properties (exactOptionalPropertyTypes)
     const saveOptions: Parameters<typeof memoryManager.save>[2] = {};
     if (args.category !== undefined) {
@@ -369,6 +378,24 @@ export class ContextToolModule implements ToolModule {
     }
     if (args.agentScope !== undefined) {
       saveOptions.agentScope = args.agentScope as AgentMemoryScope;
+    }
+
+    // --- Supersede semantics (issue #55) ---
+    // Check if a memory with the same key already exists
+    let supersededId: string | undefined;
+    try {
+      const existing = await memoryManager.recall({ key: args.key as string });
+      if (existing.length > 0) {
+        const oldMemory = existing[0]!.memory;
+        supersededId = oldMemory.id;
+        // Mark old memory as superseded via metadata update
+        const oldMeta = { ...oldMemory.metadata, status: "superseded", supersededBy: "pending" };
+        await memoryManager.update(oldMemory.key, { metadata: oldMeta });
+      }
+    } catch (supersedeError) {
+      log.warn("Supersede check failed, proceeding with save", {
+        error: supersedeError instanceof Error ? supersedeError.message : String(supersedeError),
+      });
     }
 
     // Evidence gate check — derive admin from agent_quotas if agentId present
@@ -392,7 +419,40 @@ export class ContextToolModule implements ToolModule {
     }
     const warnings: string[] = [...gateResult.warnings];
 
+    // Add supersede metadata to new memory if applicable
+    if (supersededId) {
+      saveOptions.metadata = {
+        ...(saveOptions.metadata ?? {}),
+        status: "active",
+        supersedes: supersededId,
+      };
+    }
+
     const savedMemory = await memoryManager.save(args.key as string, args.value as string, saveOptions);
+
+    // Complete supersede chain — update old memory with new memory's ID + record event
+    if (supersededId && this.state.currentSessionId) {
+      try {
+        // Update the old memory's metadata to point to the new one
+        await memoryManager.update(args.key as string, {
+          metadata: { status: "superseded", supersededBy: savedMemory.id },
+        }).catch(() => { /* old key may have been overwritten by the new save */ });
+        // Record MEMORY_SUPERSEDED event
+        await this.state.eventStore.createEvent(
+          this.state.currentSessionId,
+          "MEMORY_SUPERSEDED",
+          {
+            oldMemoryId: supersededId,
+            newMemoryId: savedMemory.id,
+            key: args.key as string,
+          },
+        );
+      } catch (supersedeCompleteError) {
+        log.warn("Supersede completion failed", {
+          error: supersedeCompleteError instanceof Error ? supersedeCompleteError.message : String(supersedeCompleteError),
+        });
+      }
+    }
 
     // Track relevance for the new memory
     if (this.state.relevanceEngine) {
@@ -403,15 +463,15 @@ export class ContextToolModule implements ToolModule {
       );
     }
 
-    // Handle entity extraction — selective routing between LLM and regex
+    // Handle entity extraction — default ON unless explicitly disabled (issue #54)
     const value = args.value as string;
     const category = args.category as string | undefined;
-    const explicitExtract = args.extractEntities === true;
+    const extractionDisabled = args.extractEntities === false;
 
     // Determine whether to use LLM extraction (high-value categories / long content)
     const useLlmExtraction = shouldUseLlmExtraction(category, value.length, false);
 
-    const shouldExtract = useLlmExtraction || explicitExtract;
+    const shouldExtract = !extractionDisabled && (useLlmExtraction || true);
     let entityIds: string[] | undefined;
 
     if (shouldExtract && this.state.graphManager) {
@@ -519,6 +579,45 @@ export class ContextToolModule implements ToolModule {
       memoryId: savedMemory.id,
       key: args.key,
     };
+
+    // --- Advisory contradiction check (issue #53) ---
+    if (this.state.contradictionDetector) {
+      try {
+        const similar = await memoryManager.recall({
+          semanticQuery: args.value as string,
+          limit: 3,
+        });
+        const contradictions: Array<{ existingKey: string; existingValue: string; type: string }> = [];
+        for (const r of similar) {
+          if (r.memory.id === savedMemory.id) continue;
+          if ((r.score ?? 0) < 0.5) continue;
+          const detection = await this.state.contradictionDetector.detect(
+            args.key as string,
+            r.memory.value,
+            args.value as string
+          );
+          if (detection.isContradiction) {
+            contradictions.push({
+              existingKey: r.memory.key,
+              existingValue: r.memory.value,
+              type: detection.conflict || "semantic",
+            });
+          }
+        }
+        if (contradictions.length > 0) {
+          result.contradictions = contradictions;
+        }
+      } catch (contradictionError) {
+        log.warn("Advisory contradiction check failed", {
+          error: contradictionError instanceof Error ? contradictionError.message : String(contradictionError),
+        });
+      }
+    }
+
+    // Surface supersede info
+    if (supersededId) {
+      result.superseded = supersededId;
+    }
 
     // Surface evidence gate warnings
     if (warnings.length > 0) {
