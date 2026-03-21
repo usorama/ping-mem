@@ -42,6 +42,9 @@ export interface SessionManagerConfig {
   maxActiveSessions?: number;
   /** Auto-checkpoint interval (ms), 0 to disable */
   autoCheckpointInterval?: number;
+  /** Session TTL in milliseconds. Sessions inactive beyond this are auto-ended.
+   *  Default: 3600000 (1 hour). Set to 0 to disable. */
+  sessionTtlMs?: number;
 }
 
 /**
@@ -50,6 +53,7 @@ export interface SessionManagerConfig {
 const DEFAULT_CONFIG: Required<Omit<SessionManagerConfig, "eventStore">> = {
   maxActiveSessions: 10,
   autoCheckpointInterval: 300000, // 5 minutes
+  sessionTtlMs: 3_600_000, // 1 hour
 };
 
 // ============================================================================
@@ -204,6 +208,39 @@ export class SessionManager {
   }
 
   /**
+   * Evict sessions that have been inactive beyond the TTL.
+   * Called automatically before max-sessions check in startSession().
+   * @returns Number of sessions evicted
+   */
+  async cleanup(): Promise<number> {
+    if (this.config.sessionTtlMs <= 0) return 0;
+
+    const now = Date.now();
+    let evicted = 0;
+
+    for (const [sessionId, session] of this.sessions) {
+      if (session.status !== "active") continue;
+      const lastActivity = session.lastActivityAt.getTime();
+      if (now - lastActivity > this.config.sessionTtlMs) {
+        try {
+          await this.endSession(sessionId);
+          evicted++;
+        } catch (err) {
+          log.warn("Failed to evict stale session, force-removing", { sessionId, error: String(err) });
+          this.sessions.delete(sessionId);
+          this.clearAutoCheckpoint(sessionId);
+          evicted++;
+        }
+      }
+    }
+
+    if (evicted > 0) {
+      log.info("Stale sessions evicted", { evicted });
+    }
+    return evicted;
+  }
+
+  /**
    * Start a new session
    *
    * Uses a promise-chain mutex to serialize the max-sessions check and
@@ -213,6 +250,9 @@ export class SessionManager {
   async startSession(config: SessionConfig): Promise<Session> {
     // Chain onto the mutex so that the check-and-create is atomic
     const resultPromise = this.sessionMutex.then(async () => {
+      // Evict expired sessions before checking capacity
+      await this.cleanup();
+
       // Check max sessions limit (now serialized)
       const activeSessions = Array.from(this.sessions.values()).filter(
         (s) => s.status === "active"

@@ -308,4 +308,85 @@ describe("SessionManager", () => {
       }).not.toThrow();
     });
   });
+
+  describe("TTL-based Session Cleanup", () => {
+    it("should evict sessions past TTL", async () => {
+      const ttlManager = createSessionManager({
+        eventStore: createInMemoryEventStore(),
+        sessionTtlMs: 50, // 50ms TTL for testing
+      });
+
+      const session = await ttlManager.startSession({ name: "Expiring Session" });
+      expect(ttlManager.getSession(session.id)?.status).toBe("active");
+
+      // Wait for TTL to expire
+      await new Promise(resolve => setTimeout(resolve, 80));
+
+      const evicted = await ttlManager.cleanup();
+      expect(evicted).toBe(1);
+
+      // Session should be ended
+      const afterCleanup = ttlManager.getSession(session.id);
+      expect(afterCleanup?.status).toBe("ended");
+
+      await ttlManager.close();
+    });
+
+    it("should auto-clean stale sessions before rejecting at max", async () => {
+      const ttlManager = createSessionManager({
+        eventStore: createInMemoryEventStore(),
+        maxActiveSessions: 2,
+        sessionTtlMs: 50, // 50ms TTL
+      });
+
+      // Fill up sessions
+      await ttlManager.startSession({ name: "Session 1" });
+      await ttlManager.startSession({ name: "Session 2" });
+
+      // Wait for TTL to expire
+      await new Promise(resolve => setTimeout(resolve, 80));
+
+      // This should succeed because cleanup() evicts stale sessions first
+      const session3 = await ttlManager.startSession({ name: "Session 3" });
+      expect(session3.name).toBe("Session 3");
+      expect(session3.status).toBe("active");
+
+      await ttlManager.close();
+    });
+
+    it("should not evict when TTL is disabled (0)", async () => {
+      const ttlManager = createSessionManager({
+        eventStore: createInMemoryEventStore(),
+        sessionTtlMs: 0, // disabled
+      });
+
+      const session = await ttlManager.startSession({ name: "Persistent Session" });
+
+      await new Promise(resolve => setTimeout(resolve, 20));
+
+      const evicted = await ttlManager.cleanup();
+      expect(evicted).toBe(0);
+      expect(ttlManager.getSession(session.id)?.status).toBe("active");
+
+      await ttlManager.close();
+    });
+
+    it("should not evict recently active sessions", async () => {
+      const ttlManager = createSessionManager({
+        eventStore: createInMemoryEventStore(),
+        sessionTtlMs: 200, // 200ms TTL
+      });
+
+      const session = await ttlManager.startSession({ name: "Active Session" });
+
+      // Only wait 20ms (well within TTL)
+      await new Promise(resolve => setTimeout(resolve, 20));
+
+      const evicted = await ttlManager.cleanup();
+      expect(evicted).toBe(0);
+      expect(ttlManager.getSession(session.id)?.status).toBe("active");
+
+      await ttlManager.close();
+    });
+  });
 });
