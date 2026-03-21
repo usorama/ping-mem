@@ -66,7 +66,7 @@ describe("context_save with entity extraction", () => {
       await server.close();
     });
 
-    it("should save memory without extractEntities parameter (backward compatible)", async () => {
+    it("should save memory without extractEntities parameter (extraction is default-on)", async () => {
       // Start a session first
       await callTool(server, "context_session_start", { name: "test-session" });
 
@@ -78,8 +78,8 @@ describe("context_save with entity extraction", () => {
       expect(result.success).toBe(true);
       expect(result.memoryId).toBeDefined();
       expect(result.key).toBe("test-key");
-      // entityIds should NOT be present when extractEntities not specified
-      expect(result.entityIds).toBeUndefined();
+      // entityIds should be empty array — extraction attempted but no graphManager
+      expect(result.entityIds).toEqual([]);
     });
 
     it("should save memory with extractEntities: false (no extraction)", async () => {
@@ -175,14 +175,14 @@ describe("context_save with entity extraction", () => {
     });
 
     it("should return empty entityIds when no entities extracted", async () => {
-      // Value with no extractable entities
+      // Value with no extractable entities (must pass JunkFilter — 10+ chars, not filler)
       mockGraphManager.batchCreateEntities.mockResolvedValue([]);
 
       await callTool(server, "context_session_start", { name: "test-session" });
 
       const result = await callTool(server, "context_save", {
         key: "test-key",
-        value: "hello world", // Simple text with no entities
+        value: "The system performed a routine maintenance check yesterday afternoon.",
         extractEntities: true,
       });
 
@@ -236,7 +236,17 @@ describe("context_save with entity extraction", () => {
       expect(mockGraphManager.batchCreateEntities).not.toHaveBeenCalled();
     });
 
-    it("should not include entityIds when extractEntities not specified", async () => {
+    it("should extract entities by default when extractEntities not specified", async () => {
+      const now = new Date();
+      mockGraphManager.batchCreateEntities.mockImplementation(async (entities) => {
+        return entities.map((e, i) => ({
+          ...e,
+          id: `default-extract-${i}`,
+          createdAt: now,
+          updatedAt: now,
+        }));
+      });
+
       await callTool(server, "context_session_start", { name: "test-session" });
 
       const result = await callTool(server, "context_save", {
@@ -245,8 +255,9 @@ describe("context_save with entity extraction", () => {
       });
 
       expect(result.success).toBe(true);
-      expect(result.entityIds).toBeUndefined();
-      expect(mockGraphManager.batchCreateEntities).not.toHaveBeenCalled();
+      // Extraction is now default-on (issue #54) — entityIds should be present
+      expect(Array.isArray(result.entityIds)).toBe(true);
+      expect(mockGraphManager.batchCreateEntities).toHaveBeenCalled();
     });
   });
 

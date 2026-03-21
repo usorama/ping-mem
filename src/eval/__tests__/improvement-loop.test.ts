@@ -345,7 +345,7 @@ describe("docker-compose.improvement.yml", () => {
 
     const content = fs.readFileSync(composePath, "utf-8");
     expect(content).toContain("ping-mem-green");
-    expect(content).toContain("3001:3000");
+    expect(content).toContain("3001:3003");
     expect(content).toContain("PING_MEM_IMPROVEMENT_MODE=true");
     expect(content).toContain("PING_MEM_INSTANCE=green");
     expect(content).toContain("improvement"); // profile name

@@ -306,7 +306,7 @@ describe("RESTPingMemClient", () => {
       await client.listSessions(5);
 
       const fetchCall = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect((fetchCall[0] as string).startsWith("http://localhost:3000")).toBe(true);
+      expect((fetchCall[0] as string).startsWith("http://localhost:3003")).toBe(true);
     });
   });
 });

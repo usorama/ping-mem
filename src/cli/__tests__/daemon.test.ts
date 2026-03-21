@@ -23,7 +23,7 @@ describe("daemon config", () => {
     const cfg = getDefaultDaemonConfig();
     expect(cfg.socketPath).toContain("ping-mem-");
     expect(cfg.pidFile).toContain(path.join(".ping-mem", "daemon.pid"));
-    expect(cfg.serverUrl).toBe("http://localhost:3000");
+    expect(cfg.serverUrl).toBe("http://localhost:3003");
   });
 
   test("isDaemonRunning returns false when no PID file exists", () => {
