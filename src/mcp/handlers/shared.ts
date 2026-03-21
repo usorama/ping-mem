@@ -29,6 +29,7 @@ import type { KnowledgeStore } from "../../knowledge/index.js";
 import type { QdrantClientWrapper } from "../../search/QdrantClient.js";
 import type { CcMemoryBridge } from "../../integration/CcMemoryBridge.js";
 import type { ContradictionDetector } from "../../graph/ContradictionDetector.js";
+import type { WriteLockManager } from "../../storage/WriteLockManager.js";
 
 /**
  * Mutable session state shared across all ToolModules by reference.
@@ -60,6 +61,7 @@ export interface SessionState {
   readonly qdrantClient: QdrantClientWrapper | null;
   readonly ccMemoryBridge: CcMemoryBridge | null;
   readonly contradictionDetector: ContradictionDetector | null;
+  readonly writeLockManager: WriteLockManager | null;
 }
 
 /**

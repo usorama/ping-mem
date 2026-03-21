@@ -78,7 +78,7 @@ services:
       # Multi-agent memory settings (v2)
       - PING_MEM_MAX_AGENTS=${PING_MEM_MAX_AGENTS:-100}
     volumes:
-      - ping-mem-data:/data
+      - /Users/umasankr/.ping-mem:/data
       - /Users/umasankr/Projects:/projects:rw
     networks:
       - ping-mem-network

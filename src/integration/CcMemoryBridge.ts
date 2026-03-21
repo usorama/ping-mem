@@ -414,12 +414,12 @@ export class CcMemoryBridge {
     // Query high-relevance memories
     type MemoryRow = { memory_id: string; score: number; payload: string };
     const rows = db.prepare(
-      `SELECT mr.memory_id, mr.score, e.payload
+      `SELECT mr.memory_id, mr.relevance_score as score, e.payload
        FROM memory_relevance mr
-       JOIN events e ON e.event_type = 'CONTEXT_SAVED'
+       JOIN events e ON e.event_type = 'MEMORY_SAVED'
          AND json_extract(e.payload, '$.memoryId') = mr.memory_id
-       WHERE mr.score >= ?
-       ORDER BY mr.score DESC
+       WHERE mr.relevance_score >= ?
+       ORDER BY mr.relevance_score DESC
        LIMIT ?`
     ).all(minRelevance, limit) as MemoryRow[];
 
@@ -432,9 +432,10 @@ export class CcMemoryBridge {
     for (const row of rows) {
       try {
         const payload = JSON.parse(row.payload) as Record<string, unknown>;
-        const category = (payload.category as string) ?? "general";
+        const memory = (payload.memory as Record<string, unknown>) ?? {};
+        const category = (memory.category as string) ?? (payload.category as string) ?? "general";
         const key = (payload.key as string) ?? row.memory_id;
-        const value = (payload.value as string) ?? "";
+        const value = (memory.value as string) ?? (payload.value as string) ?? "";
 
         const group = grouped.get(category);
         if (group) {

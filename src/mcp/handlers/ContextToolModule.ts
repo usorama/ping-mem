@@ -284,6 +284,11 @@ export class ContextToolModule implements ToolModule {
       memoryManagerConfig.agentRole = session.metadata.agentRole as string;
     }
 
+    // Wire write lock manager for cross-process coordination
+    if (this.state.writeLockManager !== null) {
+      memoryManagerConfig.writeLockManager = this.state.writeLockManager;
+    }
+
     const memoryManager = new MemoryManager(memoryManagerConfig);
 
     // Hydrate memory state from event store

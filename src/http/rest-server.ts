@@ -24,7 +24,9 @@ const log = createLogger("REST Server");
 
 import { SessionManager } from "../session/SessionManager.js";
 import { MemoryManager, type MemoryManagerConfig } from "../memory/MemoryManager.js";
+import { JunkFilter } from "../memory/JunkFilter.js";
 import { EventStore } from "../storage/EventStore.js";
+import { WriteLockManager } from "../storage/WriteLockManager.js";
 import { type VectorIndex, createInMemoryVectorIndex } from "../search/VectorIndex.js";
 import { RelevanceEngine } from "../memory/RelevanceEngine.js";
 import type { GraphManager } from "../graph/GraphManager.js";
@@ -133,6 +135,8 @@ export class RESTPingMemServer {
   private pubsub: MemoryPubSub;
   private knowledgeStore: KnowledgeStore;
   private ownsEventStore: boolean;
+  private junkFilter = new JunkFilter();
+  private writeLockManager: WriteLockManager;
   private qdrantClient: QdrantClientWrapper | null = null;
   private healthMonitor: HealthMonitor | null = null;
   private ingestionQueue: IngestionQueue | null = null;
@@ -151,6 +155,7 @@ export class RESTPingMemServer {
     this.eventStore = injectedEventStore ?? new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
     this.sessionManager = new SessionManager({ eventStore: this.eventStore });
     this.relevanceEngine = new RelevanceEngine(this.eventStore.getDatabase());
+    this.writeLockManager = new WriteLockManager(this.eventStore.getDatabase());
     this.pubsub = new MemoryPubSub();
     this.knowledgeStore = new KnowledgeStore(this.eventStore.getDatabase());
     this.diagnosticsStore =
@@ -320,16 +325,8 @@ export class RESTPingMemServer {
   private setupRoutes(): void {
     // Health check — per-component status
     this.app.get("/health", async (c) => {
-      // Auth is required for health check only when keys are configured.
-      // Uses isAuthRequired() — same policy as the global middleware.
-      if (this.isAuthRequired()) {
-        if (!this.validateApiKey(this.extractApiKey(c))) {
-          return c.json(
-            { error: "Unauthorized", message: "Invalid API key" },
-            401
-          );
-        }
-      }
+      // Health endpoint is ALWAYS unauthenticated — Docker healthchecks,
+      // load balancers, and monitoring tools must reach it without API keys.
 
       // Lightweight liveness check — only pings SQLite (core dependency).
       // Full dependency probing is at /api/v1/observability/status.
@@ -432,6 +429,7 @@ export class RESTPingMemServer {
           eventStore: this.eventStore,
           sessionId: session.id,
           pubsub: this.pubsub,
+          writeLockManager: this.writeLockManager,
         };
 
         if (this.vectorIndex) {
@@ -530,6 +528,15 @@ export class RESTPingMemServer {
         }
 
         const memoryManager = await this.getMemoryManager(sessionId);
+
+        // Quality gate: reject junk content
+        const junkResult = this.junkFilter.isJunk(body.value);
+        if (junkResult.junk) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: `Content rejected: ${junkResult.reason}` },
+            400
+          );
+        }
 
         // Build options, excluding undefined values
         const options: Record<string, unknown> = {};
@@ -3078,6 +3085,7 @@ export class RESTPingMemServer {
           qdrantClient: this.qdrantClient,
           ccMemoryBridge: null,
           contradictionDetector: null,
+          writeLockManager: this.writeLockManager,
         };
 
         const modules = [
@@ -3393,6 +3401,7 @@ export class RESTPingMemServer {
       eventStore: this.eventStore,
       sessionId,
       pubsub: this.pubsub,
+      writeLockManager: this.writeLockManager,
     };
 
     if (this.vectorIndex) {

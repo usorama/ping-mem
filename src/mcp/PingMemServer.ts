@@ -39,6 +39,7 @@ import { DiagnosticsStore } from "../diagnostics/index.js";
 import { SummaryGenerator, OpenAIProvider } from "../diagnostics/SummaryGenerator.js";
 import { SummaryCache } from "../diagnostics/SummaryCache.js";
 import { RelevanceEngine } from "../memory/RelevanceEngine.js";
+import { WriteLockManager } from "../storage/WriteLockManager.js";
 
 import type { ToolModule, ToolDefinition } from "./types.js";
 import type { SessionState } from "./handlers/shared.js";
@@ -222,6 +223,7 @@ export class PingMemServer {
       qdrantClient: config.qdrantClient ?? null,
       ccMemoryBridge: null, // Initialized below after state is fully built
       contradictionDetector: config.contradictionDetector ?? null,
+      writeLockManager: new WriteLockManager(this.eventStore.getDatabase()),
     };
 
     // Initialize CcMemoryBridge with the knowledge store and event store
