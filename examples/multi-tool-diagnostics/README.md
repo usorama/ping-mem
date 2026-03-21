@@ -182,7 +182,7 @@ const cached = await ping_mem_diagnostics_summarize({
 
 ```bash
 # Compare tools
-curl -X POST http://localhost:3000/api/v1/diagnostics/compare-tools \
+curl -X POST http://localhost:3003/api/v1/diagnostics/compare-tools \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "ping-mem-abc123",
@@ -191,7 +191,7 @@ curl -X POST http://localhost:3000/api/v1/diagnostics/compare-tools \
   }'
 
 # Get LLM summary
-curl -X POST http://localhost:3000/api/v1/diagnostics/summarize/analysis-123 \
+curl -X POST http://localhost:3003/api/v1/diagnostics/summarize/analysis-123 \
   -H "Content-Type: application/json" \
   -d '{ "useLLM": true }'
 ```

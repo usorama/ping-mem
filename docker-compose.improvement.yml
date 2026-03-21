@@ -17,14 +17,14 @@ services:
       dockerfile: Dockerfile
     container_name: ping-mem-green
     ports:
-      - "3001:3000"
+      - "3001:3003"
     deploy:
       resources:
         limits:
           memory: 4G
     environment:
       - PING_MEM_HOST=0.0.0.0
-      - PING_MEM_PORT=3000
+      - PING_MEM_PORT=3003
       - PING_MEM_TRANSPORT=rest
       - PING_MEM_INSTANCE=green
       - PING_MEM_IMPROVEMENT_MODE=true
@@ -52,7 +52,7 @@ services:
       ping-mem-qdrant:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 3000 || exit 1"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 3003 || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 3

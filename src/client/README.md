@@ -179,7 +179,7 @@ await client.close();
 
 ```typescript
 interface RESTClientConfig {
-  baseUrl?: string;        // default: "http://localhost:3000"
+  baseUrl?: string;        // default: "http://localhost:3003"
   apiKey?: string;         // optional authentication
   timeout?: number;        // default: 30000 (30s)
   sessionId?: string;      // optional default session
@@ -239,7 +239,7 @@ try {
 ```typescript
 import { createLocalRESTClient, createLocalSSEClient } from "ping-mem/client";
 
-// Automatically uses http://localhost:3000
+// Automatically uses http://localhost:3003
 const client = createLocalRESTClient();
 ```
 

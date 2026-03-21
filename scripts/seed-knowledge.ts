@@ -6,7 +6,7 @@
  * so running this script multiple times is safe.
  *
  * Usage:
- *   bun run scripts/seed-knowledge.ts [--base-url http://localhost:3000]
+ *   bun run scripts/seed-knowledge.ts [--base-url http://localhost:3003]
  *
  * Requirements:
  *   - ping-mem REST server must be running at the target URL
@@ -21,7 +21,7 @@ const log = createLogger("seed-knowledge");
 // ============================================================================
 
 function parseArgs(argv: string[]): { baseUrl: string; apiKey: string | null } {
-  let baseUrl = "http://localhost:3000";
+  let baseUrl = "http://localhost:3003";
   let apiKey: string | null = null;
 
   for (let i = 0; i < argv.length; i++) {
@@ -67,7 +67,7 @@ try {
 } catch (err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   log.error(message);
-  log.error("Usage: bun run scripts/seed-knowledge.ts [--base-url http://localhost:3000] [--api-key <key>]");
+  log.error("Usage: bun run scripts/seed-knowledge.ts [--base-url http://localhost:3003] [--api-key <key>]");
   process.exit(1);
 }
 

@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-BASE="http://localhost:3000"
+BASE="http://localhost:3003"
 PASS=0
 FAIL=0
 SKIP=0

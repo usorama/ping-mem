@@ -324,7 +324,7 @@ const diff = await ping_mem_diagnostics_diff({
 ### For CI/CD (via REST)
 ```bash
 # Ingest diagnostics
-curl -X POST http://localhost:3000/api/v1/diagnostics/ingest \
+curl -X POST http://localhost:3003/api/v1/diagnostics/ingest \
   -H "Content-Type: application/json" \
   -d '{
     "projectId": "...",
@@ -336,10 +336,10 @@ curl -X POST http://localhost:3000/api/v1/diagnostics/ingest \
   }'
 
 # Query latest
-curl http://localhost:3000/api/v1/diagnostics/latest?projectId=...
+curl http://localhost:3003/api/v1/diagnostics/latest?projectId=...
 
 # Diff two analyses
-curl -X POST http://localhost:3000/api/v1/diagnostics/diff \
+curl -X POST http://localhost:3003/api/v1/diagnostics/diff \
   -d '{"analysisIdA": "...", "analysisIdB": "..."}'
 ```
 

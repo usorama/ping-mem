@@ -64,8 +64,8 @@ export async function startHTTPServer(): Promise<void> {
   }
 
   const transport = (process.env.PING_MEM_TRANSPORT as HTTPTransportType) ?? "streamable-http";
-  const rawPort = parseInt(process.env.PING_MEM_PORT ?? "3000", 10);
-  const port = Number.isNaN(rawPort) ? 3000 : rawPort;
+  const rawPort = parseInt(process.env.PING_MEM_PORT ?? "3003", 10);
+  const port = Number.isNaN(rawPort) ? 3003 : rawPort;
   const host = process.env.PING_MEM_HOST ?? "0.0.0.0";
   const apiKey = process.env.PING_MEM_API_KEY;
   const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;

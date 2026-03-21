@@ -175,8 +175,8 @@ if [ "$SKIP_DOCKER" = false ]; then
   fi
 
   # Check ping-mem
-  if curl -sf "${AUTH_HEADER[@]}" http://localhost:3000/health > /dev/null 2>&1; then
-    echo -e "  ${GREEN}✓${NC} ping-mem: healthy (http://localhost:3000)"
+  if curl -sf "${AUTH_HEADER[@]}" http://localhost:3003/health > /dev/null 2>&1; then
+    echo -e "  ${GREEN}✓${NC} ping-mem: healthy (http://localhost:3003)"
   else
     echo -e "  ${YELLOW}⚠${NC} ping-mem: not responding yet (check: docker compose logs ping-mem)"
   fi
@@ -199,12 +199,12 @@ echo "  2. Start MCP server (for Claude Code):"
 echo "     bun run dist/mcp/cli.js"
 echo ""
 echo "  3. Or use HTTP API:"
-echo "     curl http://localhost:3000/health"
+echo "     curl http://localhost:3003/health"
 echo ""
 echo "  4. Configure your AI agent (see AGENT_INSTRUCTIONS.md)"
 echo ""
 echo "Service endpoints:"
-echo "  - ping-mem (SSE):  http://localhost:3000"
+echo "  - ping-mem (SSE):  http://localhost:3003"
 echo "  - Neo4j Browser:   http://localhost:7474"
 echo "  - Qdrant Console:  http://localhost:6333/dashboard"
 echo ""

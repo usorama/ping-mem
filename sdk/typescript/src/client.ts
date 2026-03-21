@@ -31,7 +31,7 @@ import type {
  * ```ts
  * import { createClient } from "@ping-gadgets/ping-mem-sdk";
  *
- * const client = createClient({ baseUrl: "http://localhost:3000" });
+ * const client = createClient({ baseUrl: "http://localhost:3003" });
  * const health = await client.health();
  * ```
  */

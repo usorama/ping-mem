@@ -212,7 +212,7 @@ export interface CheckpointConfig {
  * Base client configuration
  */
 export interface ClientConfig {
-  /** Server base URL (default: http://localhost:3000) */
+  /** Server base URL (default: http://localhost:3003) */
   baseUrl?: string;
   /** API key for authentication (optional) */
   apiKey?: string;

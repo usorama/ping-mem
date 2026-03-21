@@ -34,7 +34,7 @@ docker compose -f ~/Projects/ping-mem/docker-compose.yml up -d
 
 Verify:
 ```bash
-curl http://localhost:3000/health        # SSE/MCP server
+curl http://localhost:3003/health        # SSE/MCP server
 curl http://localhost:6333/collections   # Qdrant
 docker exec ping-mem-neo4j cypher-shell -u neo4j -p neo4j_password "RETURN 1"  # Neo4j
 ```
@@ -95,8 +95,8 @@ Tools are available as `context_*`, `codebase_*`, `diagnostics_*`, `worklog_*`.
 ### 3.2 REST API
 
 Base URLs:
-- **SSE server**: `http://localhost:3000` (primary, supports SSE streaming)
-- **REST server**: `http://localhost:3000` (Docker, set `PING_MEM_TRANSPORT=rest`)
+- **SSE server**: `http://localhost:3003` (primary, supports SSE streaming)
+- **REST server**: `http://localhost:3003` (Docker, set `PING_MEM_TRANSPORT=rest`)
 
 Headers:
 ```
@@ -110,7 +110,7 @@ X-API-Key: <key>                 # If authentication is configured
 ```typescript
 import { createRESTClient } from "ping-mem/client";
 
-const client = createRESTClient({ baseUrl: "http://localhost:3000" });
+const client = createRESTClient({ baseUrl: "http://localhost:3003" });
 await client.startSession({ name: "sdk-session", projectDir: process.cwd() });
 await client.save("key", "value", { category: "note" });
 const results = await client.search({ query: "authentication", limit: 10 });
@@ -537,7 +537,7 @@ docker restart ping-mem      # Restart to re-initialize
 
 **Cause 1**: Project not ingested yet.
 ```bash
-curl "http://localhost:3000/api/v1/codebase/search?query=test&limit=1"
+curl "http://localhost:3003/api/v1/codebase/search?query=test&limit=1"
 # If empty, ingest first
 ```
 
@@ -580,8 +580,8 @@ docker compose up -d                # Ensure all services up
 |-------|---------|-----|
 | `ECONNREFUSED :7687` | Neo4j | `docker restart ping-mem-neo4j` |
 | `ECONNREFUSED :6333` | Qdrant | `docker restart ping-mem-qdrant` |
-| `ECONNREFUSED :3000` | ping-mem SSE | `docker compose up -d` |
-| `ECONNREFUSED :3000` | ping-mem | `docker compose up -d ping-mem` |
+| `ECONNREFUSED :3003` | ping-mem SSE | `docker compose up -d` |
+| `ECONNREFUSED :3003` | ping-mem | `docker compose up -d ping-mem` |
 
 ---
 

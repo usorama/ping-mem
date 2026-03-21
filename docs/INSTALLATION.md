@@ -58,7 +58,7 @@ cd /path/to/ping-mem
 **What you get:**
 - Neo4j: http://localhost:7474 (graph database)
 - Qdrant: http://localhost:6333 (vector database)
-- ping-mem: http://localhost:3000 (HTTP API)
+- ping-mem: http://localhost:3003 (HTTP API)
 
 **Note**: MCP server is NOT in Docker (runs locally via stdio).
 
@@ -225,7 +225,7 @@ bun run smoke-test           # Run smoke tests
 │  │ Docker (OrbStack)                                    │  │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │  │
 │  │  │  Neo4j   │  │  Qdrant  │  │  ping-mem HTTP   │  │  │
-│  │  │  :7687   │  │  :6333   │  │  :3000           │  │  │
+│  │  │  :7687   │  │  :6333   │  │  :3003           │  │  │
 │  │  └──────────┘  └──────────┘  └──────────────────┘  │  │
 │  └──────────────────────────────────────────────────────┘  │
 │                          ▲                                  │
@@ -304,7 +304,7 @@ bun run smoke-test
 docker info
 
 # Check ports are available
-lsof -i :3000  # ping-mem
+lsof -i :3003  # ping-mem
 lsof -i :7474  # Neo4j
 lsof -i :6333  # Qdrant
 
@@ -340,7 +340,7 @@ curl http://localhost:7474
 curl http://localhost:6333/health
 
 # Try force re-ingest
-curl -X POST http://localhost:3000/api/v1/codebase/ingest \
+curl -X POST http://localhost:3003/api/v1/codebase/ingest \
   -H "Content-Type: application/json" \
   -d '{"projectDir":"/path/to/project","forceReingest":true}'
 ```

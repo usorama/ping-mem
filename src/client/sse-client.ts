@@ -59,7 +59,7 @@ export class SSEPingMemClient implements PingMemClient {
 
   constructor(config: SSEClientConfig = {}) {
     this.config = {
-      baseUrl: config.baseUrl ?? "http://localhost:3000",
+      baseUrl: config.baseUrl ?? "http://localhost:3003",
       apiKey: config.apiKey ?? "",
       timeout: config.timeout ?? 30000,
       sessionId: config.sessionId ?? "",
@@ -523,6 +523,6 @@ export function createLocalSSEClient(
 ): SSEPingMemClient {
   return new SSEPingMemClient({
     ...config,
-    baseUrl: "http://localhost:3000",
+    baseUrl: "http://localhost:3003",
   });
 }

@@ -25,7 +25,7 @@ echo ""
 
 # Test project directory (use ping-mem itself)
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-API_URL="http://localhost:3000"
+API_URL="http://localhost:3003"
 API_KEY="${PING_MEM_API_KEY:-}"
 
 AUTH_HEADER=()

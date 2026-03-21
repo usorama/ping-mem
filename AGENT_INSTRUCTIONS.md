@@ -224,7 +224,7 @@ bun run start
 
 Use REST API:
 ```bash
-curl http://localhost:3000/api/v1/codebase/search?query=authentication
+curl http://localhost:3003/api/v1/codebase/search?query=authentication
 ```
 
 ---

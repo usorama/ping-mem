@@ -1,6 +1,6 @@
 /** SDK configuration options. */
 export interface PingMemSDKConfig {
-  /** Base URL of the ping-mem REST server (e.g. "http://localhost:3000"). */
+  /** Base URL of the ping-mem REST server (e.g. "http://localhost:3003"). */
   baseUrl: string;
   /** Optional Bearer token or API key for authenticated requests. */
   apiKey?: string | undefined;

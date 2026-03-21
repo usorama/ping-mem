@@ -516,7 +516,7 @@ main() {
   # Check ping-mem app
   local app_healthy=false
   for i in $(seq 1 20); do
-    if curl -sf "http://localhost:3000/health" >/dev/null 2>&1; then
+    if curl -sf "http://localhost:3003/health" >/dev/null 2>&1; then
       app_healthy=true
       break
     fi

@@ -194,7 +194,7 @@ codebase_timeline({
 - **Neo4j**: `bolt://localhost:7687` (credentials: neo4j/neo4j_password)
 - **Qdrant**: `http://localhost:6333` (collection: `ping-mem-vectors`)
 - **ping-mem REST**: `http://localhost:3001`
-- **ping-mem SSE**: `http://localhost:3000`
+- **ping-mem SSE**: `http://localhost:3003`
 
 ### Environment Variables
 ```bash

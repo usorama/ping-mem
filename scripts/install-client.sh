@@ -49,7 +49,7 @@ echo ""
 
 echo -e "${YELLOW}[1/5] Verifying ping-mem service...${NC}"
 
-if curl -sf "${AUTH_HEADER[@]}" http://localhost:3000/health > /dev/null 2>&1; then
+if curl -sf "${AUTH_HEADER[@]}" http://localhost:3003/health > /dev/null 2>&1; then
   echo -e "  ${GREEN}✓${NC} ping-mem service is running"
 else
   echo -e "  ${RED}✗${NC} ping-mem service not responding"
@@ -268,7 +268,7 @@ if [[ "$SCOPE" == "project" ]]; then
   cat > "$TARGET_DIR/.ping-mem/config.json" <<EOF
 {
   "projectDir": "$TARGET_DIR",
-  "pingMemUrl": "http://localhost:3000",
+  "pingMemUrl": "http://localhost:3003",
   "autoIngest": false,
   "createdAt": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 }

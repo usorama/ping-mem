@@ -52,7 +52,7 @@ export class RESTPingMemClient implements PingMemClient {
 
   constructor(config: RESTClientConfig = {}) {
     this.config = {
-      baseUrl: config.baseUrl ?? "http://localhost:3000",
+      baseUrl: config.baseUrl ?? "http://localhost:3003",
       apiKey: config.apiKey ?? "",
       timeout: config.timeout ?? 30000,
       sessionId: config.sessionId ?? "",
@@ -364,6 +364,6 @@ export function createRESTClient(config?: RESTClientConfig): RESTPingMemClient {
 export function createLocalRESTClient(config?: Omit<RESTClientConfig, "baseUrl">): RESTPingMemClient {
   return new RESTPingMemClient({
     ...config,
-    baseUrl: "http://localhost:3000",
+    baseUrl: "http://localhost:3003",
   });
 }

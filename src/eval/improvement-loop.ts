@@ -296,7 +296,7 @@ function parseSearchUrl(): string {
   if (idx !== -1 && process.argv[idx + 1]) {
     return process.argv[idx + 1]!;
   }
-  return "http://localhost:3000";
+  return "http://localhost:3003";
 }
 
 async function runEvalAndSave(phase: "baseline" | "post"): Promise<void> {

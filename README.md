@@ -23,16 +23,16 @@ Agents can discover every capability at runtime — no docs needed:
 
 ```bash
 # REST — discover all tools
-curl http://localhost:3000/api/v1/tools | jq '.data.count'
+curl http://localhost:3003/api/v1/tools | jq '.data.count'
 # → 47
 
 # REST — save a memory
-curl -X POST http://localhost:3000/api/v1/context \
+curl -X POST http://localhost:3003/api/v1/context \
   -H "Content-Type: application/json" \
   -d '{"key":"decision-1","value":"Use PostgreSQL","category":"decision"}'
 
 # REST — search memories
-curl "http://localhost:3000/api/v1/search?query=database&limit=5"
+curl "http://localhost:3003/api/v1/search?query=database&limit=5"
 
 # CLI — same operations
 ping-mem context save decision-1 "Use PostgreSQL" --category decision
@@ -45,7 +45,7 @@ ping-mem context search "database" --limit 5
 // TypeScript SDK
 import { PingMemSDK } from "@ping-gadgets/ping-mem-sdk";
 
-const pm = new PingMemSDK({ baseUrl: "http://localhost:3000" });
+const pm = new PingMemSDK({ baseUrl: "http://localhost:3003" });
 await pm.contextSave("decision-1", "Use PostgreSQL", { category: "decision" });
 const results = await pm.contextSearch("database", { limit: 5 });
 ```
@@ -152,7 +152,7 @@ const results = await pm.contextSearch("database", { limit: 5 });
 ## Architecture
 
 ```
-Port 3000 (single port)
+Port 3003 (single port)
 ├── /api/v1/*       REST API (47 endpoints)
 ├── /mcp            MCP streamable-http transport
 ├── /openapi.json   OpenAPI 3.1 spec
@@ -192,15 +192,15 @@ cd ping-mem
 docker compose up -d
 
 # Verify
-curl http://localhost:3000/health
-curl http://localhost:3000/api/v1/tools | jq '.data.count'
+curl http://localhost:3003/health
+curl http://localhost:3003/api/v1/tools | jq '.data.count'
 ```
 
 ### From Source
 
 ```bash
 bun install && bun run build
-bun run start  # REST server on :3000
+bun run start  # REST server on :3003
 ```
 
 ### CLI
@@ -265,7 +265,7 @@ Add to `~/.claude/mcp.json`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PING_MEM_PORT` | `3000` | Server port |
+| `PING_MEM_PORT` | `3003` | Server port |
 | `PING_MEM_TRANSPORT` | `rest` | Transport (rest serves REST + MCP on same port) |
 | `PING_MEM_DB_PATH` | `:memory:` | SQLite database path |
 | `PING_MEM_API_KEY` | | API key for authentication |

@@ -341,7 +341,7 @@ import { createRESTClient } from "ping-mem/client";
 
 // Create client
 const client = createRESTClient({
-  baseUrl: "http://localhost:3000"
+  baseUrl: "http://localhost:3003"
 });
 
 // Start session
@@ -380,7 +380,7 @@ node my-app.js
 ```python
 import requests
 
-BASE_URL = "http://localhost:3000"
+BASE_URL = "http://localhost:3003"
 
 # Start session
 response = requests.post(f"{BASE_URL}/session/start", json={
@@ -418,7 +418,7 @@ python script.py
 
 ```bash
 # Set base URL
-BASE="http://localhost:3000"
+BASE="http://localhost:3003"
 
 # Start session
 SESSION=$(curl -s -X POST "$BASE/session/start" \
@@ -686,7 +686,7 @@ docker build -t ping-mem:latest .
 # Run container
 docker run -d \
   -v ping-mem-data:/data \
-  -p 3000:3000 \
+  -p 3003:3003 \
   -e PING_MEM_DB_PATH=/data/ping-mem.db \
   ping-mem:latest
 ```
@@ -969,7 +969,7 @@ ping-mem is designed as **universal infrastructure**. Potential consumers:
 | Environment | Endpoint | Credentials |
 |-------------|----------|-------------|
 | **Production** | `https://ping-mem.ping-gadgets.com` | `~/Projects/.creds/cloudflare.json` |
-| **Local** | `http://localhost:3000` | None |
+| **Local** | `http://localhost:3003` | None |
 
 ---
 

@@ -43,7 +43,7 @@ Full workflow: `~/.claude/ping-mem-agent-workflow.md`
 │  ping-mem Infrastructure                                   │
 │  ┌──────────┐  ┌──────────┐  ┌─────────┐  ┌──────────┐   │
 │  │ REST API │  │ MCP      │  │ Neo4j   │  │ Qdrant   │   │
-│  │ :3000    │  │ (stdio)  │  │ :7687   │  │ :6333    │   │
+│  │ :3003    │  │ (stdio)  │  │ :7687   │  │ :6333    │   │
 │  └──────────┘  └──────────┘  └─────────┘  └──────────┘   │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -122,8 +122,8 @@ The path-independent projectId ensures Neo4j graph nodes and Qdrant vectors crea
 For any project integrating with ping-mem:
 
 1. **Register**: Add project path to `~/.ping-mem/registered-projects.txt`
-2. **Verify ingestion**: `curl http://localhost:3000/api/v1/codebase/search?query=test&limit=1`
-3. **Check health**: `curl http://localhost:3000/health`
+2. **Verify ingestion**: `curl http://localhost:3003/api/v1/codebase/search?query=test&limit=1`
+3. **Check health**: `curl http://localhost:3003/health`
 4. **If 503**: Ensure Docker containers are running (`docker ps | grep ping-mem`)
 5. **Force reingest**: `bun run scripts/force-ingest.ts /path/to/project`
 
@@ -134,7 +134,7 @@ For any project integrating with ping-mem:
 | 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem` container |
 | Empty search results | Project not ingested into Qdrant | Run force-ingest script |
 | Wrong projectId | Path mismatch (Docker vs local) | Verify git remote URL is consistent |
-| Connection refused :3000 | ping-mem container down | `docker-compose up -d ping-mem` |
+| Connection refused :3003 | ping-mem container down | `docker-compose up -d ping-mem` |
 | ECONNREFUSED :6333 | Qdrant down | `docker restart ping-mem-qdrant` |
 
 ---
@@ -465,7 +465,7 @@ import { createRESTClient } from "ping-mem/client";
 
 // Create client
 const client = createRESTClient({
-  baseUrl: "http://localhost:3000"
+  baseUrl: "http://localhost:3003"
 });
 
 // Start session
@@ -504,7 +504,7 @@ node my-app.js
 ```python
 import requests
 
-BASE_URL = "http://localhost:3000"
+BASE_URL = "http://localhost:3003"
 
 # Start session
 response = requests.post(f"{BASE_URL}/session/start", json={
@@ -542,7 +542,7 @@ python script.py
 
 ```bash
 # Set base URL
-BASE="http://localhost:3000"
+BASE="http://localhost:3003"
 
 # Start session
 SESSION=$(curl -s -X POST "$BASE/session/start" \
@@ -830,7 +830,7 @@ docker build -t ping-mem:latest .
 # Run container
 docker run -d \
   -v ping-mem-data:/data \
-  -p 3000:3000 \
+  -p 3003:3003 \
   -e PING_MEM_DB_PATH=/data/ping-mem.db \
   ping-mem:latest
 ```
@@ -848,7 +848,7 @@ docker run -d \
 | `QDRANT_VECTOR_DIMENSIONS` | **For ingestion** | `768` | Vector dimensions |
 | `OPENAI_API_KEY` | Optional | | OpenAI API key (ML-based embeddings + SemanticCompressor LLM mode) |
 | `PING_MEM_MAX_AGENTS` | No | `100` | Maximum number of registered agents |
-| `PING_MEM_PORT` | No | `3000` | HTTP server port |
+| `PING_MEM_PORT` | No | `3003` | HTTP server port |
 | `PING_MEM_TRANSPORT` | No | `rest` | HTTP transport mode (`rest`, `sse`, `streamable-http`) |
 | `PING_MEM_API_KEY` | For auth | | Seed API key for request authentication |
 | `PING_MEM_ADMIN_USER` | For admin | | Admin panel Basic Auth username |
@@ -966,7 +966,7 @@ ping-mem/
 |---------|-------|-----|
 | 503 on codebase endpoints | IngestionService not initialized | Restart `ping-mem` container |
 | Empty search results | Project not ingested | Run force-ingest script |
-| Connection refused :3000 | ping-mem container down | `docker-compose up -d ping-mem` |
+| Connection refused :3003 | ping-mem container down | `docker-compose up -d ping-mem` |
 | ECONNREFUSED :6333 | Qdrant down | `docker restart ping-mem-qdrant` |
 
 ---
@@ -984,7 +984,7 @@ ping-mem/
 | `PING_MEM_API_KEY` | For auth | | Seed API key |
 | `PING_MEM_ADMIN_USER` / `PING_MEM_ADMIN_PASS` | For admin | | Basic Auth |
 | `PING_MEM_SECRET_KEY` | For encryption | | AES-256-GCM key encryption |
-| `PING_MEM_PORT` | No | 3000 | HTTP port |
+| `PING_MEM_PORT` | No | 3003 | HTTP port |
 
 ---
 
@@ -1026,7 +1026,7 @@ ping-mem/
 | Environment | Endpoint | Credentials |
 |-------------|----------|-------------|
 | Production | `https://ping-mem.ping-gadgets.com` | `~/Projects/.creds/cloudflare.json` |
-| Local | `http://localhost:3000` | None |
+| Local | `http://localhost:3003` | None |
 
 ---
 

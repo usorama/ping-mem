@@ -117,7 +117,7 @@ Clients may support varying subsets of MCP features: Resources, Prompts, Tools, 
   "mcpServers": {
     "ping-mem": {
       "type": "http",
-      "url": "http://localhost:3000/mcp"
+      "url": "http://localhost:3003/mcp"
     }
   }
 }
@@ -204,7 +204,7 @@ Note: The key is `"servers"` (NOT `"mcpServers"` like most other clients).
   "servers": {
     "ping-mem": {
       "type": "http",
-      "url": "http://localhost:3000/mcp"
+      "url": "http://localhost:3003/mcp"
     }
   }
 }
@@ -272,7 +272,7 @@ schema: v1
 mcpServers:
   - name: ping-mem
     type: streamable-http
-    url: http://localhost:3000/mcp
+    url: http://localhost:3003/mcp
 ```
 
 **Tool Discovery**: Yes, via `tools/list`.
@@ -357,7 +357,7 @@ env = { PING_MEM_DB_PATH = "~/.ping-mem/ping-mem.db" }
 **Streamable HTTP server**:
 ```toml
 [mcp_servers.ping-mem]
-url = "http://localhost:3000/mcp"
+url = "http://localhost:3003/mcp"
 ```
 
 ### CLI Configuration Commands
@@ -535,7 +535,7 @@ Yes, via standard MCP `tools/list`.
 {
   "mcpServers": {
     "ping-mem": {
-      "url": "http://localhost:3000/mcp",
+      "url": "http://localhost:3003/mcp",
       "headers": {
         "Authorization": "Bearer your-api-key"
       }
@@ -626,7 +626,7 @@ Cursor supports rich variable interpolation:
 {
   "mcpServers": {
     "ping-mem": {
-      "serverUrl": "http://localhost:3000/mcp",
+      "serverUrl": "http://localhost:3003/mcp",
       "headers": {
         "Authorization": "Bearer your-api-key"
       }
@@ -692,14 +692,14 @@ Yes, via `tools/list`.
 
 | Client | Field Name | Example |
 |--------|------------|---------|
-| Claude Code | `url` | `"url": "http://localhost:3000/mcp"` |
-| VS Code Copilot | `url` | `"url": "http://localhost:3000/mcp"` |
-| Continue | `url` | `url: http://localhost:3000/mcp` |
-| Cline | `url` | `"url": "http://localhost:3000/mcp"` |
-| Codex CLI | `url` | `url = "http://localhost:3000/mcp"` |
-| OpenCode | `url` | `"url": "http://localhost:3000/mcp"` |
-| Cursor | `url` | `"url": "http://localhost:3000/mcp"` |
-| **Windsurf** | **`serverUrl`** | `"serverUrl": "http://localhost:3000/mcp"` |
+| Claude Code | `url` | `"url": "http://localhost:3003/mcp"` |
+| VS Code Copilot | `url` | `"url": "http://localhost:3003/mcp"` |
+| Continue | `url` | `url: http://localhost:3003/mcp` |
+| Cline | `url` | `"url": "http://localhost:3003/mcp"` |
+| Codex CLI | `url` | `url = "http://localhost:3003/mcp"` |
+| OpenCode | `url` | `"url": "http://localhost:3003/mcp"` |
+| Cursor | `url` | `"url": "http://localhost:3003/mcp"` |
+| **Windsurf** | **`serverUrl`** | `"serverUrl": "http://localhost:3003/mcp"` |
 
 ---
 
@@ -742,21 +742,21 @@ Adaptation notes:
 **Claude Code / Cursor / Cline / VS Code Copilot / OpenCode**:
 ```json
 {
-  "url": "http://localhost:3000/mcp"
+  "url": "http://localhost:3003/mcp"
 }
 ```
 
 **Windsurf** (uses `serverUrl`):
 ```json
 {
-  "serverUrl": "http://localhost:3000/mcp"
+  "serverUrl": "http://localhost:3003/mcp"
 }
 ```
 
 **Codex CLI** (TOML):
 ```toml
 [mcp_servers.ping-mem]
-url = "http://localhost:3000/mcp"
+url = "http://localhost:3003/mcp"
 bearer_token_env_var = "PING_MEM_API_KEY"
 ```
 

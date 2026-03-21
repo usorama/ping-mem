@@ -37,7 +37,7 @@ cd /path/to/ping-mem
 **Result:**
 - Neo4j: http://localhost:7474 (graph)
 - Qdrant: http://localhost:6333 (vectors)
-- ping-mem: http://localhost:3000 (HTTP API)
+- ping-mem: http://localhost:3003 (HTTP API)
 
 ### 2. Client Installation (Per Project or Global)
 
@@ -115,7 +115,7 @@ cd /path/to/ping-mem
 │                                                 │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────┐ │
 │  │  Neo4j   │  │  Qdrant  │  │  ping-mem    │ │
-│  │  :7687   │  │  :6333   │  │  :3000       │ │
+│  │  :7687   │  │  :6333   │  │  :3003       │ │
 │  └──────────┘  └──────────┘  └──────────────┘ │
 │                                                 │
 │  Volumes: ping-mem-data, neo4j-data, qdrant    │
@@ -244,7 +244,7 @@ bun run diagnostics:collect      # Collect diagnostics
 ### Unified ping-mem Service
 
 Changed from 2 separate services (`ping-mem-sse`, `ping-mem-rest`) to:
-- **Primary**: `ping-mem` (port 3000, SSE by default)
+- **Primary**: `ping-mem` (port 3003, SSE by default)
 - **Optional**: `ping-mem-rest` (port 3001, REST only, profile: rest-api)
 
 **Why:**

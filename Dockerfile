@@ -40,16 +40,16 @@ RUN mkdir -p /data
 
 # Set environment defaults
 ENV PING_MEM_HOST=0.0.0.0
-ENV PING_MEM_PORT=3000
+ENV PING_MEM_PORT=3003
 ENV PING_MEM_TRANSPORT=rest
 ENV NODE_ENV=production
 
 # Expose default port
-EXPOSE 3000
+EXPOSE 3003
 
 # Health check — tests actual HTTP connectivity
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD curl -f http://localhost:3003/health || exit 1
 
 # Run the server
 CMD ["bun", "run", "dist/http/server.js"]

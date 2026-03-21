@@ -3483,7 +3483,7 @@ export function createDefaultRESTConfig(
   overrides?: Partial<HTTPServerConfig>
 ): HTTPServerConfig {
   return {
-    port: 3000,
+    port: 3003,
     host: "0.0.0.0",
     transport: "rest",
     cors: {

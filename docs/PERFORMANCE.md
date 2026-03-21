@@ -86,7 +86,7 @@ This document describes the performance characteristics, scalability limits, and
 2. **Incremental Ingestion**: Only re-ingest when `treeHash` changes
    ```bash
    # Check if already ingested
-   curl "http://localhost:3000/api/v1/diagnostics/latest?projectId=...&treeHash=..."
+   curl "http://localhost:3003/api/v1/diagnostics/latest?projectId=...&treeHash=..."
    ```
 
 3. **Limit Query Results**: Use pagination for large result sets

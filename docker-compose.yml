@@ -49,10 +49,10 @@ services:
       dockerfile: Dockerfile
     container_name: ping-mem
     ports:
-      - "3000:3000"   # Primary port (SSE or REST based on PING_MEM_TRANSPORT)
+      - "3003:3003"   # Primary port (SSE or REST based on PING_MEM_TRANSPORT)
     environment:
       - PING_MEM_HOST=0.0.0.0
-      - PING_MEM_PORT=3000
+      - PING_MEM_PORT=3003
       - PING_MEM_TRANSPORT=rest
       - PING_MEM_DB_PATH=/data/ping-mem.db
       - PING_MEM_DIAGNOSTICS_DB_PATH=/data/ping-mem-diagnostics.db
@@ -88,7 +88,7 @@ services:
       ping-mem-qdrant:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 3000 || exit 1"]
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 3003 || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

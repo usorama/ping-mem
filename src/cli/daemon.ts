@@ -27,7 +27,7 @@ export function getDefaultDaemonConfig(): DaemonConfig {
   return {
     socketPath: getDefaultSocketPath(),
     pidFile: path.join(configDir, "daemon.pid"),
-    serverUrl: "http://localhost:3000",
+    serverUrl: "http://localhost:3003",
   };
 }
 

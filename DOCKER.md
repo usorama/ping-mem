@@ -27,7 +27,7 @@ This guide covers deploying ping-mem using Docker and Docker Compose.
    ```
 
 4. **Access services:**
-   - SSE Server: http://localhost:3000
+   - SSE Server: http://localhost:3003
    - REST API: http://localhost:3001
    - Neo4j Browser: http://localhost:7474
    - Qdrant Console: http://localhost:6333/dashboard
@@ -36,7 +36,7 @@ This guide covers deploying ping-mem using Docker and Docker Compose.
 
 | Service | Port | Description |
 |---------|------|-------------|
-| ping-mem | 3000 | Main server (transport set via `PING_MEM_TRANSPORT`) |
+| ping-mem | 3003 | Main server (transport set via `PING_MEM_TRANSPORT`) |
 | ping-mem-neo4j | 7474, 7687 | Neo4j knowledge graph |
 | ping-mem-qdrant | 6333, 6334 | Qdrant vector database |
 
@@ -97,7 +97,7 @@ docker-compose exec ping-mem-neo4j cypher-shell -u neo4j -p your_password
 Key variables in `.env`:
 
 - `PING_MEM_TRANSPORT`: `sse` (default) or `rest`
-- `PING_MEM_PORT`: Server port (default: 3000)
+- `PING_MEM_PORT`: Server port (default: 3003)
 - `NEO4J_URI`: Neo4j connection URI
 - `NEO4J_PASSWORD`: Neo4j password
 - `QDRANT_URL`: Qdrant connection URL
@@ -140,7 +140,7 @@ All services include health checks:
 docker-compose ps
 
 # Manual health check
-curl http://localhost:3000/health
+curl http://localhost:3003/health
 curl http://localhost:3001/health
 curl http://localhost:6333/health
 ```
@@ -188,7 +188,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 
 Key notes:
 
-- `docker-compose.prod.yml` only exposes port 3000 on localhost
+- `docker-compose.prod.yml` only exposes port 3003 on localhost
 - Neo4j and Qdrant do not expose public ports
 - Use a reverse proxy (Nginx/Caddy) for HTTPS and routing
 

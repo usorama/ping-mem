@@ -15,7 +15,7 @@ export interface PingMemConfig {
 }
 
 const DEFAULT_CONFIG: PingMemConfig = {
-  serverUrl: "http://localhost:3000",
+  serverUrl: "http://localhost:3003",
   defaultProject: null,
   outputFormat: "table",
 };

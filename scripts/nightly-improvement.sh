@@ -8,7 +8,7 @@
 # Scheduling: launchd plist or cron at 2 AM
 #
 # Prerequisites:
-#   - docker compose running (Blue instance on port 3000)
+#   - docker compose running (Blue instance on port 3003)
 #   - claude CLI installed and authenticated
 #   - bun installed
 
@@ -22,7 +22,7 @@ LOG_FILE="$IMPROVEMENTS_DIR/nightly-$(date +%Y-%m-%d).log"
 DRY_RUN="${1:-}"
 MAX_TURNS=15
 GREEN_PORT=3001
-BLUE_PORT=3000
+BLUE_PORT=3003
 
 # Ensure improvements directory exists
 mkdir -p "$IMPROVEMENTS_DIR"
