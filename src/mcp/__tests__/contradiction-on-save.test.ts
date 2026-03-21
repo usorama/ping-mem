@@ -9,7 +9,7 @@
  * @module mcp/__tests__/contradiction-on-save.test
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { PingMemServer } from "../PingMemServer.js";
 import type { ContradictionDetector, ContradictionResult } from "../../graph/ContradictionDetector.js";
 import type { SessionState } from "../handlers/shared.js";

@@ -381,23 +381,6 @@ export class ContextToolModule implements ToolModule {
     }
 
     // --- Supersede semantics (issue #55) ---
-    // Check if a memory with the same key already exists
-    let supersededId: string | undefined;
-    try {
-      const existing = await memoryManager.recall({ key: args.key as string });
-      if (existing.length > 0) {
-        const oldMemory = existing[0]!.memory;
-        supersededId = oldMemory.id;
-        // Mark old memory as superseded via metadata update
-        const oldMeta = { ...oldMemory.metadata, status: "superseded", supersededBy: "pending" };
-        await memoryManager.update(oldMemory.key, { metadata: oldMeta });
-      }
-    } catch (supersedeError) {
-      log.warn("Supersede check failed, proceeding with save", {
-        error: supersedeError instanceof Error ? supersedeError.message : String(supersedeError),
-      });
-    }
-
     // Evidence gate check — derive admin from agent_quotas if agentId present
     const metadata = saveOptions.metadata ?? {};
     let isAdmin = false;
@@ -419,40 +402,9 @@ export class ContextToolModule implements ToolModule {
     }
     const warnings: string[] = [...gateResult.warnings];
 
-    // Add supersede metadata to new memory if applicable
-    if (supersededId) {
-      saveOptions.metadata = {
-        ...(saveOptions.metadata ?? {}),
-        status: "active",
-        supersedes: supersededId,
-      };
-    }
-
-    const savedMemory = await memoryManager.save(args.key as string, args.value as string, saveOptions);
-
-    // Complete supersede chain — update old memory with new memory's ID + record event
-    if (supersededId && this.state.currentSessionId) {
-      try {
-        // Update the old memory's metadata to point to the new one
-        await memoryManager.update(args.key as string, {
-          metadata: { status: "superseded", supersededBy: savedMemory.id },
-        }).catch(() => { /* old key may have been overwritten by the new save */ });
-        // Record MEMORY_SUPERSEDED event
-        await this.state.eventStore.createEvent(
-          this.state.currentSessionId,
-          "MEMORY_SUPERSEDED",
-          {
-            oldMemoryId: supersededId,
-            newMemoryId: savedMemory.id,
-            key: args.key as string,
-          },
-        );
-      } catch (supersedeCompleteError) {
-        log.warn("Supersede completion failed", {
-          error: supersedeCompleteError instanceof Error ? supersedeCompleteError.message : String(supersedeCompleteError),
-        });
-      }
-    }
+    // Use MemoryManager.supersede() to handle supersede logic properly
+    // This eliminates code duplication and silent failure patterns
+    const savedMemory = await memoryManager.supersede(args.key as string, args.value as string, saveOptions);
 
     // Track relevance for the new memory
     if (this.state.relevanceEngine) {
@@ -471,7 +423,7 @@ export class ContextToolModule implements ToolModule {
     // Determine whether to use LLM extraction (high-value categories / long content)
     const useLlmExtraction = shouldUseLlmExtraction(category, value.length, false);
 
-    const shouldExtract = !extractionDisabled && (useLlmExtraction || true);
+    const shouldExtract = !extractionDisabled;
     let entityIds: string[] | undefined;
 
     if (shouldExtract && this.state.graphManager) {
@@ -567,10 +519,12 @@ export class ContextToolModule implements ToolModule {
           this.state.knowledgeStore.ingest(knowledgeIngestEntry);
         }
       } catch (knowledgeError) {
-        console.warn(
-          "[ContextToolModule] Knowledge dual-write failed:",
-          knowledgeError instanceof Error ? knowledgeError.message : String(knowledgeError)
-        );
+        log.warn("Knowledge dual-write failed", {
+          key: args.key as string,
+          category: "knowledge_entry",
+          error: knowledgeError instanceof Error ? knowledgeError.message : String(knowledgeError),
+          memoryId: savedMemory.id,
+        });
       }
     }
 
@@ -622,10 +576,7 @@ export class ContextToolModule implements ToolModule {
       }
     }
 
-    // Surface supersede info
-    if (supersededId) {
-      result.superseded = supersededId;
-    }
+    // Supersede info is now handled internally by memoryManager.supersede()
 
     // Surface evidence gate warnings
     if (warnings.length > 0) {

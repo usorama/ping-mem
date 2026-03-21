@@ -279,18 +279,18 @@ export class MemoryToolModule implements ToolModule {
   }
 
   private async handleMemoryConflicts(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const action = (args.action as string) ?? "list";
+    const action = typeof args.action === "string" ? args.action : "list";
     const db = this.state.eventStore.getDatabase();
 
     if (action === "resolve") {
-      const memoryId = args.memoryId as string;
+      const memoryId = typeof args.memoryId === "string" ? args.memoryId : undefined;
       if (!memoryId) {
         throw new Error("memoryId is required for resolve action");
       }
 
-      type EventRow = { id: string; payload: string };
+      type EventRow = { id: string; payload: string; session_id: string };
       const event = db.prepare(
-        `SELECT event_id as id, payload FROM events
+        `SELECT event_id as id, payload, session_id FROM events
          WHERE event_type = 'CONTEXT_SAVED'
          AND json_extract(payload, '$.memoryId') = ?
          LIMIT 1`
@@ -300,28 +300,36 @@ export class MemoryToolModule implements ToolModule {
         throw new Error(`Memory not found: ${memoryId}`);
       }
 
-      const payload = JSON.parse(event.payload) as Record<string, unknown>;
-      const metadata = (payload.metadata ?? {}) as Record<string, unknown>;
-      metadata.contradictionResolved = true;
-      payload.metadata = metadata;
-
-      // Parameterized update to prevent SQL injection
-      db.prepare(
-        `UPDATE events SET payload = ? WHERE event_id = ?`
-      ).run(JSON.stringify(payload), event.id);
+      // Create new CONTRADICTION_RESOLVED event instead of mutating existing event
+      // This preserves the append-only EventStore invariant
+      await this.state.eventStore.createEvent(
+        event.session_id,
+        "CONTRADICTION_RESOLVED",
+        {
+          memoryId,
+          originalEventId: event.id,
+          resolvedAt: new Date().toISOString(),
+          resolvedBy: "manual_resolution",
+        }
+      );
 
       return { success: true, memoryId, resolved: true };
     }
 
     // List unresolved contradictions
+    // Find contradictions that don't have a corresponding CONTRADICTION_RESOLVED event
     type ConflictRow = { id: string; payload: string; created_at: string };
     const conflicts = db.prepare(
-      `SELECT event_id as id, payload, timestamp as created_at FROM events
-       WHERE event_type = 'CONTEXT_SAVED'
-       AND json_extract(payload, '$.metadata.contradicts') IS NOT NULL
-       AND (json_extract(payload, '$.metadata.contradictionResolved') IS NULL
-            OR json_extract(payload, '$.metadata.contradictionResolved') = 0)
-       ORDER BY created_at DESC
+      `SELECT DISTINCT c.event_id as id, c.payload, c.timestamp as created_at
+       FROM events c
+       WHERE c.event_type = 'CONTEXT_SAVED'
+       AND json_extract(c.payload, '$.metadata.contradicts') IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM events r
+         WHERE r.event_type = 'CONTRADICTION_RESOLVED'
+         AND json_extract(r.payload, '$.memoryId') = json_extract(c.payload, '$.memoryId')
+       )
+       ORDER BY c.timestamp DESC
        LIMIT 50`
     ).all() as ConflictRow[];
 

@@ -4,7 +4,7 @@
  * @module mcp/__tests__/auto-recall.test
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { PingMemServer } from "../PingMemServer.js";
 
 async function callTool(

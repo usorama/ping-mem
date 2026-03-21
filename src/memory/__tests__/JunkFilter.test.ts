@@ -3,7 +3,7 @@
  * @module memory/__tests__/JunkFilter.test
  */
 
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect } from "bun:test";
 import { JunkFilter } from "../JunkFilter.js";
 
 describe("JunkFilter", () => {

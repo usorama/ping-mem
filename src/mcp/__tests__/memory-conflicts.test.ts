@@ -3,7 +3,7 @@
  * @module mcp/__tests__/memory-conflicts.test
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { PingMemServer } from "../PingMemServer.js";
 
 describe("memory_conflicts", () => {
