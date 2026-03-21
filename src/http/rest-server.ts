@@ -82,6 +82,8 @@ import {
   MemoryUnsubscribeSchema,
   MemoryCompressSchema,
   ToolInvokeSchema,
+  MemoryExtractSchema,
+  MemoryAutoRecallSchema,
 } from "../validation/api-schemas.js";
 import { KnowledgeStore } from "../knowledge/index.js";
 import { SemanticCompressor } from "../memory/SemanticCompressor.js";
@@ -1611,6 +1613,139 @@ export class RESTPingMemServer {
         }
         const result = await this.relevanceEngine.consolidate(options);
         return c.json({ data: result });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Memory Auto-Recall Route
+    // ============================================================================
+
+    this.app.post("/api/v1/memory/auto-recall", async (c) => {
+      try {
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400);
+        }
+        const parseResult = MemoryAutoRecallSchema.safeParse(body);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const { query: queryText, limit: rawLimit, minScore: rawMinScore } = parseResult.data;
+        const limit = rawLimit ?? 5;
+        const minScore = rawMinScore ?? 0.1;
+
+        const sessionId = this.getSessionIdFromRequest(c);
+        if (!sessionId) {
+          return c.json<RESTErrorResponse>({ error: "No Session", message: "No active session. Start one first." }, 400);
+        }
+        const memoryManager = await this.getMemoryManager(sessionId);
+
+        const results = await memoryManager.recall({
+          semanticQuery: queryText,
+          limit,
+        });
+
+        const filtered = results.filter((r) => (r.score ?? 0) >= minScore);
+
+        if (filtered.length === 0) {
+          return c.json({ data: { recalled: false, context: "", count: 0 } });
+        }
+
+        const lines = filtered.map((r, i) => {
+          const mem = r.memory;
+          const score = Math.round((r.score ?? 0) * 100);
+          return `[${i + 1}] (${score}%) ${mem.key}: ${mem.value}`;
+        });
+
+        const context = [
+          "--- ping-mem auto-recall ---",
+          ...lines,
+          "--- end recall ---",
+        ].join("\n");
+
+        return c.json({
+          data: {
+            recalled: true,
+            count: filtered.length,
+            context,
+            memories: filtered.map((r) => ({
+              key: r.memory.key,
+              value: r.memory.value,
+              score: r.score ?? 0,
+              category: r.memory.category,
+            })),
+          },
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Memory Extraction Route
+    // ============================================================================
+
+    this.app.post("/api/v1/memory/extract", async (c) => {
+      try {
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400);
+        }
+        const parseResult = MemoryExtractSchema.safeParse(body);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const { exchange, category } = parseResult.data;
+        const sessionId = this.getSessionIdFromRequest(c);
+        if (!sessionId) {
+          return c.json<RESTErrorResponse>({ error: "No Session", message: "No active session. Start one first." }, 400);
+        }
+        const memoryManager = await this.getMemoryManager(sessionId);
+
+        // Extract key facts from the exchange using simple heuristic extraction
+        const facts = extractFactsFromExchange(exchange);
+
+        if (facts.length === 0) {
+          return c.json({ data: { extracted: 0, facts: [] } });
+        }
+
+        // Save each extracted fact as a memory
+        const saved: Array<{ key: string; value: string }> = [];
+        for (const fact of facts) {
+          try {
+            await memoryManager.save(fact.key, fact.value, {
+              category: category ?? "fact",
+              priority: "normal",
+            });
+            saved.push({ key: fact.key, value: fact.value });
+          } catch (saveError) {
+            log.warn("Failed to save extracted fact", {
+              key: fact.key,
+              error: saveError instanceof Error ? saveError.message : String(saveError),
+            });
+          }
+        }
+
+        return c.json({
+          data: {
+            extracted: saved.length,
+            facts: saved,
+          },
+        });
       } catch (error) {
         return this.handleError(c, error);
       }
@@ -3474,6 +3609,50 @@ const CONTENT_TYPE_MAP: Record<string, string> = {
 function getContentType(filePath: string): string {
   const ext = filePath.split(".").pop()?.toLowerCase();
   return CONTENT_TYPE_MAP[ext ?? ""] ?? "application/octet-stream";
+}
+
+/**
+ * Extract key facts from a conversation exchange using heuristic patterns.
+ * Looks for decisions, facts, preferences, and other notable statements.
+ */
+function extractFactsFromExchange(exchange: string): Array<{ key: string; value: string }> {
+  const facts: Array<{ key: string; value: string }> = [];
+  const lines = exchange.split("\n").filter((l) => l.trim().length > 15);
+  const seen = new Set<string>();
+
+  // Patterns that indicate notable facts
+  const factPatterns = [
+    /(?:decided|decision|chose|choosing|picked|selected)\s+(?:to\s+)?(.{15,200})/i,
+    /(?:always|never|must|should|don't|do not)\s+(.{10,200})/i,
+    /(?:important|critical|key|essential|remember|note)\s*:?\s+(.{10,200})/i,
+    /(?:prefer|preference|like|want|need)\s+(.{10,200})/i,
+    /(?:the (?:issue|problem|bug|fix|solution|answer|reason|cause) (?:is|was))\s+(.{10,200})/i,
+    /(?:use|using|switch(?:ed)? to|migrat(?:ed|ing) to)\s+(\w+(?:\s+\w+){0,5})\s+(?:for|because|instead)/i,
+  ];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    for (const pattern of factPatterns) {
+      const match = trimmed.match(pattern);
+      if (match?.[1]) {
+        const value = match[1].trim().replace(/[.!?]+$/, "");
+        if (value.length >= 10 && !seen.has(value.toLowerCase())) {
+          seen.add(value.toLowerCase());
+          // Generate a key from the first few words
+          const keyWords = value
+            .split(/\s+/)
+            .slice(0, 4)
+            .join("-")
+            .toLowerCase()
+            .replace(/[^a-z0-9-]/g, "");
+          facts.push({ key: `extracted:${keyWords}`, value });
+        }
+      }
+    }
+    if (facts.length >= 10) break;
+  }
+
+  return facts;
 }
 
 /**
