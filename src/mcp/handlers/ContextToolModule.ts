@@ -166,6 +166,31 @@ export const CONTEXT_TOOLS: ToolDefinition[] = [
       },
     },
   },
+  {
+    name: "context_auto_recall",
+    description:
+      "Deterministic memory recall for pre-prompt context injection. " +
+      "Returns formatted context from relevant memories matching the query. " +
+      "Designed for hook-driven or instruction-driven recall — call before processing any substantive user message.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "The user's message or keywords to search for relevant memories",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of memories to return (default: 5)",
+        },
+        minScore: {
+          type: "number",
+          description: "Minimum relevance score threshold 0-1 (default: 0.1)",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 // ============================================================================
@@ -203,6 +228,8 @@ export class ContextToolModule implements ToolModule {
         return this.handleStatus();
       case "context_session_list":
         return this.handleSessionList(args);
+      case "context_auto_recall":
+        return this.handleAutoRecall(args);
       default:
         return undefined;
     }
@@ -815,6 +842,59 @@ export class ContextToolModule implements ToolModule {
         startedAt: s.startedAt.toISOString(),
         endedAt: s.endedAt?.toISOString(),
         memoryCount: s.memoryCount,
+      })),
+    };
+  }
+
+  private async handleAutoRecall(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const queryText = args.query as string;
+    if (!queryText || queryText.trim().length < 3) {
+      return { recalled: false, reason: "query too short", context: "" };
+    }
+
+    const limit = (args.limit as number) ?? 5;
+    const minScore = (args.minScore as number) ?? 0.1;
+
+    let memoryManager: ReturnType<typeof getActiveMemoryManager> | undefined;
+    try {
+      memoryManager = getActiveMemoryManager(this.state);
+    } catch {
+      return { recalled: false, reason: "no active session", context: "" };
+    }
+
+    const query: MemoryQuery = {
+      semanticQuery: queryText,
+      limit,
+    };
+
+    const results = await memoryManager.recall(query);
+    const filtered = results.filter((r) => (r.score ?? 0) >= minScore);
+
+    if (filtered.length === 0) {
+      return { recalled: false, reason: "no relevant memories found", context: "" };
+    }
+
+    const lines = filtered.map((r, i) => {
+      const mem = r.memory;
+      const score = Math.round((r.score ?? 0) * 100);
+      return `[${i + 1}] (${score}%) ${mem.key}: ${mem.value}`;
+    });
+
+    const context = [
+      "--- ping-mem auto-recall ---",
+      ...lines,
+      "--- end recall ---",
+    ].join("\n");
+
+    return {
+      recalled: true,
+      count: filtered.length,
+      context,
+      memories: filtered.map((r) => ({
+        key: r.memory.key,
+        value: r.memory.value,
+        score: r.score ?? 0,
+        category: r.memory.category,
       })),
     };
   }

@@ -281,6 +281,41 @@ export const MemoryConsolidateSchema = z.object({
 export type MemoryConsolidateInput = z.infer<typeof MemoryConsolidateSchema>;
 
 // ============================================================================
+// Memory Extraction Schema
+// ============================================================================
+
+/**
+ * Request body for POST /api/v1/memory/extract
+ * Extracts facts from a conversation exchange and saves them as memories.
+ */
+export const MemoryExtractSchema = z.object({
+  exchange: z
+    .string()
+    .min(10, "Exchange text must be at least 10 characters")
+    .max(50000, "Exchange text must be at most 50000 characters"),
+  sessionId: z.string().optional(),
+  category: z.enum(["note", "decision", "task", "insight", "fact", "preference"]).optional(),
+});
+
+export type MemoryExtractInput = z.infer<typeof MemoryExtractSchema>;
+
+// ============================================================================
+// Memory Auto-Recall Schema
+// ============================================================================
+
+/**
+ * Request body for POST /api/v1/memory/auto-recall
+ * Returns formatted context from relevant memories for pre-prompt injection.
+ */
+export const MemoryAutoRecallSchema = z.object({
+  query: z.string().min(3, "Query must be at least 3 characters").max(1000, "Query too long"),
+  limit: z.number().int().min(1).max(20).optional(),
+  minScore: z.number().min(0).max(1).optional(),
+});
+
+export type MemoryAutoRecallInput = z.infer<typeof MemoryAutoRecallSchema>;
+
+// ============================================================================
 // Graph Schemas
 // ============================================================================
 
