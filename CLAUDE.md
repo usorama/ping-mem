@@ -35,7 +35,7 @@ bun run dist/mcp/cli.js  # MCP stdio
 
 ## MCP Tools
 
-**Core**: `context_session_start`, `context_save`, `context_get`, `context_search`, `context_checkpoint`, `context_restore`, `context_status`, `context_link`, `context_auto_recall`, `context_hybrid_search`, `context_query_relationships`, `context_get_lineage`
+**Core**: `context_session_start`, `context_save`, `context_get`, `context_search`, `context_checkpoint`, `context_status`, `context_auto_recall`, `context_hybrid_search`, `context_query_relationships`, `context_get_lineage`
 
 **Codebase**: `codebase_ingest`, `codebase_verify`, `codebase_search`, `codebase_timeline`
 

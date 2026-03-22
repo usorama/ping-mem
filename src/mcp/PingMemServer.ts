@@ -387,6 +387,60 @@ export async function main(): Promise<void> {
   const services = await createRuntimeServices();
   const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
 
+  // ── Issue #77: Concurrent SQLite access warning ─────────────────────────────
+  // Both MCP stdio (this process) and the Docker REST container open the same
+  // .db file directly.  SQLite WAL mode allows concurrent readers + one writer
+  // safely, but two concurrent writers can cause "database is locked" errors.
+  //
+  // RECOMMENDED FIX: point MCP stdio at the REST API via PING_MEM_REST_URL so
+  // it never touches the .db file directly.  That requires a larger refactor.
+  // For now we: (a) verify WAL mode is active, (b) warn if the -wal sidecar
+  // file is present (indicating an active writer — typically the Docker container).
+  //
+  // To avoid the conflict entirely without refactoring, set PING_MEM_DB_PATH to
+  // a different path for MCP stdio (e.g. ~/.ping-mem/ping-mem-mcp.db) and use
+  // context_auto_recall via REST for cross-process memory sharing.
+  if (runtimeConfig.pingMem.dbPath !== ":memory:") {
+    const { existsSync } = await import("fs");
+    const walPath = `${runtimeConfig.pingMem.dbPath}-wal`;
+    if (existsSync(walPath)) {
+      log.warn(
+        "CONCURRENT ACCESS WARNING: Another process (e.g. Docker REST container) appears to have " +
+        `the database open (WAL sidecar detected: ${walPath}). ` +
+        "SQLite WAL mode allows concurrent reads safely but concurrent writes may cause " +
+        "'database is locked' errors. " +
+        "To eliminate the conflict: set PING_MEM_DB_PATH to a separate path for MCP stdio, " +
+        "or proxy memory access through the REST API instead of direct file access."
+      );
+    }
+
+    // Verify WAL mode is active on the shared database file.
+    // EventStore enables WAL in its constructor, but a pre-existing db created without WAL
+    // will remain in journal mode until the PRAGMA is reissued.
+    try {
+      const { Database: CheckDb } = await import("bun:sqlite");
+      const checkDb = new CheckDb(runtimeConfig.pingMem.dbPath);
+      const stmt = checkDb.prepare("PRAGMA journal_mode");
+      const row = stmt.get() as { journal_mode?: string } | undefined;
+      checkDb.close();
+      const journalMode = row?.journal_mode ?? "unknown";
+      if (journalMode !== "wal") {
+        log.warn(
+          `Database is NOT in WAL mode (journal_mode=${journalMode}). ` +
+          "Concurrent access from multiple processes is unsafe without WAL. " +
+          "The EventStore will enable WAL on next write, but existing concurrent readers may see conflicts."
+        );
+      } else {
+        log.info("Database WAL mode verified: concurrent read access is safe.");
+      }
+    } catch (err) {
+      log.warn("Could not verify database journal_mode", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   // Create BM25Scorer for deterministic search ranking
   const { BM25Scorer } = await import("../search/BM25Scorer.js");
   const { Database: BM25Database } = await import("bun:sqlite");

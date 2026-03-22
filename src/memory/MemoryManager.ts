@@ -1280,18 +1280,34 @@ export class MemoryManager {
     const limit = options.limit ?? 5;
     const excludeKeys = new Set(options.excludeKeys ?? []);
 
-    // Extract keywords (words >= 3 chars, lowercase, deduplicated)
+    // Extract keywords (words >= 2 chars, lowercase, deduplicated)
     const keywords = [
       ...new Set(
         text
           .toLowerCase()
           .replace(/[^a-z0-9\s]/g, " ")
           .split(/\s+/)
-          .filter((w) => w.length >= 3)
+          .filter((w) => w.length >= 2)
       ),
     ];
 
-    if (keywords.length === 0) return [];
+    // If all tokens were filtered out (e.g. single-char query), fall back to substring match
+    // using the original text so that searches like "?" or "a" still return results.
+    if (keywords.length === 0) {
+      const fallbackText = text.toLowerCase();
+      const scored: Array<{ memory: Memory; score: number }> = [];
+      for (const memory of this.memories.values()) {
+        if (options.excludeSessionId && memory.sessionId === options.excludeSessionId) continue;
+        if (excludeKeys.has(memory.key)) continue;
+        if (!this.isVisibleToCurrentAgent(memory)) continue;
+        const memoryText = `${memory.key} ${memory.value}`.toLowerCase();
+        if (memoryText.includes(fallbackText)) {
+          scored.push({ memory, score: 0.5 });
+        }
+      }
+      scored.sort((a, b) => b.score - a.score);
+      return scored.slice(0, limit);
+    }
 
     const scored: Array<{ memory: Memory; score: number }> = [];
 
@@ -1344,25 +1360,90 @@ export class MemoryManager {
     const limit = options.limit ?? 5;
     const excludeKeys = new Set(options.excludeKeys ?? []);
 
-    // Extract keywords (same logic as findRelated)
+    // Extract keywords (same logic as findRelated — words >= 2 chars)
     const keywords = [
       ...new Set(
         text
           .toLowerCase()
           .replace(/[^a-z0-9\s]/g, " ")
           .split(/\s+/)
-          .filter((w) => w.length >= 3)
+          .filter((w) => w.length >= 2)
       ),
     ];
 
-    if (keywords.length === 0) return [];
+    // If all tokens were filtered out, fall back to a substring match against the original text
+    // so that single-character or all-symbol queries still surface relevant memories.
+    if (keywords.length === 0) {
+      const fallbackText = text.toLowerCase();
+      const db = this.eventStore.getDatabase();
+      const stmt = db.prepare(`
+        SELECT payload FROM events
+        WHERE event_type = 'MEMORY_SAVED'
+        AND session_id != $excludeSession
+        AND JSON_EXTRACT(payload, '$.key') NOT LIKE '%::superseded::%'
+        AND NOT EXISTS (
+          SELECT 1 FROM events e2
+          WHERE e2.event_type IN ('MEMORY_DELETED', 'MEMORY_SUPERSEDED')
+          AND JSON_EXTRACT(e2.payload, '$.memoryId') = JSON_EXTRACT(payload, '$.memoryId')
+        )
+        ORDER BY timestamp DESC
+        LIMIT 500
+      `);
+      const excludeSession = options.excludeSessionId ?? this.sessionId;
+      const rows = stmt.all({ $excludeSession: excludeSession }) as Array<{ payload: string }>;
+      const fallbackScored: Array<{ memory: Memory; score: number }> = [];
+      const seenKeys = new Set<string>();
+      for (const row of rows) {
+        try {
+          const payload = JSON.parse(row.payload) as MemoryEventData;
+          const memData = payload.memory;
+          if (!memData) continue;
+          const key = payload.key;
+          const value = memData.value ?? "";
+          if (!key || !value || excludeKeys.has(key) || seenKeys.has(key)) continue;
+          seenKeys.add(key);
+          const combined = `${key} ${value}`.toLowerCase();
+          if (combined.includes(fallbackText)) {
+            const reconstructed: Memory = {
+              id: payload.memoryId as MemoryId,
+              key,
+              value,
+              sessionId: payload.sessionId as SessionId,
+              priority: memData.priority ?? "normal",
+              privacy: memData.privacy ?? "session",
+              createdAt: memData.createdAt ? new Date(memData.createdAt as unknown as string) : new Date(),
+              updatedAt: memData.updatedAt ? new Date(memData.updatedAt as unknown as string) : new Date(),
+              metadata: memData.metadata ?? {},
+            };
+            if (memData.category !== undefined) reconstructed.category = memData.category;
+            if (memData.channel !== undefined) reconstructed.channel = memData.channel;
+            if (memData.agentId !== undefined) reconstructed.agentId = memData.agentId;
+            if (memData.agentScope !== undefined) reconstructed.agentScope = memData.agentScope;
+            if (!this.isVisibleToCurrentAgent(reconstructed)) continue;
+            fallbackScored.push({ memory: reconstructed, score: 0.5 });
+          }
+        } catch {
+          continue;
+        }
+      }
+      fallbackScored.sort((a, b) => b.score - a.score);
+      return fallbackScored.slice(0, limit);
+    }
 
-    // Query EventStore directly for MEMORY_SAVED events from OTHER sessions
+    // Query EventStore directly for MEMORY_SAVED events from OTHER sessions.
+    // Exclude keys that have been subsequently deleted or superseded, and
+    // skip keys containing '::superseded::' (archived copies of superseded memories).
     const db = this.eventStore.getDatabase();
     const stmt = db.prepare(`
       SELECT payload FROM events
       WHERE event_type = 'MEMORY_SAVED'
       AND session_id != $excludeSession
+      AND JSON_EXTRACT(payload, '$.key') NOT LIKE '%::superseded::%'
+      AND NOT EXISTS (
+        SELECT 1 FROM events e2
+        WHERE e2.event_type IN ('MEMORY_DELETED', 'MEMORY_SUPERSEDED')
+        AND JSON_EXTRACT(e2.payload, '$.memoryId') = JSON_EXTRACT(payload, '$.memoryId')
+      )
       ORDER BY timestamp DESC
       LIMIT 500
     `);

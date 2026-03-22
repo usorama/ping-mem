@@ -350,6 +350,9 @@ export class ContextToolModule implements ToolModule {
 
     const previousSessionId = this.state.currentSessionId;
     this.state.currentSessionId = null;
+    // Evict the MemoryManager from the map to prevent unbounded memory growth.
+    // Matches the eviction logic in the REST server's POST /api/v1/session/end handler.
+    this.state.memoryManagers.delete(previousSessionId);
 
     return {
       success: true,
@@ -927,7 +930,12 @@ export class ContextToolModule implements ToolModule {
 
   private async handleAutoRecall(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const queryText = args.query as string;
-    if (!queryText || queryText.trim().length < 3) {
+    // Minimum query length: 5 chars. Allows meaningful short terms like "debug", "FSRS", "auth"
+    // while rejecting noise tokens like "ok", "yes", "no", "hi". The companion hook
+    // (ping-mem-auto-recall.sh) uses a higher threshold of 10 chars (full prompt length) because
+    // it filters at the prompt level before keyword extraction — these thresholds operate at
+    // different layers and are intentionally different.
+    if (!queryText || queryText.trim().length < 5) {
       return { recalled: false, reason: "query too short", context: "" };
     }
 
