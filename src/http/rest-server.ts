@@ -89,6 +89,7 @@ import {
 } from "../validation/api-schemas.js";
 import { KnowledgeStore } from "../knowledge/index.js";
 import { SemanticCompressor } from "../memory/SemanticCompressor.js";
+import { ObservationCaptureService } from "../observation/ObservationCaptureService.js";
 import type { SearchWeights } from "../search/HybridSearchEngine.js";
 import { diagnosticsIngestBaseSchema } from "../validation/diagnostics-schemas.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
@@ -140,6 +141,7 @@ export class RESTPingMemServer {
   private qdrantClient: QdrantClientWrapper | null = null;
   private healthMonitor: HealthMonitor | null = null;
   private ingestionQueue: IngestionQueue | null = null;
+  private observationCaptureService: ObservationCaptureService;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -153,6 +155,7 @@ export class RESTPingMemServer {
     const injectedEventStore = this.config.eventStore;
     this.ownsEventStore = injectedEventStore === undefined;
     this.eventStore = injectedEventStore ?? new EventStore({ dbPath: this.config.dbPath ?? ":memory:" });
+    this.observationCaptureService = new ObservationCaptureService(this.eventStore);
     this.sessionManager = new SessionManager({ eventStore: this.eventStore });
     this.relevanceEngine = new RelevanceEngine(this.eventStore.getDatabase());
     this.writeLockManager = new WriteLockManager(this.eventStore.getDatabase());
@@ -328,6 +331,13 @@ export class RESTPingMemServer {
 
     // CSRF protection for browser-based UI routes
     this.app.use("/ui/*", csrfProtection());
+
+    // Higher rate limit for auto-capture hooks (300 req/min)
+    this.app.use("/api/v1/observations/*", rateLimiter({
+      name: "observations",
+      maxRequests: 300,
+      windowMs: 60_000,
+    }));
 
     // Rate limit state-changing API endpoints (60 req/min per IP)
     this.app.use("/api/v1/*", rateLimiter({
@@ -1485,6 +1495,8 @@ export class RESTPingMemServer {
           queryParams.offset = Number.isNaN(rawOff) ? 0 : Math.max(rawOff, 0);
         }
 
+        const compact = c.req.query("compact") === "true";
+
         const results = await memoryManager.recall(queryParams);
 
         // Apply relevance decay weighting to search results
@@ -1498,6 +1510,19 @@ export class RESTPingMemServer {
 
         // Re-sort by weighted score
         weightedResults.sort((a, b) => b.score - a.score);
+
+        if (compact) {
+          const compactResults = weightedResults.map((r) => ({
+            id: r.memory.id,
+            key: r.memory.key,
+            category: r.memory.category,
+            snippet: r.memory.value?.slice(0, 80) ?? "",
+            score: r.score,
+          }));
+          return c.json<RESTSuccessResponse<typeof compactResults>>({
+            data: compactResults,
+          });
+        }
 
         return c.json<RESTSuccessResponse<typeof weightedResults>>({
           data: weightedResults,
@@ -2572,6 +2597,64 @@ export class RESTPingMemServer {
             timestamp: event.timestamp.toISOString(),
           },
         });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Observation Capture Endpoint (auto-capture from Claude Code hooks)
+    // ============================================================================
+
+    this.app.post("/api/v1/observations/capture", async (c) => {
+      try {
+        let rawBody: unknown;
+        try { rawBody = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+
+        const body = rawBody as Record<string, unknown>;
+        const sessionId = (body.sessionId as string) ?? (this.currentSessionId as string);
+        if (!sessionId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "No active session. Provide sessionId or start a session." },
+            400
+          );
+        }
+
+        // Validate session exists
+        const session = await this.sessionManager.getSession(sessionId as SessionId);
+        if (!session) {
+          return c.json<RESTErrorResponse>(
+            { error: "Not Found", message: `Session ${sessionId} not found` },
+            404
+          );
+        }
+
+        const toolName = body.toolName as string;
+        if (!toolName) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "toolName is required" },
+            400
+          );
+        }
+
+        const captureInput: import("../observation/ObservationCaptureService.js").ObservationInput = {
+          sessionId,
+          toolName,
+          hookEvent: (body.hookEvent as string) ?? "PostToolUse",
+          ...(body.toolUseId !== undefined && { toolUseId: body.toolUseId as string }),
+          ...(body.project !== undefined && { project: body.project as string }),
+          ...(Array.isArray(body.filesTouched) && { filesTouched: body.filesTouched as string[] }),
+          ...(body.claudeSessionId !== undefined && { claudeSessionId: body.claudeSessionId as string }),
+          ...(body.summary !== undefined && { summary: body.summary as string }),
+        };
+        const result = await this.observationCaptureService.capture(captureInput);
+
+        if (result.deduplicated) {
+          return c.json({ data: { deduplicated: true, eventId: null } });
+        }
+
+        return c.json({ data: { deduplicated: false, eventId: result.eventId } }, 201);
       } catch (error) {
         return this.handleError(c, error);
       }

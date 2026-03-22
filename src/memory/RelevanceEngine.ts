@@ -16,6 +16,22 @@ import { createLogger } from "../util/logger.js";
 
 const log = createLogger("RelevanceEngine");
 
+/** FSRS per-category stability in days — how long before 50% retention */
+const CATEGORY_STABILITY_DAYS: Record<string, number> = {
+  decision: 180,
+  error: 90,
+  task: 30,
+  fact: 30,
+  observation: 3,
+  progress: 7,
+  note: 14,
+  knowledge_entry: 60,
+};
+
+/** FSRS constants: R(t,S) = (1 + FSRS_FACTOR * t/S)^FSRS_DECAY */
+const FSRS_DECAY = -0.5;
+const FSRS_FACTOR = 19 / 81; // ≈ 0.2346
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -365,31 +381,44 @@ export class RelevanceEngine {
   }
 
   /**
-   * Batch recalculate all relevance scores.
-   * Returns the number of records updated.
+   * Recalculate decay scores for all memories (batch operation for maintenance)
    */
-  recalculateAll(): number {
-    const allRows = this.stmtGetAllRelevance.all() as RelevanceRow[];
-    let updated = 0;
+  async recalculateAll(): Promise<number> {
+    try {
+      const rows = this.db.prepare("SELECT key, category, updated_at, access_count FROM memories").all() as Array<{
+        key: string;
+        category: string;
+        updated_at: string;
+        access_count: number;
+      }>;
 
-    const updateBatch = this.db.transaction(() => {
-      for (const row of allRows) {
-        const score = this.computeRelevance(
-          row.memory_id,
-          row.access_count,
-          row.last_accessed
+      let refreshed = 0;
+      const now = Date.now();
+
+      for (const row of rows) {
+        const updatedAt = new Date(row.updated_at).getTime();
+        const daysSinceAccess = (now - updatedAt) / (1000 * 60 * 60 * 24);
+        const stabilityDays = CATEGORY_STABILITY_DAYS[row.category] ?? 30;
+        const decayScore = Math.pow(
+          1 + FSRS_FACTOR * (daysSinceAccess / stabilityDays),
+          FSRS_DECAY
         );
+        const accessBoost = 1 + 0.3 * Math.log(1 + (row.access_count ?? 0)) * Math.exp(-(daysSinceAccess * 24) / 168);
+        const finalScore = decayScore * accessBoost;
 
-        this.stmtUpdateScore.run({
-          $memoryId: row.memory_id,
-          $relevanceScore: score,
-        });
-        updated++;
+        try {
+          this.db.prepare("UPDATE memories SET relevance_score = ? WHERE key = ?").run(finalScore, row.key);
+          refreshed++;
+        } catch {
+          // Column may not exist yet, skip silently
+        }
       }
-    });
 
-    updateBatch();
-    return updated;
+      return refreshed;
+    } catch (error) {
+      log.warn("recalculateAll failed", { error: error instanceof Error ? error.message : String(error) });
+      return 0;
+    }
   }
 
   /**
@@ -710,9 +739,19 @@ export class RelevanceEngine {
       );
     }
 
-    // Apply exponential decay
-    const decayMultiplier = Math.pow(this.config.decayFactor, daysSinceAccess);
-    const relevance = baseScore * decayMultiplier;
+    // FSRS power-law decay with per-category stability
+    const stabilityDays = CATEGORY_STABILITY_DAYS[category] ?? 30;
+    const decayMultiplier = Math.pow(
+      1 + FSRS_FACTOR * (daysSinceAccess / stabilityDays),
+      FSRS_DECAY
+    );
+
+    // Access-weighted boost: frequently accessed memories decay slower
+    const hoursSinceAccess = daysSinceAccess * 24;
+    const accessBoost = 1 + 0.3 * Math.log(1 + accessCount) * Math.exp(-hoursSinceAccess / 168);
+
+    const timeDecay = decayMultiplier * accessBoost;
+    const relevance = baseScore * timeDecay;
 
     return relevance;
   }

@@ -25,6 +25,7 @@ export interface MaintenanceResult {
   walSizeBefore: number;
   walSizeAfter: number;
   exportedCount: number;
+  refreshedScores: number;
   durationMs: number;
 }
 
@@ -92,6 +93,9 @@ export class MaintenanceRunner {
     // Step 5: Export to native memory (if bridge available)
     const exportedCount = await this.exportToNative(options, dryRun);
 
+    // Step: Refresh FSRS decay scores
+    const refreshedScores = this.relevanceEngine ? await this.relevanceEngine.recalculateAll() : 0;
+
     const durationMs = Date.now() - start;
     const result: MaintenanceResult = {
       dedupCount,
@@ -101,6 +105,7 @@ export class MaintenanceRunner {
       walSizeBefore,
       walSizeAfter,
       exportedCount,
+      refreshedScores,
       durationMs,
     };
 

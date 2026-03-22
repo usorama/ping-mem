@@ -123,6 +123,7 @@ export const CONTEXT_TOOLS: ToolDefinition[] = [
         category: { type: "string", description: "Filter by category" },
         channel: { type: "string", description: "Filter by channel" },
         limit: { type: "number", description: "Maximum results" },
+        compact: { type: "boolean", description: "When true, return snippets (first 80 chars) instead of full memory values" },
       },
       required: ["query"],
     },
@@ -786,6 +787,21 @@ export class ContextToolModule implements ToolModule {
     }
 
     const results = await memoryManager.recall(query);
+
+    const compact = args.compact === true;
+
+    if (compact) {
+      return {
+        count: results.length,
+        results: results.map((r) => ({
+          id: r.memory.id,
+          key: r.memory.key,
+          category: r.memory.category,
+          snippet: r.memory.value?.slice(0, 80) ?? "",
+          score: r.score,
+        })),
+      };
+    }
 
     return {
       count: results.length,
