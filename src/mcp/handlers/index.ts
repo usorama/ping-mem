@@ -14,5 +14,6 @@ export { CausalToolModule } from "./CausalToolModule.js";
 export { AgentToolModule } from "./AgentToolModule.js";
 export { KnowledgeToolModule } from "./KnowledgeToolModule.js";
 export { StructuralToolModule } from "./StructuralToolModule.js";
+export { MiningToolModule } from "./MiningToolModule.js";
 export type { SessionState } from "./shared.js";
 export { getActiveMemoryManager } from "./shared.js";

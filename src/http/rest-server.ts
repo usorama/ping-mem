@@ -96,6 +96,9 @@ import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import { IngestionQueue } from "../ingest/IngestionQueue.js";
 import { registerOpenAPIRoute } from "./routes/openapi.js";
 import { registerShellRoutes } from "./routes/shell.js";
+import { TranscriptMiner } from "../mining/TranscriptMiner.js";
+import { createDreamingEngine } from "../dreaming/DreamingEngine.js";
+import { UserProfileStore } from "../profile/UserProfile.js";
 
 /** Maximum SARIF payload size in bytes (5 MB) */
 const MAX_SARIF_BYTES = 5 * 1024 * 1024;
@@ -142,6 +145,9 @@ export class RESTPingMemServer {
   private healthMonitor: HealthMonitor | null = null;
   private ingestionQueue: IngestionQueue | null = null;
   private observationCaptureService: ObservationCaptureService;
+  private transcriptMiner: TranscriptMiner | null = null;
+  private dreamingEngine: ReturnType<typeof createDreamingEngine> | null = null;
+  private userProfileStore: UserProfileStore | null = null;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -2655,6 +2661,153 @@ export class RESTPingMemServer {
         }
 
         return c.json({ data: { deduplicated: false, eventId: result.eventId } }, 201);
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // ============================================================================
+    // Mining & Dreaming Endpoints
+    // ============================================================================
+
+    this.app.post("/api/v1/mining/start", async (c) => {
+      try {
+        let body: Record<string, unknown> = {};
+        try { body = (await c.req.json()) as Record<string, unknown>; } catch { /* body is optional */ }
+
+        const limit = typeof body.limit === "number" ? body.limit : undefined;
+        const project = typeof body.project === "string" ? body.project : undefined;
+        const mineOptions: { limit?: number; project?: string } = {};
+        if (limit !== undefined) mineOptions.limit = limit;
+        if (project !== undefined) mineOptions.project = project;
+
+        // Lazily instantiate TranscriptMiner and its dependencies
+        if (!this.transcriptMiner) {
+          if (!this.userProfileStore) {
+            this.userProfileStore = new UserProfileStore();
+          }
+          // Require an active session to bind the MemoryManager
+          const sessionId = this.currentSessionId;
+          if (!sessionId) {
+            return c.json<RESTErrorResponse>(
+              { error: "Bad Request", message: "No active session. Start a session first." },
+              400
+            );
+          }
+          const memoryManager = await this.getMemoryManager(sessionId);
+          this.transcriptMiner = new TranscriptMiner(
+            this.eventStore.getDatabase(),
+            memoryManager,
+            this.userProfileStore
+          );
+        }
+
+        const result = await this.transcriptMiner.mine(mineOptions);
+        return c.json({ data: result }, 200);
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/mining/status", async (c) => {
+      try {
+        const db = this.eventStore.getDatabase();
+
+        // Query mining_progress table — may not exist if mining hasn't run yet
+        let stats: {
+          total: number;
+          pending: number;
+          processing: number;
+          completed: number;
+          failed: number;
+          facts_extracted: number;
+        };
+
+        try {
+          const row = db.prepare(`
+            SELECT
+              COUNT(*) as total,
+              SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
+              SUM(CASE WHEN status = 'processing' THEN 1 ELSE 0 END) as processing,
+              SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+              SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+              COALESCE(SUM(facts_extracted), 0) as facts_extracted
+            FROM mining_progress
+          `).get() as {
+            total: number;
+            pending: number;
+            processing: number;
+            completed: number;
+            failed: number;
+            facts_extracted: number;
+          } | null;
+
+          stats = row ?? { total: 0, pending: 0, processing: 0, completed: 0, failed: 0, facts_extracted: 0 };
+        } catch {
+          // Table doesn't exist yet — mining hasn't run
+          stats = { total: 0, pending: 0, processing: 0, completed: 0, failed: 0, facts_extracted: 0 };
+        }
+
+        return c.json({ data: stats }, 200);
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.get("/api/v1/insights", async (c) => {
+      try {
+        const sessionId = this.currentSessionId;
+        if (!sessionId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "No active session. Start a session first." },
+            400
+          );
+        }
+
+        const memoryManager = await this.getMemoryManager(sessionId);
+        const results = await memoryManager.recall({ category: "derived_insight" as import("../types/index.js").MemoryCategory });
+
+        return c.json({
+          data: results.map((r) => ({
+            key: r.memory.key,
+            value: r.memory.value,
+            metadata: r.memory.metadata,
+            createdAt: r.memory.createdAt instanceof Date ? r.memory.createdAt.toISOString() : r.memory.createdAt,
+            updatedAt: r.memory.updatedAt instanceof Date ? r.memory.updatedAt.toISOString() : r.memory.updatedAt,
+          })),
+        }, 200);
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    this.app.post("/api/v1/dreaming/run", async (c) => {
+      try {
+        const sessionId = this.currentSessionId;
+        if (!sessionId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "No active session. Start a session first." },
+            400
+          );
+        }
+
+        const memoryManager = await this.getMemoryManager(sessionId);
+
+        // Lazily instantiate DreamingEngine
+        if (!this.dreamingEngine) {
+          if (!this.userProfileStore) {
+            this.userProfileStore = new UserProfileStore();
+          }
+          this.dreamingEngine = createDreamingEngine(
+            memoryManager,
+            null, // ContradictionDetector — requires OPENAI_API_KEY, optional
+            this.userProfileStore,
+            this.eventStore
+          );
+        }
+
+        const result = await this.dreamingEngine.dream(sessionId);
+        return c.json({ data: result }, 200);
       } catch (error) {
         return this.handleError(c, error);
       }

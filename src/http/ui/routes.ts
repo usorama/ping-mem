@@ -34,6 +34,11 @@ import { registerCodebaseRoutes } from "./codebase.js";
 import { registerChatRoutes } from "./chat-api.js";
 import { registerHealthPartialRoute } from "./partials/health.js";
 import { registerEvalRoutes } from "./eval.js";
+import { registerInsightsRoutes } from "./insights.js";
+import { registerInsightsPartialRoutes } from "./partials/insights.js";
+import { registerMiningRoutes } from "./mining.js";
+import { registerMiningPartialRoutes } from "./partials/mining.js";
+import { registerProfileRoutes } from "./profile.js";
 
 export interface UIDependencies {
   eventStore: EventStore;
@@ -121,4 +126,17 @@ export function registerUIRoutes(app: Hono<AppEnv>, deps: UIDependencies): void 
 
   // Health dot partial
   app.get("/ui/partials/health", registerHealthPartialRoute(deps));
+
+  // Insights
+  app.get("/ui/insights", registerInsightsRoutes(deps));
+  const insightsPartials = registerInsightsPartialRoutes(deps);
+  app.get("/ui/partials/insights", insightsPartials.list);
+
+  // Mining
+  app.get("/ui/mining", registerMiningRoutes(deps));
+  const miningPartials = registerMiningPartialRoutes(deps);
+  app.get("/ui/partials/mining", miningPartials.dashboard);
+
+  // Profile
+  app.get("/ui/profile", registerProfileRoutes(deps));
 }

@@ -10,6 +10,8 @@ import { createLogger } from "../util/logger.js";
 import type { EventStore } from "../storage/EventStore.js";
 import type { RelevanceEngine } from "../memory/RelevanceEngine.js";
 import type { CcMemoryBridge } from "../integration/CcMemoryBridge.js";
+import type { DreamingEngine, DreamResult } from "../dreaming/DreamingEngine.js";
+import type { SessionId } from "../types/index.js";
 
 const log = createLogger("MaintenanceRunner");
 
@@ -27,11 +29,14 @@ export interface MaintenanceResult {
   exportedCount: number;
   refreshedScores: number;
   durationMs: number;
+  dreamResult?: DreamResult | undefined;
 }
 
 export interface MaintenanceOptions {
   /** Preview without modifying (default: false) */
   dryRun?: boolean | undefined;
+  /** Run dreaming cycle after consolidation (default: false) */
+  dream?: boolean | undefined;
   /** Similarity threshold for dedup (default: 0.95) */
   dedupThreshold?: number | undefined;
   /** Minimum relevance score for consolidation (default: 0.3) */
@@ -56,15 +61,18 @@ export class MaintenanceRunner {
   private readonly eventStore: EventStore;
   private readonly relevanceEngine: RelevanceEngine | null;
   private readonly ccMemoryBridge: CcMemoryBridge | null;
+  private readonly dreamingEngine: DreamingEngine | null;
 
   constructor(options: {
     eventStore: EventStore;
     relevanceEngine: RelevanceEngine | null;
     ccMemoryBridge?: CcMemoryBridge | null;
+    dreamingEngine?: DreamingEngine | null;
   }) {
     this.eventStore = options.eventStore;
     this.relevanceEngine = options.relevanceEngine;
     this.ccMemoryBridge = options.ccMemoryBridge ?? null;
+    this.dreamingEngine = options.dreamingEngine ?? null;
   }
 
   /**
@@ -81,6 +89,13 @@ export class MaintenanceRunner {
 
     // Step 2: Consolidate
     const consolidateResult = await this.consolidate(options, dryRun);
+
+    // Step 2.5: Dreaming (opt-in)
+    let dreamResult: DreamResult | undefined;
+    if (options.dream && this.dreamingEngine) {
+      const sessionId = `maintenance-${Date.now()}` as SessionId;
+      dreamResult = await this.dreamingEngine.dream(sessionId);
+    }
 
     // Step 3: Prune
     const pruneCount = await this.prune(options, dryRun);
@@ -107,6 +122,7 @@ export class MaintenanceRunner {
       exportedCount,
       refreshedScores,
       durationMs,
+      dreamResult,
     };
 
     log.info("Maintenance cycle complete", { ...result, dryRun });
