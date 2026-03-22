@@ -3489,6 +3489,16 @@ export class RESTPingMemServer {
           const result = mod.handle(name, args);
           if (result !== undefined) {
             const data = await result;
+
+            // Sync session state back from tool module to REST server.
+            // When context_session_start runs via /invoke, it updates
+            // state.currentSessionId in the module's local state. We need
+            // to propagate this back to the REST server so subsequent
+            // /invoke calls see the session.
+            if (state.currentSessionId !== this.currentSessionId) {
+              this.currentSessionId = state.currentSessionId;
+            }
+
             return c.json({ data });
           }
         }
