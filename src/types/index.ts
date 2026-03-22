@@ -173,7 +173,8 @@ export type BuiltInCategory =
   | "fact"
   | "observation"
   | "knowledge_entry"
-  | "digest";
+  | "digest"
+  | "derived_insight";
 
 /**
  * Memory categories for organization.
@@ -296,7 +297,10 @@ export type EventType =
   | "CODEBASE_INGESTION_FAILED"
   | "MEMORY_SUPERSEDED"
   | "CONTRADICTION_RESOLVED"
-  | "OBSERVATION_CAPTURED";
+  | "OBSERVATION_CAPTURED"
+  | "TRANSCRIPT_MINED"
+  | "INSIGHT_DERIVED"
+  | "INSIGHT_INVALIDATED";
 
 /**
  * Event payload for session events
