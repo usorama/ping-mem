@@ -86,6 +86,7 @@ import {
   ToolInvokeSchema,
   MemoryExtractSchema,
   MemoryAutoRecallSchema,
+  ContextUpdateSchema,
 } from "../validation/api-schemas.js";
 import { KnowledgeStore } from "../knowledge/index.js";
 import { SemanticCompressor } from "../memory/SemanticCompressor.js";
@@ -454,6 +455,7 @@ export class RESTPingMemServer {
           ...(body.projectDir !== undefined ? { projectDir: body.projectDir } : {}),
           ...(body.continueFrom !== undefined ? { continueFrom: body.continueFrom } : {}),
           ...(body.defaultChannel !== undefined ? { defaultChannel: body.defaultChannel } : {}),
+          ...(body.agentId !== undefined ? { agentId: createAgentId(body.agentId) } : {}),
         });
 
         this.currentSessionId = session.id;
@@ -581,7 +583,7 @@ export class RESTPingMemServer {
         if (body.createdAt !== undefined) options.createdAt = new Date(body.createdAt);
         if (body.updatedAt !== undefined) options.updatedAt = new Date(body.updatedAt);
 
-        const savedMemory = await memoryManager.save(body.key, body.value, options);
+        const savedMemory = await memoryManager.saveOrUpdate(body.key, body.value, options);
 
         // Update session memory count (sessionId verified non-null above)
         await this.sessionManager.incrementMemoryCount(sessionId);
@@ -647,6 +649,63 @@ export class RESTPingMemServer {
 
         return c.json<RESTSuccessResponse<Record<string, unknown>>>({
           data: result,
+        });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // PUT /api/v1/context/:key — update an existing memory by key (used by native-sync hook)
+    this.app.put("/api/v1/context/:key", async (c) => {
+      try {
+        const key = decodeURIComponent(c.req.param("key"));
+        if (!key) {
+          return c.json<RESTErrorResponse>({ error: "Bad Request", message: "key path parameter is required" }, 400);
+        }
+
+        let _reqBody: unknown;
+        try { _reqBody = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+
+        const parseResult = ContextUpdateSchema.safeParse(_reqBody);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400
+          );
+        }
+
+        const body = parseResult.data;
+        const sessionId = this.getSessionIdFromRequest(c);
+        if (!sessionId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "No active session. Provide X-Session-ID header." },
+            400
+          );
+        }
+
+        const memoryManager = await this.getMemoryManager(sessionId);
+
+        // Quality gate: reject junk content
+        const junkResult = this.junkFilter.isJunk(body.value);
+        if (junkResult.junk) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: `Content rejected: ${junkResult.reason}` },
+            400
+          );
+        }
+
+        const options: Record<string, unknown> = {};
+        if (body.category !== undefined) options.category = body.category;
+        if (body.priority !== undefined) options.priority = body.priority;
+        if (body.channel !== undefined) options.channel = body.channel;
+        if (body.metadata !== undefined) options.metadata = body.metadata;
+
+        // supersede archives old value and stores new one under same key
+        await memoryManager.supersede(key, body.value, options);
+
+        return c.json<RESTSuccessResponse<Record<string, unknown>>>({
+          data: { message: "Memory updated successfully" },
         });
       } catch (error) {
         return this.handleError(c, error);
@@ -1457,9 +1516,8 @@ export class RESTPingMemServer {
 
         const memoryManager = await this.getMemoryManager(sessionId);
 
-        // Build query params — map query text to keyPattern for wildcard matching.
-        // Strip glob metacharacters and SQLite LIKE wildcards from user input before wrapping
-        // in wildcards. % and _ are also stripped defensively in case the underlying store
+        // Strip glob metacharacters and SQLite LIKE wildcards from user input.
+        // % and _ are also stripped defensively in case the underlying store
         // ever uses a LIKE expression for pattern matching. Capped at 1000 chars: the query
         // param itself is validated at 2000, but stripping metacharacters doesn't reduce length.
         const safeQuery = query.replace(/[*?[\]\\%_]/g, "").slice(0, 1000);
@@ -1468,14 +1526,16 @@ export class RESTPingMemServer {
         if (safeQuery.length === 0) {
           return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Query must contain at least one non-metacharacter character" }, 400);
         }
-        const queryParams: Record<string, unknown> = { keyPattern: `*${safeQuery}*` };
+
+        // Build shared filter params (category, channel, priority, limit, offset)
+        const filterParams: Record<string, unknown> = {};
 
         if (c.req.query("category")) {
           const rawCategory = c.req.query("category")!;
           if (!RESTPingMemServer.VALID_CATEGORIES.has(rawCategory)) {
             return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid category: must be task, decision, progress, note, error, or warning" }, 400);
           }
-          queryParams.category = rawCategory as MemoryCategory;
+          filterParams.category = rawCategory as MemoryCategory;
         }
         if (c.req.query("channel")) {
           const rawChannel = c.req.query("channel")!;
@@ -1483,27 +1543,56 @@ export class RESTPingMemServer {
             return c.json<RESTErrorResponse>({ error: "Bad Request", message: "channel exceeds maximum length" }, 400);
           }
           // Strip control chars, BiDi overrides, and SQLite LIKE wildcards.
-          queryParams.channel = rawChannel.replace(/[\x00-\x1f\x7f\u061C\uFEFF\u202A-\u202E\u2066-\u2069%_]/g, "");
+          filterParams.channel = rawChannel.replace(/[\x00-\x1f\x7f\u061C\uFEFF\u202A-\u202E\u2066-\u2069%_]/g, "");
         }
         if (c.req.query("priority")) {
           const rawPriority = c.req.query("priority")!;
           if (!RESTPingMemServer.VALID_PRIORITIES.has(rawPriority)) {
             return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid priority: must be high, normal, or low" }, 400);
           }
-          queryParams.priority = rawPriority as MemoryPriority;
+          filterParams.priority = rawPriority as MemoryPriority;
         }
-        if (c.req.query("limit")) {
-          const rawLim = parseInt(c.req.query("limit")!, 10);
-          queryParams.limit = Number.isNaN(rawLim) ? 10 : Math.min(Math.max(rawLim, 1), 1000);
-        }
-        if (c.req.query("offset")) {
-          const rawOff = parseInt(c.req.query("offset")!, 10);
-          queryParams.offset = Number.isNaN(rawOff) ? 0 : Math.max(rawOff, 0);
-        }
+        const rawLim = c.req.query("limit");
+        const limit = rawLim ? (Number.isNaN(parseInt(rawLim, 10)) ? 10 : Math.min(Math.max(parseInt(rawLim, 10), 1), 1000)) : 10;
+        const rawOff = c.req.query("offset");
+        const offset = rawOff ? (Number.isNaN(parseInt(rawOff, 10)) ? 0 : Math.max(parseInt(rawOff, 10), 0)) : 0;
 
         const compact = c.req.query("compact") === "true";
 
-        const results = await memoryManager.recall(queryParams);
+        // Primary path: semanticQuery — scores by keyword overlap on key+value (same as MCP).
+        // Fallback path: keyPattern — wildcard match on key names only.
+        // Both paths are searched and results are merged (deduped by memory id, highest score wins).
+        const semanticResults = await memoryManager.recall({
+          ...filterParams,
+          semanticQuery: safeQuery,
+          limit,
+          offset,
+        });
+
+        const keyPatternResults = await memoryManager.recall({
+          ...filterParams,
+          keyPattern: `*${safeQuery}*`,
+          limit,
+          offset,
+        });
+
+        // Merge results: semantic path first (higher quality scores); add key-pattern hits not already present
+        const seenIds = new Set<string>();
+        const mergedResults: typeof semanticResults = [];
+        for (const r of semanticResults) {
+          if (!seenIds.has(r.memory.id)) {
+            seenIds.add(r.memory.id);
+            mergedResults.push(r);
+          }
+        }
+        for (const r of keyPatternResults) {
+          if (!seenIds.has(r.memory.id)) {
+            seenIds.add(r.memory.id);
+            mergedResults.push(r);
+          }
+        }
+
+        const results = mergedResults;
 
         // Apply relevance decay weighting to search results
         const weightedResults = results.map((r) => {
@@ -3502,6 +3591,10 @@ export class RESTPingMemServer {
   /**
    * Extract session ID from X-Session-ID header or fall back to currentSessionId.
    * Validates UUID format to prevent injection attacks.
+   *
+   * When X-Session-ID header is absent and multiple active sessions exist, returns null
+   * to force a 400 response — silently picking one session would be incorrect. Callers
+   * should always pass the X-Session-ID header to avoid ambiguity.
    */
   private getSessionIdFromRequest(c: Context<AppEnv>): SessionId | null {
     const header = c.req.header("x-session-id");
@@ -3511,6 +3604,28 @@ export class RESTPingMemServer {
         return normalized as SessionId;
       }
       return null;
+    }
+
+    // No header provided — check how many active sessions exist.
+    const activeSessions = this.sessionManager.listSessions().filter((s) => s.status === "active");
+    if (activeSessions.length > 1) {
+      // Ambiguous: multiple active sessions and no X-Session-ID header. Return null so
+      // the caller returns 400 rather than silently picking the wrong session.
+      log.warn(
+        "getSessionIdFromRequest: no X-Session-ID header and multiple active sessions — cannot pick one. " +
+          "Pass X-Session-ID header to disambiguate.",
+        { activeCount: activeSessions.length }
+      );
+      return null;
+    }
+
+    // Single active session or no session — fall back to the convenience singleton.
+    if (this.currentSessionId) {
+      log.warn(
+        "getSessionIdFromRequest: no X-Session-ID header — falling back to currentSessionId. " +
+          "Clients should pass X-Session-ID header for reliable routing.",
+        { sessionId: this.currentSessionId }
+      );
     }
     return this.currentSessionId;
   }

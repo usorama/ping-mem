@@ -52,6 +52,19 @@ export const ContextSaveSchema = z.object({
 
 export type ContextSaveInput = z.infer<typeof ContextSaveSchema>;
 
+/**
+ * Request body for PUT /api/v1/context/:key
+ */
+export const ContextUpdateSchema = z.object({
+  value: z.string().min(1, "value is required").max(1_000_000),
+  category: z.string().max(200).trim().optional(),
+  priority: z.enum(["high", "normal", "low"]).optional(),
+  channel: z.string().max(200).trim().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+export type ContextUpdateInput = z.infer<typeof ContextUpdateSchema>;
+
 // ============================================================================
 // Checkpoint Schemas
 // ============================================================================
