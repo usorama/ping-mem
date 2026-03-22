@@ -38,6 +38,7 @@
     "start:sse": "PING_MEM_TRANSPORT=sse bun run dist/http/index.js",
     "start:rest": "PING_MEM_TRANSPORT=rest bun run dist/http/index.js",
     "start:mcp": "bun run dist/mcp/cli.js",
+    "start:proxy": "bun run dist/mcp/proxy-cli.js",
     "setup": "bash scripts/setup.sh",
     "setup:docker": "docker compose up -d",
     "setup:docker-only": "bash scripts/setup.sh --docker-only",
