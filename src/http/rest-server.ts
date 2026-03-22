@@ -303,7 +303,25 @@ export class RESTPingMemServer {
         return next();
       };
       this.app.use("/api/*", authMiddleware);
-      this.app.use("/ui/*", authMiddleware);
+      // UI uses Basic Auth (browser-friendly) instead of API key auth.
+      // When admin credentials are configured, prompt the browser's native login dialog.
+      // API key auth doesn't work for browsers (can't set X-API-Key headers).
+      const adminUser = process.env.PING_MEM_ADMIN_USER;
+      const adminPass = process.env.PING_MEM_ADMIN_PASS;
+      if (adminUser && adminPass) {
+        this.app.use("/ui/*", async (c, next) => {
+          const authHeader = c.req.header("Authorization") ?? "";
+          if (authHeader.startsWith("Basic ")) {
+            const decoded = atob(authHeader.slice(6));
+            const [user, pass] = decoded.split(":");
+            if (user === adminUser && pass === adminPass) {
+              return next();
+            }
+          }
+          c.header("WWW-Authenticate", 'Basic realm="ping-mem UI"');
+          return c.json({ error: "Unauthorized" }, 401);
+        });
+      }
     } else {
       log.warn("No API key configured. All routes are unauthenticated.");
     }
