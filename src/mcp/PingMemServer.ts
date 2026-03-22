@@ -309,7 +309,22 @@ export class PingMemServer {
         }
       }
     }
-    throw new Error(`Unknown tool: ${name}`);
+    // Suggest similar tool names to help agents diagnose typos
+    const suggestions = TOOLS
+      .map((t) => t.name)
+      .filter((toolName) => toolName.includes(name) || name.includes(toolName) || (
+        // Simple character-overlap similarity: count shared substrings of length >= 4
+        (() => {
+          let overlap = 0;
+          for (let i = 0; i <= name.length - 4; i++) {
+            if (toolName.includes(name.slice(i, i + 4))) overlap++;
+          }
+          return overlap >= 1;
+        })()
+      ))
+      .slice(0, 3);
+    const hint = suggestions.length > 0 ? ` Did you mean: ${suggestions.join(", ")}?` : "";
+    throw new Error(`Unknown tool '${name}'.${hint}`);
   }
 
   /**

@@ -54,7 +54,7 @@ const CONTEXT_TOOLS: ToolDefinition[] = [
   },
   {
     name: "context_save",
-    description: "Save a memory item with key-value pair, optionally extracting entities for knowledge graph",
+    description: "Save or update a memory item. If the key already exists, the old value is archived and replaced (upsert behavior). Keys are exact-match. 'my-key' and 'my_key' are different keys. Use consistent naming.",
     inputSchema: {
       type: "object",
       properties: {
@@ -91,7 +91,7 @@ const CONTEXT_TOOLS: ToolDefinition[] = [
   },
   {
     name: "context_get",
-    description: "Retrieve memories by key or query parameters",
+    description: "Retrieve memories by key or query parameters. Keys are exact-match. 'my-key' and 'my_key' are different keys. Use consistent naming.",
     inputSchema: {
       type: "object",
       properties: {
@@ -106,7 +106,7 @@ const CONTEXT_TOOLS: ToolDefinition[] = [
   },
   {
     name: "context_search",
-    description: "Semantic search for relevant memories",
+    description: "Search memories by keyword matching. Returns memories whose key or value contain words from the query.",
     inputSchema: {
       type: "object",
       properties: {

@@ -1117,9 +1117,9 @@ export class MemoryManager {
       // Sort by score descending (keyword relevance)
       results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
-      // Apply minSimilarity threshold
-      const minSim = query.minSimilarity ?? 0;
-      const thresholded = minSim > 0 ? results.filter((r) => (r.score ?? 0) >= minSim) : results;
+      // Apply minSimilarity threshold — floor at 0.2 to suppress low-relevance noise
+      const minSim = Math.max(query.minSimilarity ?? 0, 0.2);
+      const thresholded = results.filter((r) => (r.score ?? 0) >= minSim);
 
       // Apply limit and return early (skip the general sort/filter below which would overwrite scores)
       const limit = query.limit ?? 100;
@@ -1351,9 +1351,9 @@ export class MemoryManager {
       }
     }
 
-    // Sort by score descending, take top N
+    // Sort by score descending, filter below minimum threshold, take top N
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, limit);
+    return scored.filter((r) => r.score >= 0.2).slice(0, limit);
   }
 
   /**
@@ -1534,7 +1534,7 @@ export class MemoryManager {
     }
 
     scored.sort((a, b) => b.score - a.score);
-    return scored.slice(0, limit);
+    return scored.filter((r) => r.score >= 0.2).slice(0, limit);
   }
 
   // ========== Utility Operations ==========

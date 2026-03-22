@@ -1,12 +1,12 @@
 {
   "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
   "rootPath": "/projects/ping-mem",
-  "treeHash": "8d07f6d68c871624883e7497b7cf7feed03463e8a1febbc07b1bf717c0337cfc",
+  "treeHash": "dcce56a4366b3f250e33a187ac5d6242e2c9e68958bb31accc15cc8961af6b0e",
   "files": [
     {
       "path": ".ai/decisions.jsonl",
-      "sha256": "f5f177345f9f53d082400e92565070e393b31738b2cd5dc1f0477a230e4d81a7",
-      "bytes": 17476
+      "sha256": "0593fdde8dda1d8bc415ce4d5cc2b4de261ed8db46668f592299937664539519",
+      "bytes": 17937
     },
     {
       "path": ".ai/eval/labeled-queries.jsonl",
@@ -22,6 +22,16 @@
       "path": ".ai/forge-runs/forge-2026-03-15-intelligence-platform.json",
       "sha256": "98d7bbfb54cd5e15734b1749e0d0b8da72146596bbbd80c8851fb179fac4a8b2",
       "bytes": 2636
+    },
+    {
+      "path": ".ai/forge-runs/forge-2026-03-22-31829f.json",
+      "sha256": "4e6dfbc86907b95ca90d2fca1f3b0f31fc635cfe7b27926df47326620ce22f9c",
+      "bytes": 628
+    },
+    {
+      "path": ".ai/handoff/gap-W0-G1.json",
+      "sha256": "ab6a98ad542cc78dc9c18c6940515b2246ae926ebdd449371c67e15f985ddc07",
+      "bytes": 597
     },
     {
       "path": ".ai/implementation-reviews/2026-03-15-fix-container-restart-review.md",
@@ -47,6 +57,11 @@
       "path": ".ai/project.md",
       "sha256": "14cd73cf3948682762ae1957e6e4f6365e615e32e0417bb7db65bb39acd2834e",
       "bytes": 3583
+    },
+    {
+      "path": ".ai/uat-zero/cycle-1-auto-capture.md",
+      "sha256": "1af74231a492e27a3738682abd357d61b630c98dbe2951c7c0d6583c043359e8",
+      "bytes": 1844
     },
     {
       "path": ".claude/skills/local-deploy/SKILL.md",
@@ -85,7 +100,7 @@
     },
     {
       "path": ".ping-mem/manifest.json",
-      "sha256": "8758fcbf543c9979c1b8e3141bc34ef202b02688ddc3f9b5adbd160579b9089c",
+      "sha256": "a51d307d80ba8c72a19cc91a62d08b79f89a662cf168a47545c6823335a64002",
       "bytes": 83349
     },
     {
@@ -110,8 +125,8 @@
     },
     {
       "path": "CLAUDE.md",
-      "sha256": "f7955c400a3d64fef5ef045619f6e013707085eb002727f3835dbbc69acdda52",
-      "bytes": 3275
+      "sha256": "a5154a79eb03b461fadfa945937a68fb85f627641aa94139c07af5ad71bdf3e6",
+      "bytes": 3679
     },
     {
       "path": "DIAGNOSTICS_IMPLEMENTATION.md",
@@ -279,6 +294,31 @@
       "bytes": 9906
     },
     {
+      "path": "docs/auto-capture-research/01-current-implementation-audit.md",
+      "sha256": "475f5a33da212adc0bd2800ed094417e27e21a02c77b4117df441d998f60df8d",
+      "bytes": 25045
+    },
+    {
+      "path": "docs/auto-capture-research/02-claude-mem-architecture.md",
+      "sha256": "484588e09cdb012705623a74f0324d7f7b2861d12815847293b650a774a55e1a",
+      "bytes": 26430
+    },
+    {
+      "path": "docs/auto-capture-research/03-claude-code-hooks-api.md",
+      "sha256": "e0baa61f4d4ff0d808020af8c6f50bd8ac03c42cd768d331a0eef4a3b9f0ed8c",
+      "bytes": 26423
+    },
+    {
+      "path": "docs/auto-capture-research/04-forgetting-curves-research.md",
+      "sha256": "3d4979b391f0f9267c4d54bb4885980bf77f4539ce5aa18e6134f0a05ee1c108",
+      "bytes": 27493
+    },
+    {
+      "path": "docs/auto-capture-research/05-synthesis.md",
+      "sha256": "9e85e6a896db4473bac942bce20937f59b0158107841969387539addacf6a40a",
+      "bytes": 4056
+    },
+    {
       "path": "docs/brainstorms/2026-02-01-universal-memory-multi-project-brainstorm.md",
       "sha256": "5f234011574a8abfc247ee227d0bc87894f71b0161a44ca3efc69d594d26a60b",
       "bytes": 10543
@@ -317,6 +357,26 @@
       "path": "docs/continuation-packages/continuation_20260313_pr_zero_cycle23.md",
       "sha256": "3e95e681321996438c339fb9f8dc0605e2e7e243a7ba7a61145a4b65b7083a5f",
       "bytes": 9095
+    },
+    {
+      "path": "docs/dreaming-research/01-transcript-format.md",
+      "sha256": "96fcce78957e2d951ea4b7c3c114b87c94d56fe0e8a2d6e49bb91211090038df",
+      "bytes": 2423
+    },
+    {
+      "path": "docs/dreaming-research/02-existing-infrastructure.md",
+      "sha256": "bfa6c6adb6d409d17a592466bace71337efa79a0d76ba461c7964cadf257413e",
+      "bytes": 3211
+    },
+    {
+      "path": "docs/dreaming-research/03-honcho-competitors.md",
+      "sha256": "601cc9f8c5c603fdb53c63a7ea6e86671d952309431d86244172ba0c32f45778",
+      "bytes": 19363
+    },
+    {
+      "path": "docs/dreaming-research/04-synthesis.md",
+      "sha256": "59593ef882e4ebc4c48e780021154400f7bc918413da6eb417baf36b54d8552b",
+      "bytes": 4827
     },
     {
       "path": "docs/memory-evolution-research/1-synthesis.md",
@@ -467,6 +527,21 @@
       "path": "docs/plans/2026-03-21-feat-memory-evolution-auto-recall-quality-maintenance-plan.md",
       "sha256": "ada6b3fb3c5dcc1e17b2d3678d4f4b296c7d570b9534874840ee820763cd8873",
       "bytes": 44096
+    },
+    {
+      "path": "docs/plans/2026-03-22-feat-auto-capture-progressive-disclosure-memory-decay-plan.md",
+      "sha256": "3db039014bf0c819d0d4fe8f298eca97e2f5ae1efd3bcc44231851a1d4755aa4",
+      "bytes": 34765
+    },
+    {
+      "path": "docs/plans/2026-03-22-feat-conversation-mining-dreaming-engine-plan-review.md",
+      "sha256": "212053483e61f9a50febc32d3aa1eadd5e3b82fde0d6f44044b3195682a126ff",
+      "bytes": 15546
+    },
+    {
+      "path": "docs/plans/2026-03-22-feat-conversation-mining-dreaming-engine-plan.md",
+      "sha256": "94059a9fe84277d4c612de652b476ce23e5b273254fb7240e0c58d5fee0ddb96",
+      "bytes": 23445
     },
     {
       "path": "docs/plans/understory-integration-spec.md",
@@ -1330,8 +1405,8 @@
     },
     {
       "path": "src/http/rest-server.ts",
-      "sha256": "ccf0da4ba06c4a96eaf39dc4911952a526682213ba3d4692bab7920fd698c1c1",
-      "bytes": 157735
+      "sha256": "b647129de91f9553c4a0a759ad087d68dc5a522cae6654073bcb2fe6b64e6c3a",
+      "bytes": 158956
     },
     {
       "path": "src/http/routes/__tests__/shell.test.ts",
@@ -1860,8 +1935,8 @@
     },
     {
       "path": "src/mcp/handlers/ContextToolModule.ts",
-      "sha256": "00efe44d64d8130404b9b775027b3c208c4a7f565313256c3eb92563dc7507bb",
-      "bytes": 36515
+      "sha256": "150db4e0056676b74eae599a443886e5561f7d2550c090aa20ed1c20f7ebfd85",
+      "bytes": 36694
     },
     {
       "path": "src/mcp/handlers/DiagnosticsToolModule.ts",
@@ -1935,8 +2010,8 @@
     },
     {
       "path": "src/memory/MemoryManager.ts",
-      "sha256": "03d433357e70d0bdec38ed5fbd826fb069f60659925925800fe7b94139b9bea4",
-      "bytes": 56371
+      "sha256": "16327c8aef31360fb8fa56098a94a733e45d2dd630fb48675d23acbb3d8cb5e0",
+      "bytes": 57480
     },
     {
       "path": "src/memory/RelevanceEngine.ts",
@@ -2444,6 +2519,6 @@
       "bytes": 849
     }
   ],
-  "generatedAt": "2026-03-22T14:34:12.106Z",
+  "generatedAt": "2026-03-22T15:43:07.237Z",
   "schemaVersion": 1
 }

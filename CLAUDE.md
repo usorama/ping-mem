@@ -32,6 +32,7 @@ bun run dist/mcp/cli.js  # MCP stdio
 - **Health** is GET `/health` — always 200, no auth required
 - **Neo4j + Qdrant** required for ingestion features; core memory works without them
 - **ProjectId** = `SHA-256(remoteUrl + "::" + relativeToGitRoot)` — path-independent
+- **Rate limit**: 60 requests/minute on `/api/v1/*` endpoints. Mining and dreaming endpoints are resource-intensive — use sparingly.
 
 ## MCP Tools
 
