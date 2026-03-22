@@ -3467,16 +3467,21 @@ export class RESTPingMemServer {
           writeLockManager: this.writeLockManager,
         };
 
+        const { StructuralToolModule } = await import("../mcp/handlers/StructuralToolModule.js");
+        const { MiningToolModule } = await import("../mcp/handlers/MiningToolModule.js");
+
         const modules = [
           new ContextToolModule(state),
           new GraphToolModule(state),
           new WorklogToolModule(state),
           new DiagnosticsToolModule(state),
           new CodebaseToolModule(state),
+          new StructuralToolModule(state),
           new MemoryToolModule(state),
           new CausalToolModule(state),
           new KnowledgeToolModule(state),
           new AgentToolModule(state),
+          new MiningToolModule(state),
         ];
 
         const args = parseResult.data.args;

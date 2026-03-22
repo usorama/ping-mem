@@ -57,6 +57,11 @@ bun run dist/mcp/cli.js  # MCP stdio
 
 Routes: `/ui` `/ui/memories` `/ui/diagnostics` `/ui/ingestion` `/ui/agents` `/ui/knowledge` `/ui/sessions` `/ui/events` `/ui/worklog` `/ui/mining` `/ui/insights` `/ui/profile` `/admin`
 
+## MCP Transport Modes
+
+- **Proxy mode** (recommended): `PING_MEM_REST_URL=http://localhost:3003 bun run dist/mcp/proxy-cli.js` — all tools proxy through Docker, no DB opened in the MCP process
+- **Direct mode** (deprecated): `bun run dist/mcp/cli.js` — opens DB directly, concurrent access issues with Docker
+
 ## Deployment
 
 | Environment | Endpoint | Credentials |

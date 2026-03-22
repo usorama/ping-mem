@@ -383,6 +383,9 @@ export class PingMemServer {
  * Start the server if running as main module
  */
 export async function main(): Promise<void> {
+  if (!process.env.PING_MEM_REST_URL) {
+    console.error("[DEPRECATED] Running MCP in direct-DB mode. Set PING_MEM_REST_URL for proxy mode.");
+  }
   const runtimeConfig = loadRuntimeConfig();
   const services = await createRuntimeServices();
   const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
