@@ -25,6 +25,7 @@ export interface MaintenanceResult {
   walSizeBefore: number;
   walSizeAfter: number;
   exportedCount: number;
+  refreshedScores: number;
   durationMs: number;
 }
 
@@ -92,6 +93,9 @@ export class MaintenanceRunner {
     // Step 5: Export to native memory (if bridge available)
     const exportedCount = await this.exportToNative(options, dryRun);
 
+    // Step: Refresh FSRS decay scores
+    const refreshedScores = this.relevanceEngine ? await this.relevanceEngine.recalculateAll() : 0;
+
     const durationMs = Date.now() - start;
     const result: MaintenanceResult = {
       dedupCount,
@@ -101,6 +105,7 @@ export class MaintenanceRunner {
       walSizeBefore,
       walSizeAfter,
       exportedCount,
+      refreshedScores,
       durationMs,
     };
 
@@ -222,13 +227,13 @@ export class MaintenanceRunner {
     const pruneMinAgeDays = options.pruneMinAgeDays ?? 30;
     const db = this.eventStore.getDatabase();
 
-    type CandidateRow = { memory_id: string; score: number };
+    type CandidateRow = { memory_id: string; relevance_score: number };
     type SessionRow = { session_id: string };
 
     // Find memories that are very low relevance, never accessed, and old
     const candidates = db.prepare(
-      `SELECT memory_id, score FROM memory_relevance
-       WHERE score < ?
+      `SELECT memory_id, relevance_score FROM memory_relevance
+       WHERE relevance_score < ?
        AND access_count = 0
        AND last_accessed < datetime('now', '-' || ? || ' days')
        LIMIT 500`
@@ -255,7 +260,7 @@ export class MaintenanceRunner {
             {
               oldMemoryId: candidate.memory_id,
               reason: "maintenance-prune",
-              relevanceScore: candidate.score,
+              relevanceScore: candidate.relevance_score,
             },
           );
           pruneCount++;
