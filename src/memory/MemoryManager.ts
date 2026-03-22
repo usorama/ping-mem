@@ -1080,6 +1080,49 @@ export class MemoryManager {
       return results;
     }
 
+    // Keyword-scored search (when semanticQuery is set)
+    if (query.semanticQuery) {
+      // Use findRelated for in-session keyword matching (scores by keyword overlap)
+      const inSession = this.findRelated(query.semanticQuery, {
+        limit: query.limit ?? 100,
+      });
+      for (const r of inSession) {
+        results.push({ memory: r.memory, score: r.score });
+      }
+
+      // Also search across other sessions for cross-session recall
+      const crossSession = this.findRelatedAcrossSessions(query.semanticQuery, {
+        excludeSessionId: this.sessionId,
+        limit: query.limit ?? 100,
+        excludeKeys: results.map((r) => r.memory.key),
+      });
+      for (const r of crossSession) {
+        results.push({ memory: r.memory, score: r.score });
+      }
+
+      // Sort by score descending (keyword relevance)
+      results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+      // Apply minSimilarity threshold
+      const minSim = query.minSimilarity ?? 0;
+      const thresholded = minSim > 0 ? results.filter((r) => (r.score ?? 0) >= minSim) : results;
+
+      // Apply limit and return early (skip the general sort/filter below which would overwrite scores)
+      const limit = query.limit ?? 100;
+      const limited = thresholded.slice(0, limit);
+
+      // Record recall event
+      await this.eventStore.createEvent(this.sessionId, "MEMORY_RECALLED", {
+        sessionId: this.sessionId,
+        memoryId: "semantic-query",
+        key: query.semanticQuery,
+        operation: "recall",
+        affectedCount: limited.length,
+      } as MemoryEventData);
+
+      return limited;
+    }
+
     // Pattern matching
     if (query.keyPattern) {
       const escaped = query.keyPattern
