@@ -365,6 +365,10 @@ export class ContextToolModule implements ToolModule {
   private async handleSave(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const memoryManager = getActiveMemoryManager(this.state);
 
+    // Normalize key: trim whitespace to match REST Zod behavior (issue #87)
+    const normalizedArgs = { ...args, key: (args.key as string).trim() };
+    args = normalizedArgs;
+
     // --- JunkFilter quality gate (issue #52) ---
     const junkResult = this.junkFilter.isJunk(args.value as string);
     if (junkResult.junk) {

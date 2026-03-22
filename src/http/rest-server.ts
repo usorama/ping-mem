@@ -489,14 +489,24 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/session/end", async (c) => {
       try {
+        // Read optional sessionId from body (allows body-only clients without X-Session-ID header)
+        let bodySessionId: string | undefined;
+        try {
+          const body = await c.req.json() as Record<string, unknown>;
+          if (typeof body?.sessionId === "string") {
+            bodySessionId = body.sessionId;
+          }
+        } catch {
+          // Body is optional for session/end — ignore parse failures
+        }
         // Prefer X-Session-ID header to avoid ending the wrong session under concurrent use.
-        // Falls back to the single-client convenience field only when no header is provided.
-        const sessionId = this.getSessionIdFromRequest(c);
+        // Falls back to body sessionId, then to the single-client convenience field.
+        const sessionId = this.getSessionIdFromRequest(c, bodySessionId);
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
             {
               error: "Bad Request",
-              message: "No active session. Provide X-Session-ID header.",
+              message: "No active session. Provide X-Session-ID header or sessionId in body.",
             },
             400
           );
@@ -3758,6 +3768,8 @@ export class RESTPingMemServer {
       if (name === "EvidenceGateRejectionError" || name === "ScopeViolationError") return 403;
       if (name === "MemoryKeyExistsError") return 409;
       if (name === "SchemaValidationError" || name === "InvalidSessionError") return 400;
+      // Map session limit errors to 429 Too Many Requests
+      if (error.message.includes("Maximum active sessions")) return 429;
       // Check for known error codes
       const codeErr = error as { code?: string };
       if (codeErr.code === "MEMORY_NOT_FOUND") return 404;
@@ -3793,6 +3805,7 @@ export class RESTPingMemServer {
       404: "Not Found",
       409: "Conflict",
       410: "Gone",
+      429: "Too Many Requests",
       500: "Internal Server Error",
       503: "Service Unavailable",
     };
@@ -3806,6 +3819,17 @@ export class RESTPingMemServer {
   private getMemoryManager(sessionId: SessionId): Promise<MemoryManager> {
     const cached = this.memoryManagers.get(sessionId);
     if (cached) return Promise.resolve(cached);
+
+    // Verify the session exists and is active before creating a new MemoryManager.
+    // Without this check, callers using a stale/ended sessionId would silently get
+    // a fresh (empty) MemoryManager instead of an error.
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session) {
+      return Promise.reject(Object.assign(new Error("Session not found or ended"), { code: "INVALID_SESSION" }));
+    }
+    if (session.status !== "active") {
+      return Promise.reject(Object.assign(new Error("Session not found or ended"), { code: "INVALID_SESSION" }));
+    }
 
     let promise = this.managerPromises.get(sessionId);
     if (!promise) {

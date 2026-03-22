@@ -35,19 +35,21 @@ bun run dist/mcp/cli.js  # MCP stdio
 
 ## MCP Tools
 
-**Core**: `context_session_start`, `context_save`, `context_get`, `context_search`, `context_checkpoint`, `context_status`, `context_auto_recall`, `context_hybrid_search`, `context_query_relationships`, `context_get_lineage`
+**Core** (`context_*`): `context_session_start`, `context_session_end`, `context_session_list`, `context_save`, `context_get`, `context_delete`, `context_search`, `context_auto_recall`, `context_checkpoint`, `context_status`, `context_hybrid_search`, `context_query_relationships`, `context_get_lineage`, `context_query_evolution`, `context_health`
 
-**Codebase**: `codebase_ingest`, `codebase_verify`, `codebase_search`, `codebase_timeline`
+**Codebase**: `codebase_ingest`, `codebase_verify`, `codebase_search`, `codebase_timeline`, `codebase_list_projects`, `codebase_impact`, `codebase_blast_radius`, `codebase_dependency_map`
 
-**Diagnostics**: `diagnostics_ingest`, `diagnostics_latest`, `diagnostics_diff`, `diagnostics_by_symbol`, `diagnostics_summarize`
+**Diagnostics**: `diagnostics_ingest`, `diagnostics_latest`, `diagnostics_list`, `diagnostics_diff`, `diagnostics_summary`, `diagnostics_summarize`, `diagnostics_compare_tools`, `diagnostics_by_symbol`
+
+**Knowledge**: `knowledge_ingest`, `knowledge_search`
 
 **Agents**: `agent_register`, `agent_quota_status`, `agent_deregister`
 
-**Knowledge**: `knowledge_ingest`, `knowledge_search`, `knowledge_get`
-
-**Maintenance**: `memory_maintain`, `memory_conflicts`, `memory_subscribe`, `memory_unsubscribe`, `memory_compress`
+**Memory**: `memory_stats`, `memory_consolidate`, `memory_subscribe`, `memory_unsubscribe`, `memory_compress`, `memory_maintain`, `memory_conflicts`
 
 **Worklog**: `worklog_record`, `worklog_list`
+
+**Causal**: `search_causes`, `search_effects`, `get_causal_chain`, `trigger_causal_discovery`
 
 **Mining**: `transcript_mine`, `dreaming_run`, `insights_list`
 

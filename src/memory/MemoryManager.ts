@@ -34,6 +34,20 @@ import { createLogger } from "../util/logger.js";
 
 const log = createLogger("MemoryManager");
 
+// Common English words that add noise to keyword-based scoring.
+// Filtering these prevents "the", "is", etc. from dominating match scores.
+const STOP_WORDS = new Set([
+  "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+  "do", "does", "did", "will", "would", "could", "should", "may", "might", "shall",
+  "can", "need", "dare", "ought", "used", "to", "of", "in", "for", "on", "with",
+  "at", "by", "from", "as", "into", "through", "during", "before", "after", "above",
+  "below", "between", "out", "off", "over", "under", "again", "further", "then",
+  "once", "here", "there", "when", "where", "why", "how", "all", "each", "every",
+  "both", "few", "more", "most", "other", "some", "such", "no", "not", "only",
+  "own", "same", "so", "than", "too", "very", "just", "because", "but", "and",
+  "or", "if", "while", "that", "this", "these", "those", "it", "its", "an", "a",
+]);
+
 // ============================================================================
 // Memory Manager Configuration
 // ============================================================================
@@ -1280,8 +1294,8 @@ export class MemoryManager {
     const limit = options.limit ?? 5;
     const excludeKeys = new Set(options.excludeKeys ?? []);
 
-    // Extract keywords (words >= 2 chars, lowercase, deduplicated)
-    const keywords = [
+    // Extract keywords (words >= 2 chars, lowercase, deduplicated, stop-words removed)
+    const rawKeywords = [
       ...new Set(
         text
           .toLowerCase()
@@ -1290,9 +1304,10 @@ export class MemoryManager {
           .filter((w) => w.length >= 2)
       ),
     ];
+    const keywords = rawKeywords.filter((w) => !STOP_WORDS.has(w));
 
-    // If all tokens were filtered out (e.g. single-char query), fall back to substring match
-    // using the original text so that searches like "?" or "a" still return results.
+    // If all tokens were filtered out (all stop words or single-char query), fall back to
+    // substring match using the original text so searches like "?" or "a" still return results.
     if (keywords.length === 0) {
       const fallbackText = text.toLowerCase();
       const scored: Array<{ memory: Memory; score: number }> = [];
@@ -1360,8 +1375,8 @@ export class MemoryManager {
     const limit = options.limit ?? 5;
     const excludeKeys = new Set(options.excludeKeys ?? []);
 
-    // Extract keywords (same logic as findRelated — words >= 2 chars)
-    const keywords = [
+    // Extract keywords (same logic as findRelated — words >= 2 chars, stop-words removed)
+    const rawKeywordsCross = [
       ...new Set(
         text
           .toLowerCase()
@@ -1370,6 +1385,7 @@ export class MemoryManager {
           .filter((w) => w.length >= 2)
       ),
     ];
+    const keywords = rawKeywordsCross.filter((w) => !STOP_WORDS.has(w));
 
     // If all tokens were filtered out, fall back to a substring match against the original text
     // so that single-character or all-symbol queries still surface relevant memories.

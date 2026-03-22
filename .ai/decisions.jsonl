@@ -74,3 +74,13 @@
 {"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: feat: auto-capture, FSRS decay, compact search (#65)","uncommitted_changes":4,"status":"completed"}
 {"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: feat: auto-capture, FSRS decay, compact search (#65)","uncommitted_changes":4,"status":"completed"}
 {"date":"2026-03-22","session":"forge-2026-03-22-31829f","type":"decision","what":"Approved mining+dreaming+UI plan with 15 amendments (all 3 phases, zero deferrals)","why":"User explicitly requires no deferrals. UI is for the user, not optional.","status":"active"}
+{"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: fix: recall() now uses keyword scoring when semanticQuery is set (#67)","uncommitted_changes":1,"status":"completed"}
+{"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: fix: recall() now uses keyword scoring when semanticQuery is set (#67)","uncommitted_changes":2,"status":"completed"}
+{"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: fix: recall() now uses keyword scoring when semanticQuery is set (#67)","uncommitted_changes":2,"status":"completed"}
+{"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: feat: add agent-path integration audit script","uncommitted_changes":2,"status":"completed"}
+{"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: feat: add agent-path integration audit script","uncommitted_changes":4,"status":"completed"}
+{"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: feat: add agent-path integration audit script","uncommitted_changes":4,"status":"completed"}
+{"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: feat: add agent-path integration audit script","uncommitted_changes":4,"status":"completed"}
+{"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: feat: add agent-path integration audit script","uncommitted_changes":4,"status":"completed"}
+{"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: fix: getSessionIdFromRequest accepts body sessionId, audit script uses X-Session-ID","uncommitted_changes":2,"status":"completed"}
+{"date":"2026-03-22","session":"unknown","type":"session_end","what":"Session ended. Last commit: fix: getSessionIdFromRequest accepts body sessionId, audit script uses X-Session-ID","uncommitted_changes":2,"status":"completed"}

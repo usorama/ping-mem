@@ -1,0 +1,16 @@
+{
+  "gap_id": "W0-G1",
+  "description": "JunkFilter not integrated into save operations - quality gate exists but not enforced",
+  "priority": "P1",
+  "category": "INTEGRATION_GAP", 
+  "route_to": "execute",
+  "reason": "Simple import/integration fix, 5-10 minutes",
+  "source_skill": "implementation-review",
+  "fix_details": {
+    "file": "src/memory/MemoryManager.ts",
+    "action": "Add JunkFilter import and validation call in save() method",
+    "estimated_effort": "5-10 minutes",
+    "test_verification": "Add test for junk content rejection"
+  },
+  "created_at": "2026-03-21T08:55:00Z"
+}
