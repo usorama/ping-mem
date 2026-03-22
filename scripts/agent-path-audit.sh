@@ -49,7 +49,8 @@ else
   # Save with unique key
   curl -sf -X POST "$BASE/api/v1/context" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"$SESSION\",\"key\":\"audit/wtr-$TS\",\"value\":\"Audit write-then-read verification with unique timestamp $TS for deterministic search\",\"category\":\"observation\"}" > /dev/null
+    -H "X-Session-ID: $SESSION" \
+    -d "{\"key\":\"audit/wtr-$TS\",\"value\":\"Audit write-then-read verification with unique timestamp $TS for deterministic search\",\"category\":\"observation\"}" > /dev/null
 
   # Search by value content (not key)
   FOUND=$(curl -sf -X POST "$BASE/api/v1/memory/auto-recall" \
@@ -62,7 +63,8 @@ else
   # End session
   curl -sf -X POST "$BASE/api/v1/session/end" \
     -H "Content-Type: application/json" \
-    -d "{\"sessionId\":\"$SESSION\"}" > /dev/null
+    -H "X-Session-ID: $SESSION" \
+  -d '{}' > /dev/null
 fi
 
 # --- PATH 4: Cross-session search ---
@@ -74,8 +76,9 @@ SESSION_A=$(curl -sf -X POST "$BASE/api/v1/session/start" \
 TS2=$(date +%s)
 curl -sf -X POST "$BASE/api/v1/context" \
   -H "Content-Type: application/json" \
-  -d "{\"sessionId\":\"$SESSION_A\",\"key\":\"audit/cross-$TS2\",\"value\":\"Cross-session test written at $TS2 for verification\",\"category\":\"fact\"}" > /dev/null
-curl -sf -X POST "$BASE/api/v1/session/end" -H "Content-Type: application/json" -d "{\"sessionId\":\"$SESSION_A\"}" > /dev/null
+  -H "X-Session-ID: $SESSION_A" \
+  -d "{\"key\":\"audit/cross-$TS2\",\"value\":\"Cross-session test written at $TS2 for verification\",\"category\":\"fact\"}" > /dev/null
+curl -sf -X POST "$BASE/api/v1/session/end" -H "Content-Type: application/json" -H "X-Session-ID: $SESSION_A" -d '{}' > /dev/null
 
 SESSION_B=$(curl -sf -X POST "$BASE/api/v1/session/start" \
   -H "Content-Type: application/json" \

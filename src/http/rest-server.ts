@@ -557,7 +557,7 @@ export class RESTPingMemServer {
           return c.json<RESTErrorResponse>(
             {
               error: "Bad Request",
-              message: "No active session. Call /api/v1/session/start first.",
+              message: "No active session. Call /api/v1/session/start first, or pass X-Session-ID header.",
             },
             400
           );
@@ -3596,7 +3596,8 @@ export class RESTPingMemServer {
    * to force a 400 response — silently picking one session would be incorrect. Callers
    * should always pass the X-Session-ID header to avoid ambiguity.
    */
-  private getSessionIdFromRequest(c: Context<AppEnv>): SessionId | null {
+  private getSessionIdFromRequest(c: Context<AppEnv>, bodySessionId?: string): SessionId | null {
+    // Priority 1: X-Session-ID header (most reliable)
     const header = c.req.header("x-session-id");
     if (header) {
       const normalized = header.trim().toLowerCase();
@@ -3606,7 +3607,15 @@ export class RESTPingMemServer {
       return null;
     }
 
-    // No header provided — check how many active sessions exist.
+    // Priority 2: sessionId from request body (common in POST endpoints)
+    if (bodySessionId) {
+      const normalized = bodySessionId.trim().toLowerCase();
+      if (RESTPingMemServer.UUID_RE.test(normalized)) {
+        return normalized as SessionId;
+      }
+    }
+
+    // No header or body sessionId — check how many active sessions exist.
     const activeSessions = this.sessionManager.listSessions().filter((s) => s.status === "active");
     if (activeSessions.length > 1) {
       // Ambiguous: multiple active sessions and no X-Session-ID header. Return null so
