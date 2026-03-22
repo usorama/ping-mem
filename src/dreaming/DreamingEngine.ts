@@ -22,6 +22,7 @@ import type { ContradictionDetector } from "../graph/ContradictionDetector.js";
 import type { UserProfileStore } from "../profile/UserProfile.js";
 import { EventStore } from "../storage/EventStore.js";
 import { createLogger } from "../util/logger.js";
+import { callClaude } from "../llm/ClaudeCli.js";
 
 const log = createLogger("DreamingEngine");
 
@@ -51,6 +52,8 @@ export interface DreamResult {
   profileUpdates: number;
   /** Total duration in milliseconds */
   durationMs: number;
+  /** Phase-level failures collected during the dreaming cycle */
+  errors: string[];
   /** Estimated token usage (available when Claude CLI reports it) */
   costEstimate?: { inputTokens: number; outputTokens: number };
 }
@@ -91,6 +94,9 @@ Rules:
 // ============================================================================
 
 export class DreamingEngine {
+  /** Singleton lock — prevents concurrent dream() calls */
+  private dreamingLock = false;
+
   constructor(
     private readonly memoryManager: MemoryManager,
     private readonly contradictionDetector: ContradictionDetector | null,
@@ -101,8 +107,22 @@ export class DreamingEngine {
 
   /**
    * Run full dreaming cycle: deduce → generalize → cleanStaleInsights → profile update
+   * Serialized via dreamingLock — returns early if already running.
    */
   async dream(sessionId: SessionId): Promise<DreamResult> {
+    if (this.dreamingLock) {
+      log.warn("dream() called while already running — skipping");
+      return {
+        deductions: 0,
+        generalizations: 0,
+        contradictions: 0,
+        profileUpdates: 0,
+        durationMs: 0,
+        errors: ["Dreaming already in progress"],
+      };
+    }
+
+    this.dreamingLock = true;
     const startMs = Date.now();
     const result: DreamResult = {
       deductions: 0,
@@ -110,118 +130,123 @@ export class DreamingEngine {
       contradictions: 0,
       profileUpdates: 0,
       durationMs: 0,
+      errors: [],
     };
 
-    log.info("Starting dreaming cycle", { sessionId });
+    try {
+      log.info("Starting dreaming cycle", { sessionId });
 
-    // Load all memories, excluding derived_insight to prevent circular reasoning
-    const allResults = await this.memoryManager.recall({
-      limit: this.config.maxMemoriesPerCycle,
-      sort: "updated_desc",
-    });
-    const rawMemories = allResults.map((r) => r.memory);
-
-    // Filter out derived_insight memories for input to deduce/generalize
-    const sourceMemories = rawMemories.filter(
-      (m) => m.category !== "derived_insight"
-    );
-
-    if (sourceMemories.length < this.config.minMemoriesForDreaming) {
-      log.info("Not enough source memories for dreaming", {
-        count: sourceMemories.length,
-        required: this.config.minMemoriesForDreaming,
+      // Load all memories, excluding derived_insight to prevent circular reasoning
+      const allResults = await this.memoryManager.recall({
+        limit: this.config.maxMemoriesPerCycle,
+        sort: "updated_desc",
       });
-      result.durationMs = Date.now() - startMs;
-      return result;
-    }
+      const rawMemories = allResults.map((r) => r.memory);
 
-    log.info("Memory counts for dreaming", {
-      total: rawMemories.length,
-      sourceMemories: sourceMemories.length,
-    });
+      // Filter out derived_insight memories for input to deduce/generalize
+      const sourceMemories = rawMemories.filter(
+        (m) => m.category !== "derived_insight"
+      );
 
-    // Phase 1: Deduction
-    if (this.config.deductionEnabled) {
-      try {
-        const deductions = await this.deduce(sourceMemories);
-        for (const fact of deductions) {
-          const key = `derived_insight::deduction::${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          await this.memoryManager.save(key, fact, {
-            category: "derived_insight",
-            priority: "normal",
-            metadata: {
+      if (sourceMemories.length < this.config.minMemoriesForDreaming) {
+        log.info("Not enough source memories for dreaming", {
+          count: sourceMemories.length,
+          required: this.config.minMemoriesForDreaming,
+        });
+        result.durationMs = Date.now() - startMs;
+        return result;
+      }
+
+      log.info("Memory counts for dreaming", {
+        total: rawMemories.length,
+        sourceMemories: sourceMemories.length,
+      });
+
+      // Phase 1: Deduction
+      if (this.config.deductionEnabled) {
+        try {
+          const deductions = await this.deduce(sourceMemories);
+          for (const fact of deductions) {
+            const key = `derived_insight::deduction::${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            await this.memoryManager.save(key, fact, {
+              category: "derived_insight",
+              priority: "normal",
+              metadata: {
+                phase: "deduction",
+                sourceCount: sourceMemories.length,
+                derivedAt: new Date().toISOString(),
+              },
+            });
+            await this.eventStore.createEvent(sessionId, "INSIGHT_DERIVED", {
+              key,
+              fact,
               phase: "deduction",
-              sourceCount: sourceMemories.length,
-              derivedAt: new Date().toISOString(),
-            },
-          });
-          await this.eventStore.createEvent(sessionId, "INSIGHT_DERIVED", {
-            key,
-            fact,
-            phase: "deduction",
-          });
-          result.deductions++;
+            });
+            result.deductions++;
+          }
+          log.info("Deduction phase complete", { count: result.deductions });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.error("Deduction phase failed", { error: msg });
+          result.errors.push(`deduction: ${msg}`);
         }
-        log.info("Deduction phase complete", { count: result.deductions });
-      } catch (err) {
-        log.error("Deduction phase failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
       }
-    }
 
-    // Phase 2: Generalization
-    if (this.config.generalizationEnabled) {
-      try {
-        const traits = await this.generalize(sourceMemories);
-        for (const trait of traits) {
-          const key = `derived_insight::generalization::${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          await this.memoryManager.save(key, trait, {
-            category: "derived_insight",
-            priority: "normal",
-            metadata: {
+      // Phase 2: Generalization
+      if (this.config.generalizationEnabled) {
+        try {
+          const traits = await this.generalize(sourceMemories);
+          for (const trait of traits) {
+            const key = `derived_insight::generalization::${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            await this.memoryManager.save(key, trait, {
+              category: "derived_insight",
+              priority: "normal",
+              metadata: {
+                phase: "generalization",
+                sourceCount: sourceMemories.length,
+                derivedAt: new Date().toISOString(),
+              },
+            });
+            await this.eventStore.createEvent(sessionId, "INSIGHT_DERIVED", {
+              key,
+              trait,
               phase: "generalization",
-              sourceCount: sourceMemories.length,
-              derivedAt: new Date().toISOString(),
-            },
+            });
+            result.generalizations++;
+          }
+          log.info("Generalization phase complete", {
+            count: result.generalizations,
           });
-          await this.eventStore.createEvent(sessionId, "INSIGHT_DERIVED", {
-            key,
-            trait,
-            phase: "generalization",
-          });
-          result.generalizations++;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.error("Generalization phase failed", { error: msg });
+          result.errors.push(`generalization: ${msg}`);
         }
-        log.info("Generalization phase complete", {
-          count: result.generalizations,
-        });
-      } catch (err) {
-        log.error("Generalization phase failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
       }
-    }
 
-    // Phase 3: Clean stale insights
-    const existingInsights = rawMemories.filter(
-      (m) => m.category === "derived_insight"
-    );
-    if (existingInsights.length > 0) {
-      try {
-        result.contradictions = await this.cleanStaleInsights(existingInsights);
-        log.info("Stale insight cleanup complete", {
-          invalidated: result.contradictions,
-        });
-      } catch (err) {
-        log.error("Stale insight cleanup failed", {
-          error: err instanceof Error ? err.message : String(err),
-        });
+      // Phase 3: Clean stale insights
+      const existingInsights = rawMemories.filter(
+        (m) => m.category === "derived_insight"
+      );
+      if (existingInsights.length > 0) {
+        try {
+          result.contradictions = await this.cleanStaleInsights(existingInsights);
+          log.info("Stale insight cleanup complete", {
+            invalidated: result.contradictions,
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.error("Stale insight cleanup failed", { error: msg });
+          result.errors.push(`stale-insight-cleanup: ${msg}`);
+        }
       }
-    }
 
-    result.durationMs = Date.now() - startMs;
-    log.info("Dreaming cycle complete", result as unknown as Record<string, unknown>);
-    return result;
+      result.durationMs = Date.now() - startMs;
+      log.info("Dreaming cycle complete", result as unknown as Record<string, unknown>);
+      return result;
+    } finally {
+      this.dreamingLock = false;
+    }
   }
 
   /**
@@ -239,24 +264,16 @@ export class DreamingEngine {
 
     const prompt = `Here are memories stored about a user's work and interactions:\n\n${memoryText}\n\nDerive up to 5 implicit facts that are clearly implied but not explicitly stated. Return a JSON array of strings.`;
 
-    try {
-      const raw = await this.callClaude(
-        prompt,
-        "claude-sonnet-4-6",
-        DEDUCTION_SYSTEM
-      );
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) {
-        log.warn("Deduction response was not an array", { raw });
-        return [];
-      }
-      return parsed.filter((item): item is string => typeof item === "string");
-    } catch (err) {
-      log.error("Deduction callClaude failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    const raw = await callClaude(prompt, {
+      model: "claude-sonnet-4-6",
+      system: DEDUCTION_SYSTEM,
+    });
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      log.warn("Deduction response was not an array", { raw });
       return [];
     }
+    return parsed.filter((item): item is string => typeof item === "string");
   }
 
   /**
@@ -272,77 +289,69 @@ export class DreamingEngine {
 
     const prompt = `Here are memories stored about a user's work and interactions:\n\n${memoryText}\n\nIdentify personality traits, technical preferences, and behavioral patterns. Return a JSON object with traits, expertise, projects, and workStyle arrays.`;
 
-    try {
-      const raw = await this.callClaude(
-        prompt,
-        "claude-sonnet-4-6",
-        GENERALIZATION_SYSTEM
+    const raw = await callClaude(prompt, {
+      model: "claude-sonnet-4-6",
+      system: GENERALIZATION_SYSTEM,
+    });
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+    const traits: string[] = [];
+    if (Array.isArray(parsed.traits)) {
+      traits.push(
+        ...(parsed.traits as unknown[]).filter(
+          (t): t is string => typeof t === "string"
+        )
       );
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-      const traits: string[] = [];
-      if (Array.isArray(parsed.traits)) {
-        traits.push(
-          ...(parsed.traits as unknown[]).filter(
-            (t): t is string => typeof t === "string"
-          )
-        );
-      }
-
-      // Auto-update UserProfile from generalization results
-      const profileUpdates: {
-        expertise?: string[];
-        activeProjects?: string[];
-        currentFocus?: string[];
-      } = {};
-
-      if (Array.isArray(parsed.expertise) && parsed.expertise.length > 0) {
-        profileUpdates.expertise = (parsed.expertise as unknown[]).filter(
-          (e): e is string => typeof e === "string"
-        );
-      }
-      if (Array.isArray(parsed.projects) && parsed.projects.length > 0) {
-        profileUpdates.activeProjects = (parsed.projects as unknown[]).filter(
-          (p): p is string => typeof p === "string"
-        );
-      }
-      if (Array.isArray(parsed.workStyle) && parsed.workStyle.length > 0) {
-        profileUpdates.currentFocus = (parsed.workStyle as unknown[]).filter(
-          (s): s is string => typeof s === "string"
-        );
-      }
-
-      if (Object.keys(profileUpdates).length > 0) {
-        try {
-          this.userProfile.updateProfile("default", profileUpdates);
-          log.info("UserProfile updated from generalization", profileUpdates);
-        } catch (profileErr) {
-          log.warn("Failed to update UserProfile from generalization", {
-            error:
-              profileErr instanceof Error
-                ? profileErr.message
-                : String(profileErr),
-          });
-        }
-      }
-
-      // Return all generalizations as strings to be stored as derived_insight memories
-      const allGeneralizations: string[] = [...traits];
-      if (Array.isArray(parsed.workStyle)) {
-        allGeneralizations.push(
-          ...(parsed.workStyle as unknown[]).filter(
-            (s): s is string => typeof s === "string"
-          )
-        );
-      }
-
-      return allGeneralizations;
-    } catch (err) {
-      log.error("Generalization callClaude failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return [];
     }
+
+    // Auto-update UserProfile from generalization results
+    const profileUpdates: {
+      expertise?: string[];
+      activeProjects?: string[];
+      currentFocus?: string[];
+    } = {};
+
+    if (Array.isArray(parsed.expertise) && parsed.expertise.length > 0) {
+      profileUpdates.expertise = (parsed.expertise as unknown[]).filter(
+        (e): e is string => typeof e === "string"
+      );
+    }
+    if (Array.isArray(parsed.projects) && parsed.projects.length > 0) {
+      profileUpdates.activeProjects = (parsed.projects as unknown[]).filter(
+        (p): p is string => typeof p === "string"
+      );
+    }
+    if (Array.isArray(parsed.workStyle) && parsed.workStyle.length > 0) {
+      profileUpdates.currentFocus = (parsed.workStyle as unknown[]).filter(
+        (s): s is string => typeof s === "string"
+      );
+    }
+
+    if (Object.keys(profileUpdates).length > 0) {
+      try {
+        this.userProfile.updateProfile("default", profileUpdates);
+        log.info("UserProfile updated from generalization", profileUpdates);
+      } catch (profileErr) {
+        log.warn("Failed to update UserProfile from generalization", {
+          error:
+            profileErr instanceof Error
+              ? profileErr.message
+              : String(profileErr),
+        });
+      }
+    }
+
+    // Return all generalizations as strings to be stored as derived_insight memories
+    const allGeneralizations: string[] = [...traits];
+    if (Array.isArray(parsed.workStyle)) {
+      allGeneralizations.push(
+        ...(parsed.workStyle as unknown[]).filter(
+          (s): s is string => typeof s === "string"
+        )
+      );
+    }
+
+    return allGeneralizations;
   }
 
   /**
@@ -428,67 +437,6 @@ export class DreamingEngine {
     return invalidated;
   }
 
-  /**
-   * Call Claude CLI asynchronously with a 2-minute timeout.
-   * Uses the same pattern as TranscriptMiner.
-   */
-  private async callClaude(
-    prompt: string,
-    model: string,
-    system?: string
-  ): Promise<string> {
-    const cmd: string[] = [
-      "claude",
-      "-p",
-      "--output-format",
-      "json",
-      "--model",
-      model,
-      "--no-session-persistence",
-      "--max-turns",
-      "1",
-      "--dangerously-skip-permissions",
-    ];
-
-    if (system) {
-      cmd.push("--system-prompt", system);
-    }
-
-    const proc = Bun.spawn(cmd, {
-      stdin: new TextEncoder().encode(prompt),
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-
-    const timeoutHandle = setTimeout(() => {
-      log.warn("Claude CLI timed out, killing process");
-      proc.kill();
-    }, 120_000); // 2-minute timeout
-
-    try {
-      const stdout = await new Response(proc.stdout).text();
-      const exitCode = await proc.exited;
-      clearTimeout(timeoutHandle);
-
-      if (exitCode !== 0) {
-        const stderr = await new Response(proc.stderr).text();
-        throw new Error(
-          `Claude CLI exited with code ${exitCode}: ${stderr.slice(0, 200)}`
-        );
-      }
-
-      const parsed = JSON.parse(stdout) as { result?: string };
-      if (typeof parsed.result !== "string") {
-        throw new Error(
-          `Unexpected Claude CLI output format: ${stdout.slice(0, 200)}`
-        );
-      }
-      return parsed.result;
-    } catch (err) {
-      clearTimeout(timeoutHandle);
-      throw err;
-    }
-  }
 }
 
 // ============================================================================

@@ -10,7 +10,7 @@
  * @module dreaming/__tests__/DreamingEngine.test
  */
 
-import { describe, it, expect, mock, beforeEach, spyOn } from "bun:test";
+import { describe, it, expect, mock } from "bun:test";
 import { DreamingEngine } from "../DreamingEngine.js";
 import type { DreamConfig, DreamResult } from "../DreamingEngine.js";
 import type { Memory } from "../../types/index.js";
@@ -18,6 +18,26 @@ import type { MemoryManager } from "../../memory/MemoryManager.js";
 import type { ContradictionDetector } from "../../graph/ContradictionDetector.js";
 import type { UserProfileStore } from "../../profile/UserProfile.js";
 import type { EventStore } from "../../storage/EventStore.js";
+
+// ============================================================================
+// Module-level mock for callClaude — must be at top level for Bun's process-global mocking
+// ============================================================================
+
+let _mockCallClaudeImpl: (prompt: string, opts: unknown) => Promise<string> = async () => {
+  throw new Error("callClaude mock not configured — call setMockCallClaude() first");
+};
+
+mock.module("../../llm/ClaudeCli.js", () => ({
+  callClaude: (prompt: string, opts: unknown) => _mockCallClaudeImpl(prompt, opts),
+}));
+
+function setMockCallClaude(returnValue: string): void {
+  _mockCallClaudeImpl = async () => returnValue;
+}
+
+function setMockCallClaudeThrow(error: Error): void {
+  _mockCallClaudeImpl = async () => { throw error; };
+}
 
 // ============================================================================
 // Helpers
@@ -97,12 +117,11 @@ function makeContradictionDetector(isContradiction = false): ContradictionDetect
 }
 
 // ============================================================================
-// Mocking callClaude — patch prototype before instantiation
+// patchCallClaude — now delegates to module-level mock
 // ============================================================================
 
-function patchCallClaude(engine: DreamingEngine, returnValue: string): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (engine as any).callClaude = mock(async () => returnValue);
+function patchCallClaude(_engine: DreamingEngine, returnValue: string): void {
+  setMockCallClaude(returnValue);
 }
 
 // ============================================================================
@@ -164,7 +183,8 @@ describe("DreamingEngine", () => {
       expect(results).toHaveLength(0);
     });
 
-    it("should return empty array when callClaude throws", async () => {
+    it("should throw when callClaude throws (error propagates to dream() catch block)", async () => {
+      setMockCallClaudeThrow(new Error("CLI unavailable"));
       const engine = new DreamingEngine(
         makeMemoryManager(),
         null,
@@ -172,11 +192,8 @@ describe("DreamingEngine", () => {
         makeEventStore(),
         DEFAULT_CONFIG
       );
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (engine as any).callClaude = mock(async () => { throw new Error("CLI unavailable"); });
 
-      const results = await engine.deduce([makeMemory()]);
-      expect(results).toHaveLength(0);
+      await expect(engine.deduce([makeMemory()])).rejects.toThrow("CLI unavailable");
     });
   });
 
@@ -367,6 +384,7 @@ describe("DreamingEngine", () => {
       expect(typeof result.contradictions).toBe("number");
       expect(typeof result.profileUpdates).toBe("number");
       expect(typeof result.durationMs).toBe("number");
+      expect(Array.isArray(result.errors)).toBe(true);
     });
 
     it("should skip dreaming when not enough source memories", async () => {

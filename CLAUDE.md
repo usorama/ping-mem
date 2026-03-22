@@ -49,9 +49,11 @@ bun run dist/mcp/cli.js  # MCP stdio
 
 **Worklog**: `worklog_record`, `worklog_list`
 
+**Mining**: `transcript_mine`, `dreaming_run`, `insights_list`
+
 ## Web UI & Admin
 
-Routes: `/ui` `/ui/memories` `/ui/diagnostics` `/ui/ingestion` `/ui/agents` `/ui/knowledge` `/ui/sessions` `/ui/events` `/ui/worklog` `/admin`
+Routes: `/ui` `/ui/memories` `/ui/diagnostics` `/ui/ingestion` `/ui/agents` `/ui/knowledge` `/ui/sessions` `/ui/events` `/ui/worklog` `/ui/mining` `/ui/insights` `/ui/profile` `/admin`
 
 ## Deployment
 

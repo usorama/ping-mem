@@ -2673,10 +2673,32 @@ export class RESTPingMemServer {
     this.app.post("/api/v1/mining/start", async (c) => {
       try {
         let body: Record<string, unknown> = {};
-        try { body = (await c.req.json()) as Record<string, unknown>; } catch { /* body is optional */ }
+        const contentType = c.req.header("content-type") ?? "";
+        if (contentType.includes("application/json")) {
+          try {
+            body = (await c.req.json()) as Record<string, unknown>;
+          } catch {
+            return c.json<RESTErrorResponse>(
+              { error: "Bad Request", message: "Malformed JSON body" },
+              400
+            );
+          }
+        }
 
-        const limit = typeof body.limit === "number" ? body.limit : undefined;
-        const project = typeof body.project === "string" ? body.project : undefined;
+        const rawLimit = typeof body.limit === "number" ? body.limit : undefined;
+        const limit = rawLimit !== undefined
+          ? Math.min(Math.max(Math.floor(rawLimit), 1), 50)
+          : undefined;
+
+        const rawProject = typeof body.project === "string" ? body.project : undefined;
+        if (rawProject !== undefined && !/^[a-zA-Z0-9._-]{1,128}$/.test(rawProject)) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "Invalid project name. Must match /^[a-zA-Z0-9._-]{1,128}$/." },
+            400
+          );
+        }
+        const project = rawProject;
+
         const mineOptions: { limit?: number; project?: string } = {};
         if (limit !== undefined) mineOptions.limit = limit;
         if (project !== undefined) mineOptions.project = project;
@@ -2743,8 +2765,12 @@ export class RESTPingMemServer {
           } | null;
 
           stats = row ?? { total: 0, pending: 0, processing: 0, completed: 0, failed: 0, facts_extracted: 0 };
-        } catch {
-          // Table doesn't exist yet — mining hasn't run
+        } catch (err) {
+          // Only swallow "no such table" — mining hasn't run yet
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!msg.includes("no such table")) {
+            throw err;
+          }
           stats = { total: 0, pending: 0, processing: 0, completed: 0, failed: 0, facts_extracted: 0 };
         }
 
@@ -3452,6 +3478,24 @@ export class RESTPingMemServer {
       knowledgeStore: this.knowledgeStore,
       graphManager: this.graphManager ?? undefined,
       qdrantClient: this.qdrantClient ?? undefined,
+      miningStart: async (options) => {
+        if (!this.userProfileStore) {
+          this.userProfileStore = new UserProfileStore();
+        }
+        const sessionId = this.currentSessionId;
+        if (!sessionId) {
+          throw new Error("No active session. Start a session first.");
+        }
+        if (!this.transcriptMiner) {
+          const memoryManager = await this.getMemoryManager(sessionId);
+          this.transcriptMiner = new TranscriptMiner(
+            this.eventStore.getDatabase(),
+            memoryManager,
+            this.userProfileStore
+          );
+        }
+        return this.transcriptMiner.mine(options);
+      },
     });
   }
 

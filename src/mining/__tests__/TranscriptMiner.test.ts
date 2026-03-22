@@ -38,7 +38,6 @@ function createConfig(transcriptDir: string): MiningConfig {
     transcriptDir,
     batchSize: 5,
     skipSubagents: true,
-    maxSessionAge: undefined,
   };
 }
 

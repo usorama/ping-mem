@@ -48,6 +48,8 @@ export interface UIDependencies {
   knowledgeStore?: KnowledgeStore | undefined;
   graphManager?: GraphManager | undefined;
   qdrantClient?: QdrantClientWrapper | undefined;
+  /** Callback to trigger mining from the UI (bypasses API key auth) */
+  miningStart?: (options: { limit?: number; project?: string }) => Promise<unknown>;
 }
 
 export function registerUIRoutes(app: Hono<AppEnv>, deps: UIDependencies): void {
@@ -136,6 +138,33 @@ export function registerUIRoutes(app: Hono<AppEnv>, deps: UIDependencies): void 
   app.get("/ui/mining", registerMiningRoutes(deps));
   const miningPartials = registerMiningPartialRoutes(deps);
   app.get("/ui/partials/mining", miningPartials.dashboard);
+
+  // Mining start proxy — allows Basic-Auth UI to trigger mining without API key
+  app.post("/ui/api/mining/start", async (c) => {
+    if (!deps.miningStart) {
+      return c.json({ error: "Mining not available" }, 503);
+    }
+    let body: Record<string, unknown> = {};
+    try { body = (await c.req.json()) as Record<string, unknown>; } catch { /* body is optional */ }
+    const rawLimit = typeof body.limit === "number" ? body.limit : undefined;
+    const limit = rawLimit !== undefined
+      ? Math.min(Math.max(Math.floor(rawLimit), 1), 50)
+      : undefined;
+    const rawProject = typeof body.project === "string" ? body.project : undefined;
+    if (rawProject !== undefined && !/^[a-zA-Z0-9._-]{1,128}$/.test(rawProject)) {
+      return c.json({ error: "Invalid project name" }, 400);
+    }
+    try {
+      const mineOptions: { limit?: number; project?: string } = {};
+      if (limit !== undefined) mineOptions.limit = limit;
+      if (rawProject !== undefined) mineOptions.project = rawProject;
+      const result = await deps.miningStart(mineOptions);
+      return c.json({ data: result }, 200);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return c.json({ error: msg }, 500);
+    }
+  });
 
   // Profile
   app.get("/ui/profile", registerProfileRoutes(deps));

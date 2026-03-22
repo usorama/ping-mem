@@ -27,7 +27,7 @@ export function registerMiningRoutes(deps: UIDependencies) {
           <button
             class="btn btn-sm"
             style="background:var(--accent);color:#fff;border:none;cursor:pointer;padding:6px 16px;border-radius:4px"
-            hx-post="/api/v1/mining/start"
+            hx-post="/ui/api/mining/start"
             hx-target="#mining-result"
             hx-swap="innerHTML"
             hx-confirm="Start mining transcripts? This may take a while."

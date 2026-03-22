@@ -173,7 +173,8 @@ export type BuiltInCategory =
   | "fact"
   | "observation"
   | "knowledge_entry"
-  | "digest";
+  | "digest"
+  | "derived_insight";
 
 /**
  * Memory categories for organization.

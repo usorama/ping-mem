@@ -6,7 +6,7 @@
  */
 
 import type { Context } from "hono";
-import { renderLayout, escapeHtml, getCspNonce, getCsrfToken } from "./layout.js";
+import { renderLayout, getCspNonce, getCsrfToken } from "./layout.js";
 import { loadingIndicator, emptyState } from "./components.js";
 import { renderInsightsTable } from "./partials/insights.js";
 import type { UIDependencies } from "./routes.js";

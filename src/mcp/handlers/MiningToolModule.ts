@@ -128,7 +128,7 @@ export class MiningToolModule implements ToolModule {
     });
 
     return {
-      success: true,
+      success: result.errors.length === 0,
       sessionsScanned: result.sessionsScanned,
       sessionsProcessed: result.sessionsProcessed,
       factsExtracted: result.factsExtracted,
@@ -177,12 +177,13 @@ export class MiningToolModule implements ToolModule {
     });
 
     return {
-      success: true,
+      success: result.errors.length === 0,
       deductions: result.deductions,
       generalizations: result.generalizations,
       contradictions: result.contradictions,
       profileUpdates: result.profileUpdates,
       durationMs: result.durationMs,
+      errors: result.errors,
       ...(result.costEstimate && { costEstimate: result.costEstimate }),
     };
   }
