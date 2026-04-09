@@ -441,45 +441,52 @@ export class ContextToolModule implements ToolModule {
 
     if (shouldExtract && this.state.graphManager) {
       if (useLlmExtraction && this.state.llmEntityExtractor) {
-        // LLM extraction for high-value memories
+        // LLM extraction for high-value memories — split into separate try blocks so a graph
+        // write failure does not trigger the regex fallback (which would re-attempt batchCreateEntities
+        // and risk creating duplicates).
+        let llmResult: Awaited<ReturnType<typeof this.state.llmEntityExtractor.extract>> | null = null;
         try {
-          const llmResult = await this.state.llmEntityExtractor.extract(value);
-
-          if (llmResult.entities.length > 0) {
-            const createdEntities = await this.state.graphManager.batchCreateEntities(llmResult.entities);
-            entityIds = createdEntities.map((e) => e.id);
-          } else {
-            entityIds = [];
-          }
-
-          // Store relationships if any
-          if (llmResult.relationships.length > 0) {
-            for (const rel of llmResult.relationships) {
-              try {
-                await this.state.graphManager.createRelationship(rel);
-              } catch (error) {
-                log.warn("Relationship storage failed", { error: error instanceof Error ? error.message : String(error) });
-              }
-            }
-          }
+          llmResult = await this.state.llmEntityExtractor.extract(value);
         } catch (error) {
           log.warn("LLM entity extraction failed, falling back to regex", { error: error instanceof Error ? error.message : String(error) });
-          // Fallback to regex extraction on LLM failure
-          if (this.state.entityExtractor) {
-            const extractionContext: { key: string; value: string; category?: string } = {
-              key: args.key as string,
-              value,
-            };
-            if (category !== undefined) {
-              extractionContext.category = category;
-            }
-            const extractResult = this.state.entityExtractor.extractFromContext(extractionContext);
-            if (extractResult.entities.length > 0) {
-              const createdEntities = await this.state.graphManager.batchCreateEntities(extractResult.entities);
+        }
+
+        if (llmResult) {
+          // Graph write — failure here does NOT trigger regex fallback
+          try {
+            if (llmResult.entities.length > 0) {
+              const createdEntities = await this.state.graphManager.batchCreateEntities(llmResult.entities);
               entityIds = createdEntities.map((e) => e.id);
             } else {
               entityIds = [];
             }
+          } catch (error) {
+            log.warn("Graph entity write failed after LLM extraction", { error: error instanceof Error ? error.message : String(error) });
+          }
+
+          // Store relationships if any
+          for (const rel of llmResult.relationships) {
+            try {
+              await this.state.graphManager.createRelationship(rel);
+            } catch (error) {
+              log.warn("Relationship storage failed", { sourceId: rel.sourceId, targetId: rel.targetId, type: rel.type, error: error instanceof Error ? error.message : String(error) });
+            }
+          }
+        } else if (this.state.entityExtractor) {
+          // Fallback to regex extraction on LLM failure
+          const extractionContext: { key: string; value: string; category?: string } = {
+            key: args.key as string,
+            value,
+          };
+          if (category !== undefined) {
+            extractionContext.category = category;
+          }
+          const extractResult = this.state.entityExtractor.extractFromContext(extractionContext);
+          if (extractResult.entities.length > 0) {
+            const createdEntities = await this.state.graphManager.batchCreateEntities(extractResult.entities);
+            entityIds = createdEntities.map((e) => e.id);
+          } else {
+            entityIds = [];
           }
         }
       } else if (this.state.entityExtractor) {
@@ -964,6 +971,12 @@ export class ContextToolModule implements ToolModule {
     const filtered = results.filter((r) => (r.score ?? 0) >= minScore);
 
     if (filtered.length === 0) {
+      // Emit RECALL_MISS event fire-and-forget for observability and future consolidation triggers
+      void this.state.eventStore.createEvent(
+        this.state.currentSessionId ?? "system",
+        "RECALL_MISS",
+        { query: queryText, timestamp: Date.now() }
+      ).catch((err) => { log.warn("Failed to emit RECALL_MISS event", { error: err instanceof Error ? err.message : String(err) }); });
       return { recalled: false, reason: "no relevant memories found", context: "" };
     }
 

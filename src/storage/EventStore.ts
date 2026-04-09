@@ -897,31 +897,32 @@ export class EventStore {
   /**
    * Get database statistics
    */
-  getStats(): { eventCount: number; checkpointCount: number; dbSize: number } {
+  getStats(): { eventCount: number | null; checkpointCount: number | null; dbSize: number | null } {
     // Wrap count queries individually: a lock or transient corruption on one table
     // should not prevent reporting stats for the other table.
-    let eventCount = 0;
+    let eventCount: number | null = null;
     try {
       eventCount = (this.stmtGetEventCount.get() as { count: number }).count;
-    } catch {
-      // Transient SQLite error — return 0 rather than crashing the health monitor caller.
+    } catch (err) {
+      log.warn("getStats: failed to read event count", { error: err instanceof Error ? err.message : String(err) });
     }
-    let checkpointCount = 0;
+    let checkpointCount: number | null = null;
     try {
       checkpointCount = (this.stmtGetCheckpointCount.get() as { count: number }).count;
-    } catch {
-      // Transient SQLite error — return 0 rather than crashing.
+    } catch (err) {
+      log.warn("getStats: failed to read checkpoint count", { error: err instanceof Error ? err.message : String(err) });
     }
 
-    let dbSize = 0;
+    let dbSize: number | null = null;
     if (this.config.dbPath !== ":memory:") {
       try {
         const stats = fs.statSync(this.config.dbPath);
         dbSize = stats.size;
-      } catch {
-        // File transiently inaccessible (e.g., being rotated or on a slow mount).
-        // Return 0 rather than propagating — callers (health monitor) should not crash.
+      } catch (err) {
+        log.warn("getStats: failed to stat db file", { error: err instanceof Error ? err.message : String(err) });
       }
+    } else {
+      dbSize = 0;
     }
 
     return { eventCount, checkpointCount, dbSize };
@@ -1035,6 +1036,27 @@ export class EventStore {
   isAgentActive(agentId: string): boolean {
     const row = this.stmtIsAgentActive.get({ $agent_id: agentId, $now: new Date().toISOString() });
     return row !== null && row !== undefined;
+  }
+
+  /**
+   * Prune events older than retentionDays.
+   * OBSERVATION_CAPTURED events are pruned more aggressively (retentionDays / 4)
+   * since they are high-frequency and low-value after a short window.
+   * Returns the number of rows deleted.
+   */
+  pruneOldEvents(retentionDays: number): number {
+    const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
+    const obsRetentionDays = Math.max(1, Math.floor(retentionDays / 4));
+    const obsCutoff = new Date(Date.now() - obsRetentionDays * 86_400_000).toISOString();
+
+    const r1 = this.db
+      .prepare("DELETE FROM events WHERE event_type = 'OBSERVATION_CAPTURED' AND timestamp < ?")
+      .run(obsCutoff);
+    const r2 = this.db
+      .prepare("DELETE FROM events WHERE event_type != 'OBSERVATION_CAPTURED' AND timestamp < ?")
+      .run(cutoff);
+
+    return (r1.changes ?? 0) + (r2.changes ?? 0);
   }
 
   /**

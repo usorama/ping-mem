@@ -67,6 +67,12 @@ services:
       # Multi-agent memory settings (v2)
       # PING_MEM_MAX_AGENTS: Maximum number of registered agents (default: 100)
       - PING_MEM_MAX_AGENTS=${PING_MEM_MAX_AGENTS:-100}
+      # Embedding provider configuration
+      # Production typically uses Gemini or OpenAI (Ollama not available on VPS)
+      - OLLAMA_URL=${OLLAMA_URL:-}
+      - OLLAMA_EMBED_MODEL=${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
     volumes:
       - ping-mem-data:/data
     networks:

@@ -14,6 +14,7 @@ import type { ApiKeyManager } from "../admin/ApiKeyManager.js";
 import type { AdminStore } from "../admin/AdminStore.js";
 import type { QdrantClientWrapper } from "../search/QdrantClient.js";
 import type { GraphManager } from "../graph/GraphManager.js";
+import type { Neo4jClient } from "../graph/Neo4jClient.js";
 import type { HealthMonitor } from "../observability/HealthMonitor.js";
 import type { EventStore } from "../storage/EventStore.js";
 
@@ -60,6 +61,8 @@ export interface HTTPServerConfig {
   graphManager?: GraphManager | undefined;
   /** HealthMonitor for observability status endpoint (optional) */
   healthMonitor?: HealthMonitor | undefined;
+  /** Neo4jClient for warm-up connection reset (optional) */
+  neo4jClient?: Neo4jClient | undefined;
   /** Shared EventStore to avoid duplicate SQLite connections (optional) */
   eventStore?: EventStore | undefined;
 }

@@ -268,9 +268,17 @@ export class DreamingEngine {
       model: "claude-sonnet-4-6",
       system: DEDUCTION_SYSTEM,
     });
-    const parsed = JSON.parse(raw) as unknown;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      const match = raw.match(/\[[\s\S]*\]/);
+      if (match) {
+        try { parsed = JSON.parse(match[0]); } catch { /* fall through */ }
+      }
+    }
     if (!Array.isArray(parsed)) {
-      log.warn("Deduction response was not an array", { raw });
+      log.warn("Deduction response was not a valid JSON array", { rawLength: raw.length });
       return [];
     }
     return parsed.filter((item): item is string => typeof item === "string");
@@ -293,7 +301,23 @@ export class DreamingEngine {
       model: "claude-sonnet-4-6",
       system: GENERALIZATION_SYSTEM,
     });
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        try {
+          parsed = JSON.parse(match[0]) as Record<string, unknown>;
+        } catch {
+          log.warn("Generalization response was not valid JSON", { rawLength: raw.length });
+          return [];
+        }
+      } else {
+        log.warn("Generalization response contained no JSON object", { rawLength: raw.length });
+        return [];
+      }
+    }
 
     const traits: string[] = [];
     if (Array.isArray(parsed.traits)) {

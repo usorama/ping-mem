@@ -490,6 +490,15 @@ export class HybridSearchEngine {
   }
 
   /**
+   * Returns true when the engine is configured for keyword-only search
+   * (semantic weight is zero, no embedding service will be used).
+   * Used by /health to surface qdrant fallback state.
+   */
+  isKeywordOnly(): boolean {
+    return this.config.weights.semantic === 0;
+  }
+
+  /**
    * Index a document for hybrid search
    * Adds to both semantic (via Qdrant/VectorIndex) and keyword (BM25) indexes
    */
@@ -666,12 +675,10 @@ export class HybridSearchEngine {
         this.semanticSearch(query, options).then((results) => {
           resultsByMode.set("semantic", this.rankResults(results));
         }).catch((error) => {
-          throw new SearchModeError(
-            `Semantic search failed: ${error instanceof Error ? error.message : String(error)}`,
-            "semantic",
-            "SEMANTIC_SEARCH_FAILED",
-            error instanceof Error ? error : undefined
-          );
+          // Gracefully degrade: log the failure and continue with keyword results
+          log.warn("Semantic search failed — degrading to keyword-only results", {
+            error: error instanceof Error ? error.message : String(error),
+          });
         })
       );
     }

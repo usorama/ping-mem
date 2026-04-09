@@ -415,8 +415,8 @@ export class IngestionService {
   }
 
   // Structural intelligence queries
-  async queryImpact(projectId: string, filePath: string, maxDepth?: number): Promise<Array<{ file: string; depth: number; via: string[] }>> {
-    return this.codeGraph.queryImpact(projectId, filePath, maxDepth);
+  async queryImpact(projectId: string, filePath: string, maxDepth?: number, limit?: number): Promise<Array<{ file: string; depth: number; via: string[] }>> {
+    return this.codeGraph.queryImpact(projectId, filePath, maxDepth, limit);
   }
   async queryBlastRadius(projectId: string, filePath: string, maxDepth?: number): Promise<Array<{ file: string; depth: number }>> {
     return this.codeGraph.queryBlastRadius(projectId, filePath, maxDepth);
@@ -436,12 +436,19 @@ export class IngestionService {
     const projectPath = path.resolve(projectDir);
     const allProjectFiles = new Set(ingestionResult.codeFiles.map((f) => f.filePath));
     const files: Array<{ filePath: string; content: string }> = [];
+    let skippedFiles = 0;
     for (const codeFile of ingestionResult.codeFiles) {
       try {
         const fullPath = path.join(projectPath, codeFile.filePath);
         const content = fs.readFileSync(fullPath, "utf-8");
         files.push({ filePath: codeFile.filePath, content });
-      } catch { /* skip unreadable files */ }
+      } catch (err) {
+        skippedFiles++;
+        log.debug("Skipped unreadable file during structural analysis", { file: codeFile.filePath, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (skippedFiles > 0) {
+      log.warn("Structural analysis skipped unreadable files", { skippedFiles, totalFiles: ingestionResult.codeFiles.length });
     }
     const structuralResult = this.structuralAnalyzer.analyzeProject(files, allProjectFiles);
     if (structuralResult.edges.length > 0) {

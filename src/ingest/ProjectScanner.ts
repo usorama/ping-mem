@@ -59,7 +59,7 @@ const DEFAULT_EXCLUDE_EXTENSIONS = new Set([
   ".lock",
   // Phase 1.3: Extended exclude extensions
   ".d.ts", ".map", ".min.js", ".min.css", ".snap",
-  ".csv", ".log", ".sql", ".wasm",
+  ".csv", ".log", ".wasm",
 ]);
 
 const MANIFEST_SCHEMA_VERSION = 1;

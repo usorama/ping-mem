@@ -29,6 +29,20 @@ const BASE_URL = process.env.PING_MEM_REST_URL ?? "http://localhost:3003";
 const ADMIN_USER = process.env.PING_MEM_ADMIN_USER ?? "";
 const ADMIN_PASS = process.env.PING_MEM_ADMIN_PASS ?? "";
 
+// Configurable tool call timeout (default: 15s for interactive tools)
+const TOOL_TIMEOUT_MS = parseInt(process.env["MCP_TOOL_TIMEOUT_MS"] ?? "15000", 10);
+
+// Long-running tools get a fixed 120s budget regardless of TOOL_TIMEOUT_MS
+const LONG_RUNNING_TOOLS = new Set([
+  "codebase_ingest",
+  "codebase_verify",
+  "transcript_mine",
+  "dreaming_run",
+  "memory_consolidate",
+  "memory_compress",
+  "memory_maintain",
+]);
+
 const AUTH_HEADER =
   ADMIN_USER
     ? "Basic " + Buffer.from(`${ADMIN_USER}:${ADMIN_PASS}`).toString("base64")
@@ -66,6 +80,28 @@ export async function tryStartDocker(): Promise<void> {
   }
 }
 
+/**
+ * Poll /health every pollIntervalMs until it returns 200 or maxWaitMs elapses.
+ * Returns true if the server becomes healthy within the window, false on timeout.
+ */
+export async function waitForServer(
+  baseUrl: string,
+  maxWaitMs: number = 10_000,
+  pollIntervalMs: number = 2_000
+): Promise<boolean> {
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    const healthy = await checkDockerHealth(baseUrl);
+    if (healthy) return true;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, Math.min(pollIntervalMs, remaining))
+    );
+  }
+  return false;
+}
+
 // ============================================================================
 // Tool call proxy
 // ============================================================================
@@ -84,6 +120,9 @@ export async function proxyToolCall(
     headers["Authorization"] = authHeader;
   }
 
+  // Long-running tools get a fixed 120s budget; interactive tools use TOOL_TIMEOUT_MS
+  const timeoutMs = LONG_RUNNING_TOOLS.has(name) ? 120_000 : TOOL_TIMEOUT_MS;
+
   let response: Response;
   try {
     response = await fetch(
@@ -92,7 +131,7 @@ export async function proxyToolCall(
         method: "POST",
         headers,
         body: JSON.stringify({ args }),
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(timeoutMs),
       }
     );
   } catch (err) {
@@ -183,14 +222,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // Startup
 // ============================================================================
 
-const isHealthy = await checkDockerHealth(BASE_URL);
+let isHealthy = await checkDockerHealth(BASE_URL);
 if (!isHealthy) {
-  process.stderr.write(
-    `[ping-mem proxy] WARNING: Docker REST server not reachable at ${BASE_URL}. ` +
-    `Tool calls will fail until Docker is up.\n` +
-    `Attempting: docker compose up -d ping-mem ...\n`
-  );
+  process.stderr.write(`[ping-mem proxy] Docker not reachable at ${BASE_URL} — starting containers...\n`);
   await tryStartDocker();
+  isHealthy = await waitForServer(BASE_URL, 10_000);
+  if (!isHealthy) {
+    process.stderr.write(
+      `[ping-mem proxy] WARNING: Server not ready within 10s. Tool calls will fail until Docker is up.\n`
+    );
+  } else {
+    process.stderr.write(`[ping-mem proxy] Server ready after startup wait.\n`);
+  }
 } else {
   process.stderr.write(`[ping-mem proxy] Connected to ${BASE_URL}\n`);
 }

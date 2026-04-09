@@ -150,8 +150,8 @@ const DEFAULT_TX_RETRY_TIME = 30000;
 export class Neo4jClient {
   private driver: Driver | null = null;
   private readonly config: ResolvedConfig;
-  private readonly servicePolicy: ServicePolicy;
-  private readonly writePolicy: ServicePolicy;
+  private servicePolicy: ServicePolicy;
+  private writePolicy: ServicePolicy;
 
   constructor(config: Neo4jClientConfig) {
     this.config = {
@@ -197,6 +197,54 @@ export class Neo4jClient {
       }
     });
     // Write circuit: log only, do not affect connected flag (reads may still work)
+    this.writePolicy.onStateChange((state) => {
+      if (state === "open") {
+        log.error("Write circuit OPEN — Neo4j write operations will fail fast", { state });
+      } else if (state === "half-open") {
+        log.info("Write circuit half-open — attempting write recovery", { state });
+      } else {
+        log.info("Write circuit recovered", { state });
+      }
+    });
+  }
+
+  /**
+   * Reset circuit breaker policies to CLOSED state.
+   *
+   * Called during warm-up (after disconnect/connect) to prevent a stale OPEN
+   * circuit from blocking the connectivity roundtrip probe. Post-wake, if the
+   * circuit opened on 5 consecutive failures, it stays OPEN until
+   * halfOpenAfterMs elapses. resetPolicies() creates fresh circuit objects in
+   * CLOSED state so neo4j_roundtrip in the warm-up succeeds immediately.
+   *
+   * Not for use in normal operation — rely on cockatiel half-open self-recovery
+   * instead.
+   */
+  resetPolicies(): void {
+    this.servicePolicy = createServicePolicy({
+      name: "neo4j",
+      consecutiveFailures: 5,
+      halfOpenAfterMs: 30_000,
+      maxRetries: 2,
+      timeoutMs: 15_000,
+    });
+    this.writePolicy = createServicePolicy({
+      name: "neo4j-write",
+      consecutiveFailures: 5,
+      halfOpenAfterMs: 30_000,
+      maxRetries: 0,
+      timeoutMs: 15_000,
+    });
+    // Re-register onStateChange log handlers on the new policy objects
+    this.servicePolicy.onStateChange((state) => {
+      if (state === "open") {
+        log.error("Read circuit OPEN — Neo4j operations will fail fast", { state });
+      } else if (state === "half-open") {
+        log.info("Read circuit half-open — attempting recovery", { state });
+      } else {
+        log.info("Read circuit recovered", { state });
+      }
+    });
     this.writePolicy.onStateChange((state) => {
       if (state === "open") {
         log.error("Write circuit OPEN — Neo4j write operations will fail fast", { state });

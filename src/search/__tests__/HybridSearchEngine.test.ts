@@ -799,7 +799,7 @@ describe("HybridSearchEngine", () => {
       ).rejects.toThrow(HybridSearchError);
     });
 
-    it("should throw SearchModeError on semantic search failure", async () => {
+    it("should gracefully degrade to empty results on semantic search failure", async () => {
       const failingEmbeddingService = {
         ...createMockEmbeddingService(),
         embed: vi.fn().mockRejectedValue(new Error("Embedding failed")),
@@ -810,9 +810,9 @@ describe("HybridSearchEngine", () => {
         qdrantClient,
       });
 
-      await expect(
-        engine.search("test query", { modes: ["semantic"] })
-      ).rejects.toThrow(SearchModeError);
+      // Should NOT throw — semantic failure degrades gracefully to keyword-only results
+      const results = await engine.search("test query", { modes: ["semantic"] });
+      expect(Array.isArray(results)).toBe(true);
     });
   });
 

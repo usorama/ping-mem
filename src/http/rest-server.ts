@@ -144,11 +144,13 @@ export class RESTPingMemServer {
   private writeLockManager: WriteLockManager;
   private qdrantClient: QdrantClientWrapper | null = null;
   private healthMonitor: HealthMonitor | null = null;
+  private neo4jClient: import("../graph/Neo4jClient.js").Neo4jClient | null = null;
   private ingestionQueue: IngestionQueue | null = null;
   private observationCaptureService: ObservationCaptureService;
   private transcriptMiner: TranscriptMiner | null = null;
   private dreamingEngine: ReturnType<typeof createDreamingEngine> | null = null;
   private userProfileStore: UserProfileStore | null = null;
+  private warmUpInProgress = false;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -201,6 +203,9 @@ export class RESTPingMemServer {
     }
     if (config.healthMonitor) {
       this.healthMonitor = config.healthMonitor;
+    }
+    if (config.neo4jClient) {
+      this.neo4jClient = config.neo4jClient;
     }
     if (config.ingestionService) {
       this.ingestionQueue = new IngestionQueue(config.ingestionService);
@@ -363,17 +368,52 @@ export class RESTPingMemServer {
       // Health endpoint is ALWAYS unauthenticated — Docker healthchecks,
       // load balancers, and monitoring tools must reach it without API keys.
 
-      // Lightweight liveness check — only pings SQLite (core dependency).
-      // Full dependency probing is at /api/v1/observability/status.
+      // Primary liveness gate: SQLite must be reachable.
       const alive = await this.eventStore.ping();
-      if (alive) {
-        return c.json({
-          status: "ok",
-          timestamp: new Date().toISOString(),
-        });
+      if (!alive) {
+        log.error("Health check failed — SQLite unreachable");
+        return c.json({ status: "unhealthy", error: "SQLite unreachable" }, 503);
       }
-      log.error("Health check failed — SQLite unreachable");
-      return c.json({ status: "unhealthy", error: "SQLite unreachable" }, 503);
+
+      // Per-component status from HealthMonitor cached snapshot (zero inline latency).
+      // If no snapshot yet (first 60s), fall back to passive object-existence check.
+      const components: Record<string, string> = { sqlite: "ok" };
+      let degraded = false;
+
+      const snapshot = this.healthMonitor?.getStatus()?.lastSnapshot;
+      if (snapshot) {
+        // Extract .status from HealthComponent objects — do NOT assign raw objects
+        for (const [key, component] of Object.entries(snapshot.components)) {
+          components[key] = typeof component === "string" ? component : (component as { status: string }).status;
+        }
+        degraded = snapshot.status !== "ok";
+      } else {
+        // No snapshot yet (initializing): passive fallback with "initializing" status
+        if (this.graphManager) {
+          components["neo4j"] = "initializing";
+        } else if (process.env["NEO4J_URI"]) {
+          components["neo4j"] = "not_connected";
+          degraded = true;
+        }
+        if (this.qdrantClient) {
+          components["qdrant"] = "initializing";
+        } else if (process.env["QDRANT_URL"]) {
+          components["qdrant"] = "not_connected";
+          degraded = true;
+        }
+      }
+
+      // G11: Surface Qdrant keyword-only fallback
+      if (this.config.hybridSearchEngine?.isKeywordOnly?.()) {
+        components["search_mode"] = "keyword_only";
+      }
+
+      return c.json({
+        status: degraded ? "degraded" : "ok",
+        timestamp: new Date().toISOString(),
+        components,
+        embeddingProvider: this.config.embeddingService?.providerName ?? "none (keyword-only)",
+      });
     });
 
     this.app.get("/api/v1/observability/status", async (c) => {
@@ -424,6 +464,126 @@ export class RESTPingMemServer {
         });
       } catch (error) {
         return this.handleError(c, error);
+      }
+    });
+
+    // GET /api/v1/internal/readiness — deep dependency probe for ping-guard / post-wake checks
+    // Auth: API key required (inherits from /api/* authMiddleware)
+    this.app.get("/api/v1/internal/readiness", async (c) => {
+      try {
+        const snapshot = await probeSystemHealth({
+          eventStore: this.eventStore,
+          ...(this.graphManager ? { graphManager: this.graphManager } : {}),
+          ...(this.qdrantClient ? { qdrantClient: this.qdrantClient } : {}),
+          diagnosticsStore: this.diagnosticsStore,
+          skipIntegrityCheck: true,
+        });
+        const ready = snapshot.status === "ok";
+        return c.json({ ready, checks: snapshot.components }, ready ? 200 : (503 as 503));
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
+    // POST /api/v1/internal/warm-up — force connection pool reset + verify capability chain
+    // Called by ping-guard after container recovery to ensure stale circuits are cleared.
+    // Auth: API key required (inherits from /api/* authMiddleware)
+    this.app.post("/api/v1/internal/warm-up", async (c) => {
+      if (this.warmUpInProgress) {
+        return c.json({ error: "warm-up already in progress" }, 409);
+      }
+      this.warmUpInProgress = true;
+      const warmUpStart = Date.now();
+      const steps: Array<{ name: string; status: "ok" | "failed" | "skipped"; durationMs: number; error?: string }> = [];
+
+      const runStep = async (
+        name: string,
+        fn: () => Promise<void>
+      ): Promise<boolean> => {
+        const t = Date.now();
+        try {
+          await fn();
+          steps.push({ name, status: "ok", durationMs: Date.now() - t });
+          return true;
+        } catch (err) {
+          steps.push({
+            name,
+            status: "failed",
+            durationMs: Date.now() - t,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return false;
+        }
+      };
+
+      try {
+        // Step 1: sqlite_ping
+        await runStep("sqlite_ping", async () => {
+          const ok = await this.eventStore.ping();
+          if (!ok) throw new Error("SQLite ping returned false");
+        });
+
+        // Step 2: neo4j_driver_reset — disconnect → resetPolicies → connect
+        if (this.neo4jClient) {
+          await runStep("neo4j_driver_reset", async () => {
+            await this.neo4jClient!.disconnect();
+            this.neo4jClient!.resetPolicies();
+            await this.neo4jClient!.connect();
+          });
+
+          // Step 3: neo4j_roundtrip — verify with a lightweight read query
+          await runStep("neo4j_roundtrip", async () => {
+            const result = await Promise.race([
+              this.neo4jClient!.executeQuery<{ count: number }>(
+                "MATCH (n) RETURN count(n) AS count LIMIT 1"
+              ),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("Neo4j roundtrip timeout")), 4_000)
+              ),
+            ]);
+            if (!Array.isArray(result)) throw new Error("Unexpected Neo4j response");
+          });
+        } else {
+          steps.push({ name: "neo4j_driver_reset", status: "skipped", durationMs: 0 });
+          steps.push({ name: "neo4j_roundtrip", status: "skipped", durationMs: 0 });
+        }
+
+        // Step 4: qdrant_roundtrip — use existing healthCheck() method
+        if (this.qdrantClient) {
+          await runStep("qdrant_roundtrip", async () => {
+            const ok = await Promise.race([
+              this.qdrantClient!.healthCheck(),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("Qdrant roundtrip timeout")), 2_000)
+              ),
+            ]);
+            if (!ok) throw new Error("Qdrant healthCheck returned false");
+          });
+        } else {
+          steps.push({ name: "qdrant_roundtrip", status: "skipped", durationMs: 0 });
+        }
+
+        // Step 5: canary_roundtrip — write/read/delete via EventStore
+        await runStep("canary_roundtrip", async () => {
+          const canarySessionId = "warm-up-canary" as import("../types/index.js").SessionId;
+          const event = await this.eventStore.createEvent(
+            canarySessionId,
+            "TOOL_RUN_RECORDED",
+            { key: "warm-up-canary", value: "ping" },
+          );
+          const readBack = await this.eventStore.getById(event.eventId);
+          if (!readBack) throw new Error("Canary event not found after write");
+          this.eventStore.deleteSessions([canarySessionId]);
+        });
+
+        const success = steps.every((s) => s.status !== "failed");
+        return c.json({
+          success,
+          durationMs: Date.now() - warmUpStart,
+          steps,
+        });
+      } finally {
+        this.warmUpInProgress = false;
       }
     });
 
@@ -1700,7 +1860,7 @@ export class RESTPingMemServer {
         const eventStats = this.eventStore.getStats();
         const stats = {
           eventStore: {
-            totalEvents: eventStats.eventCount,
+            totalEvents: eventStats.eventCount ?? 0,
           },
           sessions: (() => {
             const allSessions = this.sessionManager.listSessions();
@@ -2819,7 +2979,9 @@ export class RESTPingMemServer {
           this.transcriptMiner = new TranscriptMiner(
             this.eventStore.getDatabase(),
             memoryManager,
-            this.userProfileStore
+            this.userProfileStore,
+            undefined,
+            this.eventStore
           );
         }
 
@@ -3605,7 +3767,9 @@ export class RESTPingMemServer {
           this.transcriptMiner = new TranscriptMiner(
             this.eventStore.getDatabase(),
             memoryManager,
-            this.userProfileStore
+            this.userProfileStore,
+            undefined,
+            this.eventStore
           );
         }
         return this.transcriptMiner.mine(options);

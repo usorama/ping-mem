@@ -75,8 +75,8 @@ export function registerDashboardRoutes(deps: UIDependencies) {
         <div class="stats-grid">
           ${statCard("Memories", memoryCount, "across all sessions")}
           ${statCard("Sessions", sessions.length, `${activeSessions.length} active`)}
-          ${statCard("Events", eventStats.eventCount)}
-          ${statCard("Checkpoints", eventStats.checkpointCount)}
+          ${statCard("Events", eventStats.eventCount ?? "?")}
+          ${statCard("Checkpoints", eventStats.checkpointCount ?? "?")}
           ${statCard("Agents", agentCount, "registered")}
           ${statCard("Knowledge", knowledgeCount, "entries")}
         </div>

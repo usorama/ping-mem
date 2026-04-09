@@ -74,6 +74,10 @@ src/
 └── validation/        # Input validation (Zod)
 ```
 
+## DreamingEngine LLM Dependency
+
+DreamingEngine calls `callClaude()` directly (bypassing the Ollama/Gemini fallback chain). Claude API access is required for dreaming. In environments without Claude API access, dreaming will silently fail. Future work: route through LLMProxy.
+
 ## Key Design Decisions
 
 - **SQLite**: Core storage (always available, no deps)
