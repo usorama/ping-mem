@@ -2,7 +2,7 @@
 title: "feat: Full Capability Activation — Harness, Primitives, Architecture Gaps + Regressions"
 type: feat
 date: 2026-04-09
-status: ready
+status: complete
 github_issues: [92, 93, 94, 95, 96, 97, 98, 99, 101, 102]
 github_pr: null
 research: docs/ping-mem-research/capability-audit-verified.md (31 claims, 28 paper-verified); second-opinion Codex+Gemini 2026-04-09; research agents 2026-04-09
