@@ -494,6 +494,7 @@ export class TemporalCodeGraph {
       `
       UNWIND $items AS item
       MATCH (f:File { fileId: item.fileId })
+      WITH f, item WHERE f IS NOT NULL
       MERGE (c:Chunk { chunkId: item.chunkId })
       SET c.type = item.type,
           c.start = item.start,
@@ -545,6 +546,7 @@ export class TemporalCodeGraph {
       `
       UNWIND $items AS item
       MATCH (f:File { fileId: item.fileId })
+      WITH f, item WHERE f IS NOT NULL
       MERGE (s:Symbol { symbolId: item.symbolId })
       SET s.name = item.name,
           s.kind = item.kind,
@@ -783,7 +785,7 @@ export class TemporalCodeGraph {
     } finally { await session.close(); }
   }
 
-  async queryImpact(projectId: string, filePath: string, maxDepth: number = 5): Promise<Array<{ file: string; depth: number; via: string[] }>> {
+  async queryImpact(projectId: string, filePath: string, maxDepth: number = 5, limit: number = 500): Promise<Array<{ file: string; depth: number; via: string[] }>> {
     const session = this.neo4j.getSession();
     try {
       const fileId = this.computeFileId(filePath);
@@ -791,15 +793,22 @@ export class TemporalCodeGraph {
       const result = await session.run(
         `MATCH path = (src:File)-[:STRUCTURAL_EDGE*1..${d}]->(tgt:File { fileId: $fileId })
          WHERE ALL(r IN relationships(path) WHERE r.projectId = $projectId AND r.kind = 'IMPORTS_FROM')
-         WITH src, length(path) AS depth, [n IN nodes(path) | n.path] AS via
-         RETURN DISTINCT src.path AS file, min(depth) AS depth, via ORDER BY depth, src.path`,
-        { fileId, projectId }
+           AND src.path IS NOT NULL
+         WITH src, length(path) AS depth, [n IN nodes(path) WHERE n.path IS NOT NULL | n.path] AS via
+         RETURN DISTINCT src.path AS file, min(depth) AS depth, via ORDER BY depth, src.path
+         LIMIT $limit`,
+        { fileId, projectId, limit },
+        { timeout: 10000 }
       );
-      return result.records.map((r) => ({
+      const records = result.records.map((r) => ({
         file: r.get("file") as string,
         depth: typeof r.get("depth") === "object" ? (r.get("depth") as { toNumber: () => number }).toNumber() : (r.get("depth") as number),
-        via: r.get("via") as string[],
+        via: (r.get("via") as string[]).filter(Boolean),
       }));
+      if (records.length === limit) {
+        log.warn("queryImpact hit limit — results may be incomplete", { filePath, limit });
+      }
+      return records;
     } finally { await session.close(); }
   }
 

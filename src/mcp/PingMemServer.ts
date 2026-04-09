@@ -108,6 +108,8 @@ export interface PingMemServerConfig {
   causalDiscoveryAgent?: CausalDiscoveryAgent | undefined;
   /** Optional QdrantClientWrapper for health checks */
   qdrantClient?: QdrantClientWrapper | undefined;
+  /** Optional Neo4jClient for warm-up circuit breaker reset */
+  neo4jClient?: import("../graph/Neo4jClient.js").Neo4jClient | undefined;
   /** Optional pre-created EventStore to share with the health monitor (avoids dual SQLite connections) */
   eventStore?: import("../storage/EventStore.js").EventStore | undefined;
   /** Optional ContradictionDetector for advisory contradiction checks on save */

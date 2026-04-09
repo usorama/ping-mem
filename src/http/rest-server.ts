@@ -1860,7 +1860,7 @@ export class RESTPingMemServer {
         const eventStats = this.eventStore.getStats();
         const stats = {
           eventStore: {
-            totalEvents: eventStats.eventCount,
+            totalEvents: eventStats.eventCount ?? 0,
           },
           sessions: (() => {
             const allSessions = this.sessionManager.listSessions();

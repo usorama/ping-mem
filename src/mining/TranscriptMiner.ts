@@ -325,11 +325,12 @@ export class TranscriptMiner {
         }
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       log.warn(`Failed to parse Claude response for ${sessionFile}`, {
-        error: err instanceof Error ? err.message : String(err),
+        error: msg,
         rawResult: rawResult.slice(0, 200),
       });
-      return 0;
+      throw new Error(`LLM response parse failed for ${sessionFile}: ${msg}`);
     }
 
     if (facts.length === 0) return 0;

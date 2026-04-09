@@ -117,29 +117,38 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
 
   // Connect to Neo4j if configured
   if (config.neo4j) {
-    try {
-      const neo4jClient = createNeo4jClient({
-        uri: config.neo4j.uri,
-        username: config.neo4j.username,
-        password: config.neo4j.password,
-        ...(config.neo4j.database && { database: config.neo4j.database }),
-        ...(config.neo4j.maxConnectionPoolSize && { maxConnectionPoolSize: config.neo4j.maxConnectionPoolSize }),
-      });
-      await neo4jClient.connect();
+    const maxRetries = 5;
+    const retryDelayMs = 3_000;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const neo4jClient = createNeo4jClient({
+          uri: config.neo4j.uri,
+          username: config.neo4j.username,
+          password: config.neo4j.password,
+          ...(config.neo4j.database && { database: config.neo4j.database }),
+          ...(config.neo4j.maxConnectionPoolSize && { maxConnectionPoolSize: config.neo4j.maxConnectionPoolSize }),
+        });
+        await neo4jClient.connect();
 
-      services.neo4jClient = neo4jClient;
-      services.graphManager = new GraphManager({ neo4jClient });
-      services.temporalStore = new TemporalStore({ neo4jClient });
-      services.lineageEngine = new LineageEngine(neo4jClient);
-      services.evolutionEngine = new EvolutionEngine({
-        temporalStore: services.temporalStore,
-        graphManager: services.graphManager,
-      });
-      log.info("Neo4j connected");
-    } catch (err) {
-      log.warn("Neo4j connection failed (ingestion/graph features disabled)", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+        services.neo4jClient = neo4jClient;
+        services.graphManager = new GraphManager({ neo4jClient });
+        services.temporalStore = new TemporalStore({ neo4jClient });
+        services.lineageEngine = new LineageEngine(neo4jClient);
+        services.evolutionEngine = new EvolutionEngine({
+          temporalStore: services.temporalStore,
+          graphManager: services.graphManager,
+        });
+        log.info("Neo4j connected", { attempt });
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt < maxRetries) {
+          log.warn(`Neo4j connection attempt ${attempt}/${maxRetries} failed, retrying in ${retryDelayMs}ms`, { error: msg });
+          await new Promise((r) => setTimeout(r, retryDelayMs));
+        } else {
+          log.warn("Neo4j connection failed after all retries (ingestion/graph features disabled)", { error: msg, attempts: maxRetries });
+        }
+      }
     }
   } else {
     log.info("Neo4j not configured (ingestion/graph features disabled)");
@@ -147,21 +156,30 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
 
   // Connect to Qdrant if configured
   if (config.qdrant) {
-    try {
-      const qdrantClient = new QdrantClientWrapper({
-        url: config.qdrant.url,
-        collectionName: config.qdrant.collectionName,
-        ...(config.qdrant.apiKey && { apiKey: config.qdrant.apiKey }),
-        ...(config.qdrant.vectorDimensions && { vectorDimensions: config.qdrant.vectorDimensions }),
-        enableFallback: false,
-      });
-      await qdrantClient.connect();
-      services.qdrantClient = qdrantClient;
-      log.info("Qdrant connected");
-    } catch (err) {
-      log.warn("Qdrant connection failed (code search disabled)", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    const qdrantMaxRetries = 5;
+    const qdrantRetryDelayMs = 3_000;
+    for (let attempt = 1; attempt <= qdrantMaxRetries; attempt++) {
+      try {
+        const qdrantClient = new QdrantClientWrapper({
+          url: config.qdrant.url,
+          collectionName: config.qdrant.collectionName,
+          ...(config.qdrant.apiKey && { apiKey: config.qdrant.apiKey }),
+          ...(config.qdrant.vectorDimensions && { vectorDimensions: config.qdrant.vectorDimensions }),
+          enableFallback: false,
+        });
+        await qdrantClient.connect();
+        services.qdrantClient = qdrantClient;
+        log.info("Qdrant connected", { attempt });
+        break;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt < qdrantMaxRetries) {
+          log.warn(`Qdrant connection attempt ${attempt}/${qdrantMaxRetries} failed, retrying in ${qdrantRetryDelayMs}ms`, { error: msg });
+          await new Promise((r) => setTimeout(r, qdrantRetryDelayMs));
+        } else {
+          log.warn("Qdrant connection failed after all retries (code search disabled)", { error: msg, attempts: qdrantMaxRetries });
+        }
+      }
     }
   } else {
     log.info("Qdrant not configured (code search disabled)");
@@ -179,10 +197,15 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
     if (services.qdrantClient) hybridConfig.qdrantClient = services.qdrantClient;
     services.hybridSearchEngine = createHybridSearchEngine(hybridConfig);
     log.info(`HybridSearchEngine created with ${embeddingService.providerName} embeddings`);
-  } catch {
-    // No API keys configured — create keyword-only engine
+  } catch (err) {
     services.hybridSearchEngine = createKeywordOnlySearchEngine();
-    log.info("HybridSearchEngine created (keyword-only, no embedding API key configured)");
+    const msg = err instanceof Error ? err.message : String(err);
+    const isConfigError = msg.includes("No embedding") || msg.includes("API key") || msg.includes("not configured");
+    if (isConfigError) {
+      log.info("HybridSearchEngine created (keyword-only, no embedding provider configured)");
+    } else {
+      log.error("Embedding provider initialization failed — falling back to keyword-only search", { error: msg });
+    }
   }
 
   // Wire LLMEntityExtractor if OPENAI_API_KEY and graphManager are available

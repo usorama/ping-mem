@@ -38,7 +38,7 @@ bun run dist/mcp/cli.js  # MCP stdio
 
 **Core** (`context_*`): `context_session_start`, `context_session_end`, `context_session_list`, `context_save`, `context_get`, `context_delete`, `context_search`, `context_auto_recall`, `context_checkpoint`, `context_status`, `context_hybrid_search`, `context_query_relationships`, `context_get_lineage`, `context_query_evolution`, `context_health`
 
-**Codebase**: `codebase_ingest`, `codebase_verify`, `codebase_search`, `codebase_timeline`, `codebase_list_projects`, `codebase_impact`, `codebase_blast_radius`, `codebase_dependency_map`
+**Codebase**: `codebase_ingest`, `codebase_verify`, `codebase_search`, `codebase_timeline`, `codebase_list_projects`, `codebase_impact`, `codebase_blast_radius`, `codebase_dependency_map`, `project_delete`
 
 **Diagnostics**: `diagnostics_ingest`, `diagnostics_latest`, `diagnostics_list`, `diagnostics_diff`, `diagnostics_summary`, `diagnostics_summarize`, `diagnostics_compare_tools`, `diagnostics_by_symbol`
 

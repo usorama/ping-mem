@@ -289,7 +289,7 @@ describe("FallbackEmbeddingProvider", () => {
       expect(warnSpy).toHaveBeenCalledTimes(1);
       expect(warnSpy.mock.calls[0]![0]).toContain("Primary provider");
       expect(warnSpy.mock.calls[0]![0]).toContain("primary");
-      expect(warnSpy.mock.calls[0]![0]).toContain("Falling back");
+      expect(warnSpy.mock.calls[0]![0]).toContain("falling back");
 
       warnSpy.mockRestore();
     });

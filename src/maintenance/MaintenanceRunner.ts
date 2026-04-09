@@ -23,6 +23,7 @@ export interface MaintenanceResult {
   dedupCount: number;
   consolidateResult: { archivedCount: number; digestsCreated: number };
   pruneCount: number;
+  eventsPruned: number;
   vacuumRan: boolean;
   walSizeBefore: number;
   walSizeAfter: number;
@@ -47,6 +48,8 @@ export interface MaintenanceOptions {
   pruneThreshold?: number | undefined;
   /** Minimum age in days for pruning (default: 30) */
   pruneMinAgeDays?: number | undefined;
+  /** Retention days for events table. Opt-in: unset means no event deletion (default). OBSERVATION_CAPTURED pruned at retentionDays/4. */
+  eventRetentionDays?: number | undefined;
   /** WAL size threshold in bytes for vacuum (default: 50MB) */
   walThreshold?: number | undefined;
   /** Directory to export native memories to */
@@ -100,6 +103,16 @@ export class MaintenanceRunner {
     // Step 3: Prune
     const pruneCount = await this.prune(options, dryRun);
 
+    // Step 3.5: Prune old events (opt-in only — EventStore is append-only by default)
+    const retentionDays = options.eventRetentionDays;
+    let eventsPruned = 0;
+    if (retentionDays !== undefined) {
+      eventsPruned = dryRun ? 0 : this.eventStore.pruneOldEvents(retentionDays);
+      if (eventsPruned > 0) {
+        log.info("Events pruned", { eventsPruned, retentionDays });
+      }
+    }
+
     // Step 4: Vacuum
     const walSizeBefore = this.eventStore.getWalSizeBytes();
     const vacuumRan = await this.vacuum(options, dryRun);
@@ -116,6 +129,7 @@ export class MaintenanceRunner {
       dedupCount,
       consolidateResult,
       pruneCount,
+      eventsPruned,
       vacuumRan,
       walSizeBefore,
       walSizeAfter,

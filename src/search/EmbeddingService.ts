@@ -10,6 +10,9 @@
 
 import OpenAI from "openai";
 import { createHash } from "crypto";
+import { createLogger } from "../util/logger.js";
+
+const embLog = createLogger("EmbeddingService");
 
 // ============================================================================
 // Error Classes
@@ -521,9 +524,7 @@ export class ChainedFallbackProvider implements EmbeddingProvider {
         this.consecutiveFailures.set(provider.name, count);
         const msg = error instanceof Error ? error.message : String(error);
         const level = count > 5 ? "error" : "warn";
-        console[level](
-          `[ChainedFallback] ${provider.name} failed (${count}x): ${msg}. Trying next provider...`
-        );
+        embLog[level](`${provider.name} failed (${count}x), trying next provider`, { error: msg });
         lastError = error instanceof Error ? error : new Error(msg);
       }
     }
@@ -577,10 +578,7 @@ export class FallbackEmbeddingProvider implements EmbeddingProvider {
       this.fallbackCount++;
       const errorMessage = error instanceof Error ? error.message : String(error);
       const level = this.fallbackCount > 10 ? "error" : "warn";
-      console[level](
-        `[FallbackEmbedding] Primary "${this.primary.name}" failed (${this.fallbackCount} consecutive): ${errorMessage}. ` +
-        `Falling back to "${this.fallback.name}".`
-      );
+      embLog[level](`Primary "${this.primary.name}" failed (${this.fallbackCount}x), falling back to "${this.fallback.name}"`, { error: errorMessage });
       return await this.fallback.embed(text);
     }
   }

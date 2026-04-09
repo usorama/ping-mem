@@ -183,15 +183,16 @@ export class CodeIndexer {
       if (qdrantResults.length > 0) {
         const bm25S = new Map(bm25Results.map(r => [r.chunkId, r.score]));
         const denseS = new Map(qdrantResults.map(r => [r.chunkId, r.score]));
-        const bv = [...bm25S.values()]; const bMin = bv.length ? Math.min(...bv) : 0; const bRng = (bv.length ? Math.max(...bv) : 0) - bMin || 1;
-        const dv = [...denseS.values()]; const dMin = dv.length ? Math.min(...dv) : 0; const dRng = (dv.length ? Math.max(...dv) : 0) - dMin || 1;
+        const bv = [...bm25S.values()]; const bMin = bv.length ? Math.min(...bv) : 0; const bRngRaw = (bv.length ? Math.max(...bv) : 0) - bMin; const bRng = bRngRaw || 1;
+        const dv = [...denseS.values()]; const dMin = dv.length ? Math.min(...dv) : 0; const dRngRaw = (dv.length ? Math.max(...dv) : 0) - dMin; const dRng = dRngRaw || 1;
         const allIds = new Set([...bm25S.keys(), ...denseS.keys()]);
         const scored: Array<{ chunkId: string; score: number }> = [];
         for (const id of allIds) {
           const m = metaLookup.get(id); if (!m) continue;
           if (options.projectId && m.projectId !== options.projectId) continue;
-          const bn = bm25S.has(id) ? (bm25S.get(id)! - bMin) / bRng : 0;
-          const dn = denseS.has(id) ? (denseS.get(id)! - dMin) / dRng : 0;
+          // When range is 0, all candidates tied — give full credit rather than collapsing to 0
+          const bn = bm25S.has(id) ? (bRngRaw === 0 ? 1 : (bm25S.get(id)! - bMin) / bRng) : 0;
+          const dn = denseS.has(id) ? (dRngRaw === 0 ? 1 : (denseS.get(id)! - dMin) / dRng) : 0;
           scored.push({ chunkId: id, score: bn * BM25_WEIGHT + dn * DENSE_WEIGHT });
         }
         scored.sort((a, b) => b.score - a.score);
