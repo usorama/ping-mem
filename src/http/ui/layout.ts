@@ -75,6 +75,10 @@ export function renderLayout(options: LayoutOptions): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="${escapeHtml(csrfToken ?? '')}">
+  <!-- htmx reads this config during its own initialization (before DOMContentLoaded).
+       inlineStyleNonce lets htmx add nonce="..." to the CSS indicator rule it injects,
+       so that rule passes the style-src nonce check. -->
+  <meta name="htmx-config" content='{"inlineStyleNonce":"${nonce ?? ""}"}'>
   <title>${escapeHtml(title)} - ping-mem</title>
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/htmx.min.js" defer${nonceAttr}${SRI_HTMX ? ` integrity="${SRI_HTMX}" crossorigin="anonymous"` : ""}></script>

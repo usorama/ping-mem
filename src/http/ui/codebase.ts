@@ -56,7 +56,7 @@ export function registerCodebaseRoutes(_deps: UIDependencies) {
             <iframe
               src="/static/codebase-diagram.html"
               style="flex:1;border:1px solid var(--border);border-radius:8px;width:100%;background:#08111f;"
-              sandbox="allow-scripts allow-same-origin"
+              sandbox="allow-scripts"
               title="Codebase Architecture Diagram"
             ></iframe>
           </div>

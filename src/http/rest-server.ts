@@ -277,17 +277,32 @@ export class RESTPingMemServer {
       c.set("cspNonce", nonce);
       await next();
       c.header("X-Content-Type-Options", "nosniff");
-      c.header("X-Frame-Options", "DENY");
+      // SAMEORIGIN (not DENY): the /ui/codebase page embeds /static/codebase-diagram.html
+      // in a same-origin iframe for style isolation. DENY would block that.
+      c.header("X-Frame-Options", "SAMEORIGIN");
       c.header("Referrer-Policy", "strict-origin-when-cross-origin");
-      c.header(
-        "Content-Security-Policy",
-        // style-src-attr 'unsafe-inline': required for the HTMX server-rendered UI which
-        // uses inline style="" attributes extensively (e.g. color, opacity, pointer-events).
-        // Migrating all inline styles to CSS classes is a significant refactor; the risk
-        // is mitigated because all user-controlled values in HTML attributes go through
-        // escapeHtml() before rendering, preventing CSS injection via style attribute values.
-        `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'`,
-      );
+      if (c.req.path === "/static/codebase-diagram.html") {
+        // codebase-diagram.html is a self-contained static page loaded in a same-origin
+        // iframe. It uses external CDN resources (mermaid, Google Fonts) and inline
+        // styles/scripts which cannot use server-generated nonces. Apply a targeted CSP
+        // that allows only the specific CDNs this file actually uses.
+        c.header(
+          "Content-Security-Policy",
+          "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'",
+        );
+      } else {
+        c.header(
+          "Content-Security-Policy",
+          // style-src-attr 'unsafe-inline': required for the HTMX server-rendered UI which
+          // uses inline style="" attributes extensively (e.g. color, opacity, pointer-events).
+          // Migrating all inline styles to CSS classes is a significant refactor; the risk
+          // is mitigated because all user-controlled values in HTML attributes go through
+          // escapeHtml() before rendering, preventing CSS injection via style attribute values.
+          // frame-ancestors 'self': allows same-origin iframes (/ui/codebase embeds the diagram).
+          // Cross-origin framing is still blocked; 'self' is sufficient clickjacking protection.
+          `default-src 'self'; script-src 'self' 'nonce-${nonce}'; style-src 'self' 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'`,
+        );
+      }
       c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
       c.header("Cross-Origin-Opener-Policy", "same-origin");
       c.header("Cross-Origin-Resource-Policy", "same-origin");
