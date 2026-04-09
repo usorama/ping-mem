@@ -176,6 +176,10 @@ export function renderLayout(options: LayoutOptions): string {
       if (csrfMeta) {
         document.body.setAttribute('hx-headers', JSON.stringify({'x-csrf-token': csrfMeta.content}));
       }
+      // Configure htmx CSP nonce so inline style mutations don't violate style-src
+      if (window.htmx) {
+        htmx.config.inlineStyleNonce = '${nonce ?? ""}';
+      }
     });
   </script>
 </body>

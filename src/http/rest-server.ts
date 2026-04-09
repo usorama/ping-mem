@@ -364,6 +364,8 @@ export class RESTPingMemServer {
    */
   private setupRoutes(): void {
     // Health check — per-component status
+    this.app.get("/favicon.ico", (c) => c.body(null, 204));
+
     this.app.get("/health", async (c) => {
       // Health endpoint is ALWAYS unauthenticated — Docker healthchecks,
       // load balancers, and monitoring tools must reach it without API keys.
@@ -1971,6 +1973,9 @@ export class RESTPingMemServer {
         const filtered = results.filter((r) => (r.score ?? 0) >= minScore);
 
         if (filtered.length === 0) {
+          // Fire-and-forget RECALL_MISS event for observability
+          void this.eventStore.createEvent(sessionId, "RECALL_MISS", { query: queryText, timestamp: Date.now() })
+            .catch((err) => { log.warn("Failed to emit RECALL_MISS event", { error: err instanceof Error ? err.message : String(err) }); });
           return c.json({ data: { recalled: false, context: "", count: 0 } });
         }
 
