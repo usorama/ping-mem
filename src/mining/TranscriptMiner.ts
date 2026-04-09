@@ -330,7 +330,7 @@ export class TranscriptMiner {
         error: msg,
         rawResult: rawResult.slice(0, 200),
       });
-      throw new Error(`LLM response parse failed for ${sessionFile}: ${msg}`);
+      throw new Error(`LLM response parse failed for ${sessionFile}: ${msg}`, { cause: err });
     }
 
     if (facts.length === 0) return 0;

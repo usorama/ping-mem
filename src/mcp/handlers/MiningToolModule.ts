@@ -110,7 +110,7 @@ export class MiningToolModule implements ToolModule {
     const db = this.state.eventStore.getDatabase();
     const userProfile = new UserProfileStore();
 
-    const miner = new TranscriptMiner(db, memoryManager, userProfile);
+    const miner = new TranscriptMiner(db, memoryManager, userProfile, undefined, this.state.eventStore);
 
     const mineOptions: { limit?: number; project?: string } = {};
     if (typeof args.limit === "number") {

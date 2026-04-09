@@ -903,14 +903,14 @@ export class EventStore {
     let eventCount: number | null = null;
     try {
       eventCount = (this.stmtGetEventCount.get() as { count: number }).count;
-    } catch {
-      // Transient SQLite error — return null (not 0) so callers can distinguish "empty" from "error".
+    } catch (err) {
+      log.warn("getStats: failed to read event count", { error: err instanceof Error ? err.message : String(err) });
     }
     let checkpointCount: number | null = null;
     try {
       checkpointCount = (this.stmtGetCheckpointCount.get() as { count: number }).count;
-    } catch {
-      // Transient SQLite error — return null rather than crashing.
+    } catch (err) {
+      log.warn("getStats: failed to read checkpoint count", { error: err instanceof Error ? err.message : String(err) });
     }
 
     let dbSize: number | null = null;
@@ -918,8 +918,8 @@ export class EventStore {
       try {
         const stats = fs.statSync(this.config.dbPath);
         dbSize = stats.size;
-      } catch {
-        // File transiently inaccessible — return null so callers know the stat failed.
+      } catch (err) {
+        log.warn("getStats: failed to stat db file", { error: err instanceof Error ? err.message : String(err) });
       }
     } else {
       dbSize = 0;

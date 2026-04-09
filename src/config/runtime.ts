@@ -199,12 +199,11 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
     log.info(`HybridSearchEngine created with ${embeddingService.providerName} embeddings`);
   } catch (err) {
     services.hybridSearchEngine = createKeywordOnlySearchEngine();
-    const msg = err instanceof Error ? err.message : String(err);
-    const isConfigError = msg.includes("No embedding") || msg.includes("API key") || msg.includes("not configured");
-    if (isConfigError) {
+    const hasEmbeddingConfig = process.env["GEMINI_API_KEY"] || process.env["OPENAI_API_KEY"] || process.env["OLLAMA_URL"];
+    if (!hasEmbeddingConfig) {
       log.info("HybridSearchEngine created (keyword-only, no embedding provider configured)");
     } else {
-      log.error("Embedding provider initialization failed — falling back to keyword-only search", { error: msg });
+      log.error("Embedding provider initialization failed — falling back to keyword-only search", { error: err instanceof Error ? err.message : String(err) });
     }
   }
 

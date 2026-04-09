@@ -797,7 +797,7 @@ export class TemporalCodeGraph {
          WITH src, length(path) AS depth, [n IN nodes(path) WHERE n.path IS NOT NULL | n.path] AS via
          RETURN DISTINCT src.path AS file, min(depth) AS depth, via ORDER BY depth, src.path
          LIMIT $limit`,
-        { fileId, projectId, limit },
+        { fileId, projectId, limit: neo4j.int(limit) },
         { timeout: 10000 }
       );
       const records = result.records.map((r) => ({

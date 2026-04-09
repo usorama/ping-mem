@@ -969,7 +969,7 @@ export class ContextToolModule implements ToolModule {
         this.state.currentSessionId ?? "system",
         "RECALL_MISS",
         { query: queryText, timestamp: Date.now() }
-      ).catch(() => { /* never block recall path */ });
+      ).catch((err) => { log.warn("Failed to emit RECALL_MISS event", { error: err instanceof Error ? err.message : String(err) }); });
       return { recalled: false, reason: "no relevant memories found", context: "" };
     }
 

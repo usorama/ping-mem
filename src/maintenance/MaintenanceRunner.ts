@@ -107,9 +107,15 @@ export class MaintenanceRunner {
     const retentionDays = options.eventRetentionDays;
     let eventsPruned = 0;
     if (retentionDays !== undefined) {
-      eventsPruned = dryRun ? 0 : this.eventStore.pruneOldEvents(retentionDays);
-      if (eventsPruned > 0) {
-        log.info("Events pruned", { eventsPruned, retentionDays });
+      if (!dryRun) {
+        try {
+          eventsPruned = this.eventStore.pruneOldEvents(retentionDays);
+          if (eventsPruned > 0) {
+            log.info("Events pruned", { eventsPruned, retentionDays });
+          }
+        } catch (err) {
+          log.warn("Event pruning failed", { error: err instanceof Error ? err.message : String(err), retentionDays });
+        }
       }
     }
 

@@ -8,7 +8,14 @@ VPS_HOST="72.62.117.123"
 VPS_PATH="/opt/ping-mem"
 
 echo "Syncing to VPS..."
-rsync -av --exclude='.env' --exclude='node_modules' --exclude='.git' \
+rsync -av \
+  --exclude='.env' \
+  --exclude='node_modules' \
+  --exclude='.git' \
+  --exclude='.data-backup' \
+  --exclude='.worktrees' \
+  --exclude='dist' \
+  --exclude='.claude' \
   /Users/umasankr/Projects/ping-mem/ \
   root@${VPS_HOST}:${VPS_PATH}/
 

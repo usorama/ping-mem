@@ -170,7 +170,7 @@ export class CodeIndexer {
       const fetchLimit = Math.min(clampedLimit * 3, 300);
       const bm25Results = this.bm25Scorer.search(query, fetchLimit);
       let qdrantResults: ChunkSearchResult[] = [];
-      try { qdrantResults = await this.searchQdrantOnly(query, { ...options, limit: fetchLimit }); } catch {}
+      try { qdrantResults = await this.searchQdrantOnly(query, { ...options, limit: fetchLimit }); } catch (err) { log.warn("Qdrant search failed, continuing with BM25 only", { error: err instanceof Error ? err.message : String(err) }); }
       const metaLookup = new Map<string, ChunkSearchResult>();
       for (const r of qdrantResults) metaLookup.set(r.chunkId, r);
       if (this.codeChunkStore) {
