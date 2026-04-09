@@ -897,23 +897,23 @@ export class EventStore {
   /**
    * Get database statistics
    */
-  getStats(): { eventCount: number | null; checkpointCount: number | null; dbSize: number | null } {
+  getStats(): { eventCount: number; checkpointCount: number; dbSize: number } {
     // Wrap count queries individually: a lock or transient corruption on one table
     // should not prevent reporting stats for the other table.
-    let eventCount: number | null = null;
+    let eventCount = 0;
     try {
       eventCount = (this.stmtGetEventCount.get() as { count: number }).count;
     } catch (err) {
       log.warn("getStats: failed to read event count", { error: err instanceof Error ? err.message : String(err) });
     }
-    let checkpointCount: number | null = null;
+    let checkpointCount = 0;
     try {
       checkpointCount = (this.stmtGetCheckpointCount.get() as { count: number }).count;
     } catch (err) {
       log.warn("getStats: failed to read checkpoint count", { error: err instanceof Error ? err.message : String(err) });
     }
 
-    let dbSize: number | null = null;
+    let dbSize = 0;
     if (this.config.dbPath !== ":memory:") {
       try {
         const stats = fs.statSync(this.config.dbPath);
@@ -921,8 +921,6 @@ export class EventStore {
       } catch (err) {
         log.warn("getStats: failed to stat db file", { error: err instanceof Error ? err.message : String(err) });
       }
-    } else {
-      dbSize = 0;
     }
 
     return { eventCount, checkpointCount, dbSize };
