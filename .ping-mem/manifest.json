@@ -1,12 +1,12 @@
 {
   "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
   "rootPath": "/projects/ping-mem",
-  "treeHash": "545cf5c882f464f99eb4bcd13e8ebe1bd59e162a8e12c46ab65a992031d026a5",
+  "treeHash": "64724a0938dc334870d47d3e6f4f358e4859175ee20e5e8aa70bda00c244b580",
   "files": [
     {
       "path": ".ai/decisions.jsonl",
-      "sha256": "ec93350b6c088417b0ebbd20b01877dc97dada05d69cc1d3c803e56328184bfa",
-      "bytes": 27595
+      "sha256": "2ffbe42706d2484a1e34f89818d6feb4f2d19f706c16bc627bda0a9828b0529f",
+      "bytes": 28443
     },
     {
       "path": ".ai/eval/labeled-queries.jsonl",
@@ -80,8 +80,8 @@
     },
     {
       "path": ".cursor/mcp.json",
-      "sha256": "32de12e02513a2668215a7d5abfce93ca30e816aea8437ce9109c2bd86d00701",
-      "bytes": 632
+      "sha256": "8a751f92269d579b1963227fc93d535809239edcbc56285e195f98a20adf7f1e",
+      "bytes": 200
     },
     {
       "path": ".cursorrules",
@@ -110,8 +110,8 @@
     },
     {
       "path": ".ping-mem/manifest.json",
-      "sha256": "7c8bb1f6c6116323d50667c6544396faa4a4d5741f610099aa7eaa449299f538",
-      "bytes": 87610
+      "sha256": "21af09dd71895425c4a8982f6f17cf7cdf83f67f6146f5afc29d95e653c8d47a",
+      "bytes": 88495
     },
     {
       "path": ".serena/.gitignore",
@@ -580,8 +580,8 @@
     },
     {
       "path": "docs/plans/2026-04-09-feat-full-capability-activation-plan.md",
-      "sha256": "3b103b7bdbad23356799450b58d6a906282d378a5bd3c07f3d01498eaf6daa51",
-      "bytes": 59691
+      "sha256": "c06c1d30ed74b583e52b4df7c9e14abe7fe035940f0023961bbdadd6fc5350a9",
+      "bytes": 59694
     },
     {
       "path": "docs/plans/understory-integration-spec.md",
@@ -2425,8 +2425,8 @@
     },
     {
       "path": "src/storage/EventStore.ts",
-      "sha256": "9ef73af039f90617e76a00d20d25cc35530d7a6f6f7b810a0da20f6ea01afc52",
-      "bytes": 37458
+      "sha256": "083f4053ad68773f2c8132b14d0daab39cc2d998884cf6461e05eb4aabfccab1",
+      "bytes": 37352
     },
     {
       "path": "src/storage/WriteLockManager.ts",
@@ -2584,6 +2584,6 @@
       "bytes": 849
     }
   ],
-  "generatedAt": "2026-04-09T08:18:11.032Z",
+  "generatedAt": "2026-04-09T09:25:27.326Z",
   "schemaVersion": 1
 }

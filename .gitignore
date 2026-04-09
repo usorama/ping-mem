@@ -50,5 +50,11 @@ progress-*.txt
 # Worktrees
 .worktrees/
 
+# Backups
+.data-backup/
+
+# Playwright MCP logs
+.playwright-mcp/
+
 # Claude Code
 .claude/
