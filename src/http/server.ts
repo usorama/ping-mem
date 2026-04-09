@@ -100,6 +100,7 @@ export async function startHTTPServer(): Promise<void> {
     evolutionEngine: services.evolutionEngine,
     ingestionService,
     qdrantClient: services.qdrantClient,
+    neo4jClient: services.neo4jClient,
     healthMonitor,
     eventStore,
   });
