@@ -199,6 +199,9 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
     log.info(`HybridSearchEngine created with ${embeddingService.providerName} embeddings`);
   } catch (err) {
     services.hybridSearchEngine = createKeywordOnlySearchEngine();
+    // Clear embeddingService so health checks correctly report "none (keyword-only)" rather
+    // than showing a provider that failed to initialize.
+    delete services.embeddingService;
     const hasEmbeddingConfig = process.env["GEMINI_API_KEY"] || process.env["OPENAI_API_KEY"] || process.env["OLLAMA_URL"];
     if (!hasEmbeddingConfig) {
       log.info("HybridSearchEngine created (keyword-only, no embedding provider configured)");

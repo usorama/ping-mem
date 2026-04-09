@@ -221,7 +221,7 @@ export class TranscriptMiner {
         try {
           parsed = JSON.parse(trimmed) as ClaudeJsonlMessage;
         } catch {
-          // Skip malformed lines, but track the failure count
+          // Error object intentionally unused — count is sufficient; details logged in summary warn.
           parseFailures++;
           return;
         }
