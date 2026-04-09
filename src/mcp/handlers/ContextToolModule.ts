@@ -452,7 +452,7 @@ export class ContextToolModule implements ToolModule {
         }
 
         if (llmResult) {
-          // Graph write — failure here does NOT trigger regex fallback
+          // Graph write — failure here falls through to regex if entityIds is still empty
           try {
             if (llmResult.entities.length > 0) {
               const createdEntities = await this.state.graphManager.batchCreateEntities(llmResult.entities);
@@ -461,18 +461,23 @@ export class ContextToolModule implements ToolModule {
               entityIds = [];
             }
           } catch (error) {
-            log.warn("Graph entity write failed after LLM extraction", { error: error instanceof Error ? error.message : String(error) });
+            log.warn("Graph entity write failed after LLM extraction, falling back to regex", { error: error instanceof Error ? error.message : String(error) });
           }
 
-          // Store relationships if any
-          for (const rel of llmResult.relationships) {
-            try {
-              await this.state.graphManager.createRelationship(rel);
-            } catch (error) {
-              log.warn("Relationship storage failed", { sourceId: rel.sourceId, targetId: rel.targetId, type: rel.type, error: error instanceof Error ? error.message : String(error) });
+          // Store relationships if entities were written successfully
+          if (entityIds !== undefined) {
+            for (const rel of llmResult.relationships) {
+              try {
+                await this.state.graphManager.createRelationship(rel);
+              } catch (error) {
+                log.warn("Relationship storage failed", { sourceId: rel.sourceId, targetId: rel.targetId, type: rel.type, error: error instanceof Error ? error.message : String(error) });
+              }
             }
           }
-        } else if (this.state.entityExtractor) {
+        }
+
+        // Regex fallback: LLM failed entirely OR LLM succeeded but graph write failed
+        if (entityIds === undefined && this.state.entityExtractor) {
           // Fallback to regex extraction on LLM failure
           const extractionContext: { key: string; value: string; category?: string } = {
             key: args.key as string,

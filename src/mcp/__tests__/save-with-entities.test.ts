@@ -236,6 +236,70 @@ describe("context_save with entity extraction", () => {
       expect(mockGraphManager.batchCreateEntities).not.toHaveBeenCalled();
     });
 
+    it("should fall back to regex extraction when graph write fails after LLM extraction", async () => {
+      // Simulate: LLM extraction succeeds but batchCreateEntities throws (Neo4j down)
+      // The regex fallback should then trigger with its own batchCreateEntities call
+      const mockLlmExtractor = {
+        extract: jest.fn().mockResolvedValue({
+          entities: [{ type: "PERSON", name: "AuthUser", properties: { confidence: 0.9 } }],
+          relationships: [],
+        }),
+      };
+
+      const localMockGm = createMockGraphManager();
+      let callCount = 0;
+      localMockGm.batchCreateEntities.mockImplementation(async (entities) => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error("Neo4j connection refused");
+        }
+          const now = new Date();
+          return entities.map((e, i) => ({
+            ...e,
+            id: `regex-fallback-${i}`,
+            createdAt: now,
+            updatedAt: now,
+          }));
+        });
+
+      const serverWithFallback = new PingMemServer({
+        dbPath: ":memory:",
+        enableVectorSearch: false,
+        graphManager: localMockGm,
+        entityExtractor: new EntityExtractor({ minConfidence: 0.3 }),
+        llmEntityExtractor: mockLlmExtractor as never,
+      });
+
+      const callToolLocal = async (name: string, args: Record<string, unknown>) => {
+        const s = serverWithFallback as unknown as {
+          handleToolCall: (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+        };
+        return s.handleToolCall(name, args);
+      };
+
+      await callToolLocal("context_session_start", { name: "fallback-session" });
+
+      const result = await callToolLocal("context_save", {
+        key: "fallback-test",
+        // category "decision" triggers LLM extraction path (shouldUseLlmExtraction returns true)
+        category: "decision",
+        value: "class AuthService handles user authentication with JWT tokens.",
+        extractEntities: true,
+      });
+
+      expect(result.success).toBe(true);
+      // LLM extract was called
+      expect(mockLlmExtractor.extract).toHaveBeenCalledTimes(1);
+      // batchCreateEntities called twice: first fails (LLM graph write), second succeeds (regex fallback)
+      expect(localMockGm.batchCreateEntities).toHaveBeenCalledTimes(2);
+      // entityIds should come from the regex fallback path
+      expect(Array.isArray(result.entityIds)).toBe(true);
+      expect((result.entityIds as string[]).length).toBeGreaterThan(0);
+      expect((result.entityIds as string[])[0]).toMatch(/^regex-fallback-/);
+
+      await serverWithFallback.close();
+    });
+
     it("should extract entities by default when extractEntities not specified", async () => {
       const now = new Date();
       mockGraphManager.batchCreateEntities.mockImplementation(async (entities) => {

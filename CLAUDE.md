@@ -20,7 +20,8 @@ bun run typecheck    # Type check (0 errors required)
 bun run lint         # Lint
 bun run start        # REST server (:3003)
 bun run start:sse    # SSE server
-bun run dist/mcp/cli.js  # MCP stdio
+bun run dist/mcp/cli.js  # MCP stdio (deprecated — use proxy-cli.js)
+PING_MEM_REST_URL=http://localhost:3003 bun run dist/mcp/proxy-cli.js  # MCP stdio (proxy mode, recommended)
 ```
 
 **Quality gate**: `bun run typecheck && bun run lint && bun test`

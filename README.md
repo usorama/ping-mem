@@ -5,7 +5,7 @@
 [![Version](https://img.shields.io/badge/version-2.0.1-blue.svg)](package.json)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-ping-mem gives AI agents persistent memory, codebase intelligence, and cross-project awareness. It runs as a single server exposing 47 tools via REST API, MCP protocol, CLI, and TypeScript SDK — all on one port.
+ping-mem gives AI agents persistent memory, codebase intelligence, and cross-project awareness. It runs as a single server exposing 53 tools via REST API, MCP protocol, CLI, and TypeScript SDK — all on one port.
 
 ## How Agents Discover and Use ping-mem
 
@@ -13,7 +13,7 @@ Agents can discover every capability at runtime — no docs needed:
 
 | Method | For | Discovery |
 |--------|-----|-----------|
-| **MCP `tools/list`** | Claude Code, Cursor, any MCP client | Automatic at session start — 47 tools with schemas |
+| **MCP `tools/list`** | Claude Code, Cursor, any MCP client | Automatic at session start — 53 tools with schemas |
 | **`GET /api/v1/tools`** | REST agents, LangChain, CrewAI | One HTTP call returns all tools + input schemas |
 | **`GET /openapi.json`** | SDK generators, Swagger UI | OpenAPI 3.1 spec for any HTTP client |
 | **TypeScript SDK** | Node.js/Bun agents | `import { PingMemSDK }` — typed methods with autocomplete |
@@ -24,7 +24,7 @@ Agents can discover every capability at runtime — no docs needed:
 ```bash
 # REST — discover all tools
 curl http://localhost:3003/api/v1/tools | jq '.data.count'
-# → 47
+# → 53
 
 # REST — save a memory
 curl -X POST http://localhost:3003/api/v1/context \
@@ -50,9 +50,9 @@ await pm.contextSave("decision-1", "Use PostgreSQL", { category: "decision" });
 const results = await pm.contextSearch("database", { limit: 5 });
 ```
 
-## All 47 Capabilities
+## All 53 Capabilities
 
-### Context Memory (9 tools)
+### Context Memory (10 tools)
 
 | Tool | REST | CLI | Description |
 |------|------|-----|-------------|
@@ -65,6 +65,7 @@ const results = await pm.contextSearch("database", { limit: 5 });
 | `context_delete` | `DELETE /api/v1/context/:key` | `ping-mem context delete <key>` | Delete memory |
 | `context_checkpoint` | `POST /api/v1/checkpoint` | `ping-mem context checkpoint <name>` | Named checkpoint |
 | `context_status` | `GET /api/v1/status` | `ping-mem context status` | Session + server status |
+| `context_auto_recall` | `POST /api/v1/memory/auto-recall` | `ping-mem context auto-recall <query>` | Auto-recall relevant context by keywords |
 
 ### Knowledge Graph (5 tools)
 
@@ -102,7 +103,7 @@ const results = await pm.contextSearch("database", { limit: 5 });
 | `diagnostics_by_symbol` | `GET /api/v1/diagnostics/by-symbol` | `ping-mem diagnostics by-symbol` | Group by function/class |
 | `diagnostics_summarize` | `POST /api/v1/diagnostics/summarize/:id` | `ping-mem diagnostics summarize <id>` | LLM-powered summary |
 
-### Memory Management (5 tools)
+### Memory Management (7 tools)
 
 | Tool | REST | CLI | Description |
 |------|------|-----|-------------|
@@ -111,6 +112,8 @@ const results = await pm.contextSearch("database", { limit: 5 });
 | `memory_compress` | `POST /api/v1/memory/compress` | `ping-mem memory compress` | Compress to digest facts |
 | `memory_subscribe` | `POST /api/v1/memory/subscribe` | `ping-mem memory subscribe` | Subscribe to change events |
 | `memory_unsubscribe` | `POST /api/v1/memory/unsubscribe` | `ping-mem memory unsubscribe` | Unsubscribe |
+| `memory_maintain` | `POST /api/v1/tools/memory_maintain/invoke` | `ping-mem memory maintain` | Run maintenance (junk filter, quality gates) |
+| `memory_conflicts` | `POST /api/v1/tools/memory_conflicts/invoke` | `ping-mem memory conflicts` | Detect contradictions across memories |
 
 ### Causal Inference (4 tools)
 
@@ -143,6 +146,14 @@ const results = await pm.contextSearch("database", { limit: 5 });
 | `worklog_record` | `POST /api/v1/worklog` | `ping-mem worklog record <kind> <title>` | Record tool/diagnostic/git event |
 | `worklog_list` | `GET /api/v1/worklog` | `ping-mem worklog list` | List events |
 
+### Mining & Insights (3 tools)
+
+| Tool | REST | CLI | Description |
+|------|------|-----|-------------|
+| `transcript_mine` | `POST /api/v1/mining/start` | `ping-mem mining start` | Extract structured insights from transcripts |
+| `dreaming_run` | `POST /api/v1/dreaming/run` | `ping-mem dreaming run` | Run dreaming cycle (cross-session pattern discovery) |
+| `insights_list` | `GET /api/v1/insights` | `ping-mem insights list` | List mined insights |
+
 ### Project Management (1 tool)
 
 | Tool | REST | CLI | Description |
@@ -153,7 +164,7 @@ const results = await pm.contextSearch("database", { limit: 5 });
 
 ```
 Port 3003 (single port)
-├── /api/v1/*       REST API (47 endpoints)
+├── /api/v1/*       REST API (53 endpoints)
 ├── /mcp            MCP streamable-http transport
 ├── /openapi.json   OpenAPI 3.1 spec
 ├── /health         Health check
@@ -226,24 +237,23 @@ ping-mem daemon start
 
 ### Claude Code Integration
 
-Add to `~/.claude/mcp.json`:
+Add to `~/.claude/mcp.json` (proxy mode — recommended):
 
 ```json
 {
   "mcpServers": {
     "ping-mem": {
       "command": "bun",
-      "args": ["run", "/path/to/ping-mem/dist/mcp/cli.js"],
+      "args": ["run", "/path/to/ping-mem/dist/mcp/proxy-cli.js"],
       "env": {
-        "PING_MEM_DB_PATH": "~/.ping-mem/ping-mem.db",
-        "NEO4J_URI": "bolt://localhost:7687",
-        "NEO4J_USERNAME": "neo4j",
-        "NEO4J_PASSWORD": "neo4j_password",
-        "QDRANT_URL": "http://localhost:6333"
+        "PING_MEM_REST_URL": "http://localhost:3003"
       }
     }
   }
 }
+```
+
+> **Note**: Direct mode (`dist/mcp/cli.js`) is deprecated — it opens the DB directly and causes concurrent access issues with Docker. Use proxy mode instead.
 ```
 
 ## Web UI

@@ -409,8 +409,8 @@ export class RelevanceEngine {
         try {
           this.db.prepare("UPDATE memories SET relevance_score = ? WHERE key = ?").run(finalScore, row.key);
           refreshed++;
-        } catch {
-          // Column may not exist yet, skip silently
+        } catch (error) {
+          log.warn("Failed to update relevance_score — column may not exist yet", { key: row.key, error: error instanceof Error ? error.message : String(error) });
         }
       }
 

@@ -68,26 +68,23 @@ docker exec ping-mem-neo4j cypher-shell -u neo4j -p neo4j_password "RETURN 1"  #
 
 ### 3.1 MCP (stdio) — Claude Code
 
-Add to `~/.claude/mcp.json`:
+Add to `~/.claude/mcp.json` (proxy mode — recommended):
 
 ```json
 {
   "mcpServers": {
     "ping-mem": {
       "command": "bun",
-      "args": ["run", "/Users/umasankr/Projects/ping-mem/dist/mcp/cli.js"],
+      "args": ["run", "/Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js"],
       "env": {
-        "PING_MEM_DB_PATH": "~/.claude/ping-mem.db",
-        "NEO4J_URI": "bolt://localhost:7687",
-        "NEO4J_USERNAME": "neo4j",
-        "NEO4J_PASSWORD": "neo4j_password",
-        "QDRANT_URL": "http://localhost:6333",
-        "QDRANT_COLLECTION_NAME": "ping-mem-vectors",
-        "QDRANT_VECTOR_DIMENSIONS": "768"
+        "PING_MEM_REST_URL": "http://localhost:3003"
       }
     }
   }
 }
+```
+
+> **Note**: Direct mode (`dist/mcp/cli.js`) is deprecated — it opens the DB directly and causes concurrent access issues with Docker. Use proxy mode with `PING_MEM_REST_URL` instead.
 ```
 
 Tools are available as `context_*`, `codebase_*`, `diagnostics_*`, `worklog_*`.
@@ -103,7 +100,13 @@ Headers:
 Content-Type: application/json
 X-Session-ID: <session-id>       # For context operations
 X-API-Key: <key>                 # If authentication is configured
+Authorization: Bearer <key>      # Alternative to X-API-Key
+Authorization: Basic <base64>    # Required for tool invocation when admin credentials are set
 ```
+
+**Auth modes:**
+- **Bearer / API Key**: Most endpoints accept `X-API-Key` header or `Authorization: Bearer <token>`. Use this for general API access.
+- **Basic Auth**: The `POST /api/v1/tools/:name/invoke` endpoint requires `Authorization: Basic <base64(user:pass)>` when `PING_MEM_ADMIN_USER` and `PING_MEM_ADMIN_PASS` are configured. The TypeScript SDK supports this via the `basicAuth` config option.
 
 ### 3.3 TypeScript Client SDK
 

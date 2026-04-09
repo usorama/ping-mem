@@ -74,7 +74,8 @@ export async function renderInsightsTable(deps: UIDependencies): Promise<string>
         priority: r.priority ?? "normal",
         createdAt: r.created_at ?? null,
       }));
-    } catch {
+    } catch (error) {
+      log.warn("Failed to query insights", { error: error instanceof Error ? error.message : String(error) });
       return emptyState("No insights found. Run dreaming to generate insights.");
     }
 

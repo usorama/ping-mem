@@ -1438,7 +1438,8 @@ export class MemoryManager {
             if (!this.isVisibleToCurrentAgent(reconstructed)) continue;
             fallbackScored.push({ memory: reconstructed, score: 0.5 });
           }
-        } catch {
+        } catch (error) {
+          log.warn("Failed to reconstruct memory from event payload", { error: error instanceof Error ? error.message : String(error) });
           continue;
         }
       }

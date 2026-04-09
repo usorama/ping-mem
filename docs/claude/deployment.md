@@ -35,16 +35,17 @@ Production VPS: 72.62.117.123, install path: `/opt/ping-mem/`, shared with SN-As
 bun install && bun run build
 bun run start           # REST mode
 bun run start:sse       # SSE mode
-bun run dist/mcp/cli.js # MCP stdio
+PING_MEM_REST_URL=http://localhost:3003 bun run dist/mcp/proxy-cli.js  # MCP stdio (proxy mode, recommended)
 ```
+
+> **Note**: Direct mode (`bun run dist/mcp/cli.js`) is deprecated — it opens the DB directly and causes concurrent access issues with Docker. Use proxy mode instead.
 
 ## Full Stack (Neo4j + Qdrant required for ingestion)
 
 ```bash
 docker-compose up -d neo4j qdrant
-export NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME="neo4j" NEO4J_PASSWORD="your-pw"
-export QDRANT_URL="http://localhost:6333"
-bun run dist/mcp/cli.js
+export PING_MEM_REST_URL="http://localhost:3003"
+PING_MEM_REST_URL=http://localhost:3003 bun run dist/mcp/proxy-cli.js
 ```
 
 ## Docker Deployment

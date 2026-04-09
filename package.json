@@ -6,7 +6,8 @@
   "types": "dist/index.d.ts",
   "bin": {
     "ping-mem": "./dist/cli/index.js",
-    "ping-mem-mcp": "./dist/mcp/cli.js",
+    "ping-mem-mcp": "./dist/mcp/proxy-cli.js",
+    "ping-mem-mcp-direct": "./dist/mcp/cli.js",
     "ping-mem-http": "./dist/http/index.js"
   },
   "exports": {
@@ -37,7 +38,7 @@
     "start": "bun run dist/http/server.js",
     "start:sse": "PING_MEM_TRANSPORT=sse bun run dist/http/index.js",
     "start:rest": "PING_MEM_TRANSPORT=rest bun run dist/http/index.js",
-    "start:mcp": "bun run dist/mcp/cli.js",
+    "start:mcp": "bun run dist/mcp/proxy-cli.js",
     "start:proxy": "bun run dist/mcp/proxy-cli.js",
     "setup": "bash scripts/setup.sh",
     "setup:docker": "docker compose up -d",

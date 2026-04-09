@@ -81,7 +81,8 @@ function queryRecentProgress(db: import("bun:sqlite").Database, limit = 50): Min
       ORDER BY COALESCE(completed_at, started_at, created_at) DESC
       LIMIT ?
     `).all(limit) as MiningProgressRow[];
-  } catch {
+  } catch (error) {
+    log.warn("Failed to query mining progress", { error: error instanceof Error ? error.message : String(error) });
     return [];
   }
 }

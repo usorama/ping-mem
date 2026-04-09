@@ -38,11 +38,13 @@ import type {
 export class PingMemSDK {
   private readonly baseUrl: string;
   private readonly apiKey: string | undefined;
+  private readonly basicAuth: { username: string; password: string } | undefined;
   private readonly customHeaders: Record<string, string>;
 
   constructor(config: PingMemSDKConfig) {
     this.baseUrl = config.baseUrl.replace(/\/+$/, "");
     this.apiKey = config.apiKey;
+    this.basicAuth = config.basicAuth;
     this.customHeaders = config.headers ?? {};
   }
 
@@ -53,7 +55,10 @@ export class PingMemSDK {
       "Content-Type": "application/json",
       ...this.customHeaders,
     };
-    if (this.apiKey) {
+    if (this.basicAuth) {
+      const encoded = btoa(`${this.basicAuth.username}:${this.basicAuth.password}`);
+      h["Authorization"] = `Basic ${encoded}`;
+    } else if (this.apiKey) {
       h["Authorization"] = `Bearer ${this.apiKey}`;
     }
     return h;
