@@ -4,6 +4,12 @@ export interface PingMemSDKConfig {
   baseUrl: string;
   /** Optional Bearer token or API key for authenticated requests. */
   apiKey?: string | undefined;
+  /**
+   * Optional Basic Auth credentials (username:password).
+   * When set, the SDK sends `Authorization: Basic <base64>` instead of Bearer.
+   * Required for endpoints like `/api/v1/tools/:name/invoke` when admin credentials are configured.
+   */
+  basicAuth?: { username: string; password: string } | undefined;
   /** Optional custom headers merged into every request. */
   headers?: Record<string, string> | undefined;
 }

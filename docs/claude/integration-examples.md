@@ -1,6 +1,6 @@
 # Integration Examples
 
-## 1. Claude Code (stdio MCP)
+## 1. Claude Code (stdio MCP — proxy mode, recommended)
 
 In `~/.claude/mcp.json`:
 ```json
@@ -8,14 +8,16 @@ In `~/.claude/mcp.json`:
   "mcpServers": {
     "ping-mem": {
       "command": "bun",
-      "args": ["run", "/Users/umasankr/Projects/ping-mem/dist/mcp/cli.js"],
+      "args": ["run", "/Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js"],
       "env": {
-        "PING_MEM_DB_PATH": "~/.claude/ping-mem.db",
-        "PING_MEM_VECTOR_SEARCH": "false"
+        "PING_MEM_REST_URL": "http://localhost:3003"
       }
     }
   }
 }
+```
+
+> **Note**: Direct mode (`dist/mcp/cli.js`) is deprecated — it opens the DB directly and causes concurrent access issues with Docker. Use proxy mode instead.
 ```
 
 ## 2. Node.js (REST)

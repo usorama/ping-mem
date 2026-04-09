@@ -231,8 +231,9 @@ bun run smoke-test           # Run smoke tests
 │                          ▲                                  │
 │                          │ HTTP                             │
 │  ┌───────────────────────┴──────────────────────────────┐  │
-│  │ MCP Server (stdio, runs locally)                     │  │
-│  │  bun run dist/mcp/cli.js                             │  │
+│  │ MCP Server (stdio, runs locally — proxy mode)         │  │
+│  │  PING_MEM_REST_URL=http://localhost:3003              │  │
+│  │  bun run dist/mcp/proxy-cli.js                       │  │
 │  └───────────────────────┬──────────────────────────────┘  │
 │                          │ stdio                            │
 │  ┌───────────────────────┴──────────────────────────────┐  │
@@ -262,9 +263,11 @@ bun run smoke-test           # Run smoke tests
 - TTY access
 
 Docker containers can't easily provide this. Instead:
-- **MCP server runs locally** (via `bun run dist/mcp/cli.js`)
-- **Connects to Dockerized services** (Neo4j, Qdrant, ping-mem HTTP)
+- **MCP server runs locally** (via `PING_MEM_REST_URL=http://localhost:3003 bun run dist/mcp/proxy-cli.js`)
+- **Proxies all tool calls to Dockerized ping-mem** (which handles Neo4j, Qdrant, SQLite)
 - **IDE communicates via stdio** (standard input/output)
+
+> **Note**: Direct mode (`dist/mcp/cli.js`) is deprecated — it opens the DB directly and causes concurrent access issues with Docker. Use proxy mode instead.
 
 This architecture provides:
 - ✅ IDE integration (stdio works natively)
@@ -321,7 +324,7 @@ cat .cursor/mcp.json    # Cursor
 cat ~/.claude/mcp.json  # Claude Code
 
 # 2. Check ping-mem is built
-ls dist/mcp/cli.js
+ls dist/mcp/proxy-cli.js
 
 # 3. Rebuild if needed
 bun run build

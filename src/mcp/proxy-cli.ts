@@ -32,6 +32,10 @@ const ADMIN_PASS = process.env.PING_MEM_ADMIN_PASS ?? "";
 // Configurable tool call timeout (default: 15s for interactive tools)
 const TOOL_TIMEOUT_MS = parseInt(process.env["MCP_TOOL_TIMEOUT_MS"] ?? "15000", 10);
 
+// Per-client active session ID — set by context_session_start, cleared by context_session_end.
+// Sent as X-Session-ID header on every REST call to avoid server-global session cross-talk.
+let activeSessionId: string | null = null;
+
 // Long-running tools get a fixed 120s budget regardless of TOOL_TIMEOUT_MS
 const LONG_RUNNING_TOOLS = new Set([
   "codebase_ingest",
@@ -111,13 +115,17 @@ export async function proxyToolCall(
   name: string,
   args: Record<string, unknown>,
   baseUrl: string,
-  authHeader?: string
+  authHeader?: string,
+  sessionId?: string | null
 ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   if (authHeader) {
     headers["Authorization"] = authHeader;
+  }
+  if (sessionId) {
+    headers["X-Session-ID"] = sessionId;
   }
 
   // Long-running tools get a fixed 120s budget; interactive tools use TOOL_TIMEOUT_MS
@@ -215,7 +223,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 // Call tool: proxy to Docker REST
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
-  return proxyToolCall(name, (args as Record<string, unknown>) ?? {}, BASE_URL, AUTH_HEADER);
+  const result = await proxyToolCall(
+    name,
+    (args as Record<string, unknown>) ?? {},
+    BASE_URL,
+    AUTH_HEADER,
+    activeSessionId
+  );
+
+  // Track session lifecycle so subsequent calls include X-Session-ID
+  if (!result.isError && result.content[0]?.text) {
+    try {
+      const data = JSON.parse(result.content[0].text);
+      if (name === "context_session_start" && data?.id) {
+        activeSessionId = data.id;
+      } else if (name === "context_session_end") {
+        activeSessionId = null;
+      }
+    } catch {
+      // Response not JSON — skip session tracking
+    }
+  }
+
+  return result;
 });
 
 // ============================================================================

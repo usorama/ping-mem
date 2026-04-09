@@ -275,7 +275,7 @@ export class DreamingEngine {
     } catch {
       const match = raw.match(/\[[\s\S]*\]/);
       if (match) {
-        try { parsed = JSON.parse(match[0]); } catch { /* fall through */ }
+        try { parsed = JSON.parse(match[0]); } catch { log.warn("Regex-extracted JSON fragment also failed to parse", { fragmentLength: match[0].length }); }
       }
     }
     if (!Array.isArray(parsed)) {
@@ -304,14 +304,22 @@ export class DreamingEngine {
     });
     let parsed: Record<string, unknown>;
     try {
-      parsed = JSON.parse(raw) as Record<string, unknown>;
+      const raw_parsed = JSON.parse(raw);
+      if (raw_parsed === null || typeof raw_parsed !== "object" || Array.isArray(raw_parsed)) {
+        throw new Error("Expected JSON object, got " + typeof raw_parsed);
+      }
+      parsed = raw_parsed as Record<string, unknown>;
     } catch {
       const match = raw.match(/\{[\s\S]*\}/);
       if (match) {
         try {
-          parsed = JSON.parse(match[0]) as Record<string, unknown>;
+          const frag = JSON.parse(match[0]);
+          if (frag === null || typeof frag !== "object" || Array.isArray(frag)) {
+            throw new Error("Extracted fragment is not a JSON object");
+          }
+          parsed = frag as Record<string, unknown>;
         } catch {
-          log.warn("Generalization response was not valid JSON", { rawLength: raw.length });
+          log.warn("Generalization response was not valid JSON object", { rawLength: raw.length });
           return [];
         }
       } else {

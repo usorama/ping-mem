@@ -46,7 +46,6 @@ import {
   type SessionId,
   type MemoryCategory,
   type MemoryPriority,
-  type MemoryPrivacy,
   type EventType,
   type WorklogEventData,
   type Entity,
@@ -80,7 +79,6 @@ import {
   GraphHybridSearchSchema,
   CausalDiscoverSchema,
   WorklogRecordSchema,
-  MemorySubscribeSchema,
   MemoryUnsubscribeSchema,
   MemoryCompressSchema,
   ToolInvokeSchema,
@@ -284,11 +282,11 @@ export class RESTPingMemServer {
       if (c.req.path === "/static/codebase-diagram.html") {
         // codebase-diagram.html is a self-contained static page loaded in a same-origin
         // iframe. It uses external CDN resources (mermaid, Google Fonts) and inline
-        // styles/scripts which cannot use server-generated nonces. Apply a targeted CSP
-        // that allows only the specific CDNs this file actually uses.
+        // styles (1300+ lines, extraction out of scope — CSS-only XSS risk is minimal).
+        // Scripts are loaded from external files, so no 'unsafe-inline' needed for script-src.
         c.header(
           "Content-Security-Policy",
-          "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'",
+          "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'self'",
         );
       } else {
         c.header(
@@ -384,53 +382,60 @@ export class RESTPingMemServer {
     this.app.get("/health", async (c) => {
       // Health endpoint is ALWAYS unauthenticated — Docker healthchecks,
       // load balancers, and monitoring tools must reach it without API keys.
-
-      // Primary liveness gate: SQLite must be reachable.
-      const alive = await this.eventStore.ping();
-      if (!alive) {
-        log.error("Health check failed — SQLite unreachable");
-        return c.json({ status: "unhealthy", error: "SQLite unreachable" }, 503);
-      }
-
-      // Per-component status from HealthMonitor cached snapshot (zero inline latency).
-      // If no snapshot yet (first 60s), fall back to passive object-existence check.
-      const components: Record<string, string> = { sqlite: "ok" };
-      let degraded = false;
-
-      const snapshot = this.healthMonitor?.getStatus()?.lastSnapshot;
-      if (snapshot) {
-        // Extract .status from HealthComponent objects — do NOT assign raw objects
-        for (const [key, component] of Object.entries(snapshot.components)) {
-          components[key] = typeof component === "string" ? component : (component as { status: string }).status;
+      try {
+        // Primary liveness gate: SQLite must be reachable.
+        const alive = await this.eventStore.ping();
+        if (!alive) {
+          log.error("Health check failed — SQLite unreachable");
+          return c.json({ status: "unhealthy", error: "SQLite unreachable" }, 503);
         }
-        degraded = snapshot.status !== "ok";
-      } else {
-        // No snapshot yet (initializing): passive fallback with "initializing" status
-        if (this.graphManager) {
-          components["neo4j"] = "initializing";
-        } else if (process.env["NEO4J_URI"]) {
-          components["neo4j"] = "not_connected";
-          degraded = true;
-        }
-        if (this.qdrantClient) {
-          components["qdrant"] = "initializing";
-        } else if (process.env["QDRANT_URL"]) {
-          components["qdrant"] = "not_connected";
-          degraded = true;
-        }
-      }
 
-      // G11: Surface Qdrant keyword-only fallback
-      if (this.config.hybridSearchEngine?.isKeywordOnly?.()) {
-        components["search_mode"] = "keyword_only";
-      }
+        // Per-component status from HealthMonitor cached snapshot (zero inline latency).
+        // If no snapshot yet (first 60s), fall back to passive object-existence check.
+        const components: Record<string, string> = { sqlite: "ok" };
+        let degraded = false;
 
-      return c.json({
-        status: degraded ? "degraded" : "ok",
-        timestamp: new Date().toISOString(),
-        components,
-        embeddingProvider: this.config.embeddingService?.providerName ?? "none (keyword-only)",
-      });
+        const snapshot = this.healthMonitor?.getStatus()?.lastSnapshot;
+        if (snapshot) {
+          for (const [key, component] of Object.entries(snapshot.components)) {
+            if (component != null && typeof component === "object" && "status" in component) {
+              components[key] = String((component as { status: unknown }).status);
+            } else {
+              components[key] = typeof component === "string" ? component : "unknown";
+            }
+          }
+          degraded = snapshot.status !== "ok";
+        } else {
+          // No snapshot yet (initializing): passive fallback with "initializing" status
+          if (this.graphManager) {
+            components["neo4j"] = "initializing";
+          } else if (process.env["NEO4J_URI"]) {
+            components["neo4j"] = "not_connected";
+            degraded = true;
+          }
+          if (this.qdrantClient) {
+            components["qdrant"] = "initializing";
+          } else if (process.env["QDRANT_URL"]) {
+            components["qdrant"] = "not_connected";
+            degraded = true;
+          }
+        }
+
+        // G11: Surface Qdrant keyword-only fallback
+        if (this.config.hybridSearchEngine?.isKeywordOnly?.()) {
+          components["search_mode"] = "keyword_only";
+        }
+
+        return c.json({
+          status: degraded ? "degraded" : "ok",
+          timestamp: new Date().toISOString(),
+          components,
+          embeddingProvider: this.config.embeddingService?.providerName ?? "none (keyword-only)",
+        });
+      } catch (error) {
+        log.error("Health check threw unexpectedly", { error: error instanceof Error ? error.message : String(error) });
+        return c.json({ status: "unhealthy", error: "health probe failed" }, 503);
+      }
     });
 
     this.app.get("/api/v1/observability/status", async (c) => {
@@ -2817,10 +2822,10 @@ export class RESTPingMemServer {
         }
 
         const args = parseResult.data;
-        const sessionId = (args.sessionId ?? this.currentSessionId) as SessionId | null;
+        const sessionId = this.getSessionIdFromRequest(c, args.sessionId as string | undefined);
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
-            { error: "Bad Request", message: "No active session. Start a session first or provide sessionId in body." },
+            { error: "Bad Request", message: "No active session. Start a session first, pass X-Session-ID header, or provide sessionId in body." },
             400
           );
         }
@@ -2898,10 +2903,10 @@ export class RESTPingMemServer {
         catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
 
         const body = rawBody as Record<string, unknown>;
-        const sessionId = (body.sessionId as string) ?? (this.currentSessionId as string);
+        const sessionId = this.getSessionIdFromRequest(c, body.sessionId as string | undefined);
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
-            { error: "Bad Request", message: "No active session. Provide sessionId or start a session." },
+            { error: "Bad Request", message: "No active session. Pass X-Session-ID header, provide sessionId in body, or start a session." },
             400
           );
         }
@@ -2987,11 +2992,12 @@ export class RESTPingMemServer {
           if (!this.userProfileStore) {
             this.userProfileStore = new UserProfileStore();
           }
-          // Require an active session to bind the MemoryManager
-          const sessionId = this.currentSessionId;
+          // Require an active session to bind the MemoryManager.
+          // Use per-request session ID to avoid cross-talk between concurrent clients.
+          const sessionId = this.getSessionIdFromRequest(c, body.sessionId as string | undefined);
           if (!sessionId) {
             return c.json<RESTErrorResponse>(
-              { error: "Bad Request", message: "No active session. Start a session first." },
+              { error: "Bad Request", message: "No active session. Start a session first or pass X-Session-ID header." },
               400
             );
           }
@@ -3063,10 +3069,10 @@ export class RESTPingMemServer {
 
     this.app.get("/api/v1/insights", async (c) => {
       try {
-        const sessionId = this.currentSessionId;
+        const sessionId = this.getSessionIdFromRequest(c);
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
-            { error: "Bad Request", message: "No active session. Start a session first." },
+            { error: "Bad Request", message: "No active session. Start a session first or pass X-Session-ID header." },
             400
           );
         }
@@ -3090,10 +3096,10 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/dreaming/run", async (c) => {
       try {
-        const sessionId = this.currentSessionId;
+        const sessionId = this.getSessionIdFromRequest(c);
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
-            { error: "Bad Request", message: "No active session. Start a session first." },
+            { error: "Bad Request", message: "No active session. Start a session first or pass X-Session-ID header." },
             400
           );
         }
@@ -3122,10 +3128,10 @@ export class RESTPingMemServer {
 
     this.app.get("/api/v1/worklog", async (c) => {
       try {
-        const sessionId = (c.req.query("sessionId") ?? this.currentSessionId) as SessionId | null;
+        const sessionId = this.getSessionIdFromRequest(c, c.req.query("sessionId"));
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
-            { error: "Bad Request", message: "No active session. Start a session first or provide sessionId query param." },
+            { error: "Bad Request", message: "No active session. Start a session first, pass X-Session-ID header, or provide sessionId query param." },
             400
           );
         }
@@ -3597,7 +3603,6 @@ export class RESTPingMemServer {
         }
 
         // Validate args against the tool's own input schema (defense in depth)
-        const { z } = await import("zod");
         if (tool.inputSchema && typeof tool.inputSchema === "object") {
           const requiredProps = (tool.inputSchema as Record<string, unknown>).required;
           if (Array.isArray(requiredProps)) {
@@ -3666,6 +3671,13 @@ export class RESTPingMemServer {
           new MiningToolModule(state),
         ];
 
+        // Use per-request session ID from header/body when available (prevents cross-talk
+        // between concurrent proxy-cli clients). Fall back to server global for backwards compat.
+        const requestSessionId = this.getSessionIdFromRequest(c);
+        if (requestSessionId) {
+          state.currentSessionId = requestSessionId;
+        }
+
         const args = parseResult.data.args;
         for (const mod of modules) {
           const result = mod.handle(name, args);
@@ -3676,7 +3688,8 @@ export class RESTPingMemServer {
             // When context_session_start runs via /invoke, it updates
             // state.currentSessionId in the module's local state. We need
             // to propagate this back to the REST server so subsequent
-            // /invoke calls see the session.
+            // /invoke calls see the session (for non-proxy callers that
+            // don't send X-Session-ID).
             if (state.currentSessionId !== this.currentSessionId) {
               this.currentSessionId = state.currentSessionId;
             }

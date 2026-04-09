@@ -443,8 +443,8 @@ export class CcMemoryBridge {
         } else {
           grouped.set(category, [{ key, value, score: row.score }]);
         }
-      } catch {
-        // Skip unparseable payloads
+      } catch (error) {
+        log.warn("Skipping unparseable memory payload during export", { error: error instanceof Error ? error.message : String(error) });
       }
     }
 

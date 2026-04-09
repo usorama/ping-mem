@@ -19,6 +19,8 @@ export interface ServicePolicy {
   readonly name: string;
   readonly state: ServiceState;
   onStateChange(handler: (state: ServiceState) => void): void;
+  /** Reset internal circuit state to CLOSED without replacing the outer object. */
+  reset(): void;
 }
 
 function isTransient(err: unknown): boolean {
@@ -55,18 +57,23 @@ export function createServicePolicy(opts: {
 }): ServicePolicy {
   const transientOnly = handleWhen(isTransient);
 
-  const breaker = circuitBreaker(transientOnly, {
-    halfOpenAfter: opts.halfOpenAfterMs ?? 30_000,
-    breaker: new ConsecutiveBreaker(opts.consecutiveFailures ?? 5),
+  const consecutiveFailures = opts.consecutiveFailures ?? 5;
+  const halfOpenAfterMs = opts.halfOpenAfterMs ?? 30_000;
+  const maxRetries = opts.maxRetries ?? 3;
+  const timeoutMs = opts.timeoutMs ?? 15_000;
+
+  let breaker = circuitBreaker(transientOnly, {
+    halfOpenAfter: halfOpenAfterMs,
+    breaker: new ConsecutiveBreaker(consecutiveFailures),
   });
 
-  const retryPolicy = retry(transientOnly, {
-    maxAttempts: opts.maxRetries ?? 3,
+  let retryPolicy = retry(transientOnly, {
+    maxAttempts: maxRetries,
     backoff: new ExponentialBackoff({ initialDelay: 250, maxDelay: 10_000 }),
   });
 
-  const timeoutPolicy = timeout(opts.timeoutMs ?? 15_000, TimeoutStrategy.Aggressive);
-  const policy = wrap(retryPolicy, breaker, timeoutPolicy);
+  let timeoutPolicy = timeout(timeoutMs, TimeoutStrategy.Aggressive);
+  let policy = wrap(retryPolicy, breaker, timeoutPolicy);
 
   let currentState: ServiceState = "closed";
   // Use a Set to prevent duplicate handler registrations (common with re-initialization).
@@ -91,17 +98,22 @@ export function createServicePolicy(opts: {
     notifyHandlers(newState);
   };
 
-  breaker.onBreak(() => {
-    updateStateAndNotify("open");
-  });
+  /** Wire breaker event listeners to update currentState and notify handlers. */
+  function wireBreakerEvents(): void {
+    breaker.onBreak(() => {
+      updateStateAndNotify("open");
+    });
 
-  breaker.onHalfOpen(() => {
-    updateStateAndNotify("half-open");
-  });
+    breaker.onHalfOpen(() => {
+      updateStateAndNotify("half-open");
+    });
 
-  breaker.onReset(() => {
-    updateStateAndNotify("closed");
-  });
+    breaker.onReset(() => {
+      updateStateAndNotify("closed");
+    });
+  }
+
+  wireBreakerEvents();
 
   return {
     execute: <T>(fn: () => Promise<T>) => policy.execute(fn),
@@ -111,6 +123,27 @@ export function createServicePolicy(opts: {
     },
     onStateChange: (handler: (state: ServiceState) => void) => {
       handlers.add(handler);
+    },
+    reset(): void {
+      // Create fresh internal circuit components — the outer ServicePolicy
+      // object identity stays the same, so in-flight callers holding a reference
+      // to this ServicePolicy will use the new internals on their next execute().
+      breaker = circuitBreaker(transientOnly, {
+        halfOpenAfter: halfOpenAfterMs,
+        breaker: new ConsecutiveBreaker(consecutiveFailures),
+      });
+      retryPolicy = retry(transientOnly, {
+        maxAttempts: maxRetries,
+        backoff: new ExponentialBackoff({ initialDelay: 250, maxDelay: 10_000 }),
+      });
+      timeoutPolicy = timeout(timeoutMs, TimeoutStrategy.Aggressive);
+      policy = wrap(retryPolicy, breaker, timeoutPolicy);
+
+      // Re-wire breaker event listeners to the new breaker instance.
+      wireBreakerEvents();
+
+      // Reset state to closed and notify all handlers.
+      updateStateAndNotify("closed");
     },
   };
 }

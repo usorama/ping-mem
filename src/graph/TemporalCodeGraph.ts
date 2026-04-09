@@ -494,7 +494,7 @@ export class TemporalCodeGraph {
       `
       UNWIND $items AS item
       MATCH (f:File { fileId: item.fileId })
-      WITH f, item WHERE f IS NOT NULL
+      WITH f, item
       MERGE (c:Chunk { chunkId: item.chunkId })
       SET c.type = item.type,
           c.start = item.start,
@@ -546,7 +546,7 @@ export class TemporalCodeGraph {
       `
       UNWIND $items AS item
       MATCH (f:File { fileId: item.fileId })
-      WITH f, item WHERE f IS NOT NULL
+      WITH f, item
       MERGE (s:Symbol { symbolId: item.symbolId })
       SET s.name = item.name,
           s.kind = item.kind,
