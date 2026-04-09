@@ -15,6 +15,7 @@ import * as os from "os";
 import * as readline from "node:readline";
 import type { MemoryManager } from "../memory/MemoryManager.js";
 import type { UserProfileStore } from "../profile/UserProfile.js";
+import type { EventStore } from "../storage/EventStore.js";
 import { createLogger } from "../util/logger.js";
 import { callClaude } from "../llm/ClaudeCli.js";
 
@@ -82,12 +83,16 @@ export class TranscriptMiner {
   /** Singleton lock — prevents concurrent mine() calls */
   private miningLock = false;
 
+  private readonly eventStore: EventStore | null;
+
   constructor(
     private readonly db: Database,
     private readonly memoryManager: MemoryManager,
     private readonly userProfile: UserProfileStore,
-    private readonly config: MiningConfig = DEFAULT_CONFIG
+    private readonly config: MiningConfig = DEFAULT_CONFIG,
+    eventStore?: EventStore
   ) {
+    this.eventStore = eventStore ?? null;
     this.initSchema();
   }
 
@@ -353,10 +358,17 @@ export class TranscriptMiner {
     }
 
     log.debug(`Saved ${saved}/${facts.length} facts from ${sessionFile}`);
-    // TODO: Emit TRANSCRIPT_MINED event here. TranscriptMiner currently lacks an
-    // EventStore dependency. Wire it in via constructor injection and call:
-    //   this.eventStore.createEvent(sessionId, "TRANSCRIPT_MINED", { sessionFile, project, factsExtracted: saved })
-    // This requires a constructor change and passing the EventStore from rest-server.ts.
+    if (this.eventStore && saved > 0) {
+      void this.eventStore.createEvent(
+        "system",
+        "TRANSCRIPT_MINED",
+        { sessionFile, project, factsExtracted: saved }
+      ).catch((err) => {
+        log.warn("Failed to emit TRANSCRIPT_MINED event", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
     return saved;
   }
 

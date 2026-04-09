@@ -103,6 +103,8 @@ export async function startHTTPServer(): Promise<void> {
     neo4jClient: services.neo4jClient,
     healthMonitor,
     eventStore,
+    llmEntityExtractor: services.llmEntityExtractor,
+    embeddingService: services.embeddingService,
   });
 
   // Always create SSE/MCP server (handles /mcp endpoint for MCP streamable-http)
@@ -121,6 +123,7 @@ export async function startHTTPServer(): Promise<void> {
     ingestionService,
     qdrantClient: services.qdrantClient,
     eventStore,
+    llmEntityExtractor: services.llmEntityExtractor,
   });
 
   // Unified server instance for lifecycle management (start/stop/hydrate)

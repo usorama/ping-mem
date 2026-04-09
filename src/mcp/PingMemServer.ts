@@ -112,6 +112,8 @@ export interface PingMemServerConfig {
   eventStore?: import("../storage/EventStore.js").EventStore | undefined;
   /** Optional ContradictionDetector for advisory contradiction checks on save */
   contradictionDetector?: import("../graph/ContradictionDetector.js").ContradictionDetector | undefined;
+  /** Optional EmbeddingService — exposed for health observability (shows active provider) */
+  embeddingService?: import("../search/EmbeddingService.js").EmbeddingService | undefined;
 }
 
 // ============================================================================

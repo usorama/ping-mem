@@ -412,6 +412,7 @@ export class RESTPingMemServer {
         status: degraded ? "degraded" : "ok",
         timestamp: new Date().toISOString(),
         components,
+        embeddingProvider: this.config.embeddingService?.providerName ?? "none (keyword-only)",
       });
     });
 
@@ -2978,7 +2979,9 @@ export class RESTPingMemServer {
           this.transcriptMiner = new TranscriptMiner(
             this.eventStore.getDatabase(),
             memoryManager,
-            this.userProfileStore
+            this.userProfileStore,
+            undefined,
+            this.eventStore
           );
         }
 
@@ -3764,7 +3767,9 @@ export class RESTPingMemServer {
           this.transcriptMiner = new TranscriptMiner(
             this.eventStore.getDatabase(),
             memoryManager,
-            this.userProfileStore
+            this.userProfileStore,
+            undefined,
+            this.eventStore
           );
         }
         return this.transcriptMiner.mine(options);

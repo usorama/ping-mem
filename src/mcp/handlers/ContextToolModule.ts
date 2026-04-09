@@ -964,6 +964,12 @@ export class ContextToolModule implements ToolModule {
     const filtered = results.filter((r) => (r.score ?? 0) >= minScore);
 
     if (filtered.length === 0) {
+      // Emit RECALL_MISS event fire-and-forget for observability and future consolidation triggers
+      void this.state.eventStore.createEvent(
+        this.state.currentSessionId ?? "system",
+        "RECALL_MISS",
+        { query: queryText, timestamp: Date.now() }
+      ).catch(() => { /* never block recall path */ });
       return { recalled: false, reason: "no relevant memories found", context: "" };
     }
 

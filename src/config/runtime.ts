@@ -18,6 +18,9 @@ import { QdrantClientWrapper } from "../search/QdrantClient.js";
 import type { HealthMonitor } from "../observability/HealthMonitor.js";
 import { HybridSearchEngine, createHybridSearchEngine, createKeywordOnlySearchEngine } from "../search/HybridSearchEngine.js";
 import { createEmbeddingServiceFromEnv, type EmbeddingService } from "../search/EmbeddingService.js";
+import { LLMEntityExtractor, type LLMEntityExtractorConfig } from "../graph/LLMEntityExtractor.js";
+import { EntityExtractor } from "../graph/EntityExtractor.js";
+import OpenAI from "openai";
 import { createLogger } from "../util/logger.js";
 
 const log = createLogger("Runtime");
@@ -51,6 +54,7 @@ export interface RuntimeServices {
   healthMonitor?: HealthMonitor;
   hybridSearchEngine?: HybridSearchEngine;
   embeddingService?: EmbeddingService;
+  llmEntityExtractor?: LLMEntityExtractor;
 }
 
 function getNeo4jUsername(): string | undefined {
@@ -179,6 +183,22 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
     // No API keys configured — create keyword-only engine
     services.hybridSearchEngine = createKeywordOnlySearchEngine();
     log.info("HybridSearchEngine created (keyword-only, no embedding API key configured)");
+  }
+
+  // Wire LLMEntityExtractor if OPENAI_API_KEY and graphManager are available
+  const openAiKey = process.env["OPENAI_API_KEY"];
+  if (openAiKey && services.graphManager) {
+    const openaiClient = new OpenAI({ apiKey: openAiKey }) as unknown as LLMEntityExtractorConfig["openai"];
+    const fallbackExtractor = new EntityExtractor();
+    services.llmEntityExtractor = new LLMEntityExtractor({
+      openai: openaiClient,
+      fallbackExtractor,
+    });
+    log.info("LLMEntityExtractor created (OpenAI gpt-4o-mini)");
+  } else if (!openAiKey) {
+    log.info("LLMEntityExtractor disabled (OPENAI_API_KEY not set)");
+  } else {
+    log.info("LLMEntityExtractor disabled (graphManager not available)");
   }
 
   return services;
