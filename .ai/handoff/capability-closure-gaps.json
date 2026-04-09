@@ -1,0 +1,26 @@
+[
+  {
+    "gap_id": "MT-1",
+    "title": "Missing test: TranscriptMiner TRANSCRIPT_MINED event emission",
+    "route_to": "execute",
+    "complexity": "trivial",
+    "evidence": "TranscriptMiner:362-365 emits TRANSCRIPT_MINED fire-and-forget when eventStore present and saved>0. No test exists in src/mining/__tests__/ covering this code path.",
+    "suggested_fix": "Add test to src/mining/__tests__/TranscriptMiner.test.ts: construct TranscriptMiner with mock eventStore, run mine(), assert createEvent called with TRANSCRIPT_MINED."
+  },
+  {
+    "gap_id": "MT-2",
+    "title": "Missing test: RECALL_MISS event emission on zero-result auto_recall",
+    "route_to": "execute",
+    "complexity": "trivial",
+    "evidence": "ContextToolModule:974-979 emits RECALL_MISS when filtered.length===0. No test covers this path.",
+    "suggested_fix": "Add test to context_auto_recall handler: mock memoryManager.recall to return [], assert eventStore.createEvent called with RECALL_MISS type."
+  },
+  {
+    "gap_id": "GAP-M1-docs",
+    "title": "DreamingEngine module comment missing Claude CLI dependency note",
+    "route_to": "execute",
+    "complexity": "trivial",
+    "evidence": "DreamingEngine.ts module doc says 'Performs periodic LLM reasoning' but does not note that it requires Claude CLI (callClaude) and cannot fall back to Ollama. Plan outcome was 'DreamingEngine Claude dependency documented'.",
+    "suggested_fix": "Add one JSDoc line to DreamingEngine.ts @module comment: '@requires Claude Code CLI — uses callClaude() directly; Ollama fallback not available for dreaming.'"
+  }
+]

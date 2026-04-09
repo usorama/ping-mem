@@ -13,6 +13,20 @@ import { TranscriptMiner } from "../TranscriptMiner.js";
 import type { MiningConfig } from "../TranscriptMiner.js";
 
 // ============================================================================
+// Module-level mock for callClaude (process-global — must be at top level)
+// ============================================================================
+
+let _mockCallClaudeImpl: () => Promise<string> = async () => "[]";
+
+mock.module("../../llm/ClaudeCli.js", () => ({
+  callClaude: () => _mockCallClaudeImpl(),
+}));
+
+function setMockCallClaude(returnValue: string): void {
+  _mockCallClaudeImpl = async () => returnValue;
+}
+
+// ============================================================================
 // Minimal stubs
 // ============================================================================
 
@@ -401,6 +415,67 @@ describe("TranscriptMiner", () => {
       const result = await miner.mine();
       expect(result.sessionsScanned).toBe(0);
       expect(result.errors).toHaveLength(0);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // TRANSCRIPT_MINED event emission
+  // --------------------------------------------------------------------------
+
+  describe("eventStore — TRANSCRIPT_MINED emission", () => {
+    it("emits TRANSCRIPT_MINED when mining saves facts", async () => {
+      // Mock callClaude to return two facts
+      setMockCallClaude('["User prefers dark mode", "User works on ping-mem"]');
+
+      // Create a project dir with a session that has a user message
+      const projectDir = path.join(tmpDir, "test-project");
+      fs.mkdirSync(projectDir);
+      const jsonlPath = path.join(projectDir, "session.jsonl");
+      fs.writeFileSync(
+        jsonlPath,
+        JSON.stringify({ role: "user", content: "I prefer dark mode when working on ping-mem" }) + "\n"
+      );
+
+      const createEvent = mock(async () => ({ eventId: "test-evt" }));
+      const mockEventStore = { createEvent } as never;
+
+      const config = createConfig(tmpDir);
+      const miner = new TranscriptMiner(db, memoryManager as never, userProfile as never, config, mockEventStore);
+
+      await miner.mine({ limit: 1 });
+
+      // Give fire-and-forget a tick to resolve
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(createEvent).toHaveBeenCalledWith(
+        "system",
+        "TRANSCRIPT_MINED",
+        expect.objectContaining({ project: "test-project", factsExtracted: 2 })
+      );
+    });
+
+    it("does not emit TRANSCRIPT_MINED when no facts are saved", async () => {
+      // Mock callClaude to return empty array
+      setMockCallClaude("[]");
+
+      const projectDir = path.join(tmpDir, "empty-project");
+      fs.mkdirSync(projectDir);
+      const jsonlPath = path.join(projectDir, "session.jsonl");
+      fs.writeFileSync(
+        jsonlPath,
+        JSON.stringify({ role: "user", content: "hi" }) + "\n"
+      );
+
+      const createEvent = mock(async () => ({ eventId: "test-evt" }));
+      const mockEventStore = { createEvent } as never;
+
+      const config = createConfig(tmpDir);
+      const miner = new TranscriptMiner(db, memoryManager as never, userProfile as never, config, mockEventStore);
+
+      await miner.mine({ limit: 1 });
+      await new Promise((r) => setTimeout(r, 20));
+
+      expect(createEvent).not.toHaveBeenCalled();
     });
   });
 });

@@ -14,6 +14,7 @@
  *
  * @module dreaming/DreamingEngine
  * @version 1.0.0
+ * @requires Claude Code CLI — uses callClaude() directly; Ollama/OpenAI fallback not available for dreaming.
  */
 
 import type { Memory, SessionId } from "../types/index.js";

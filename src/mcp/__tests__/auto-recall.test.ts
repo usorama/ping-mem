@@ -57,6 +57,26 @@ describe("context_auto_recall", () => {
     expect(result.reason).toBe("no relevant memories found");
   });
 
+  it("emits RECALL_MISS event when zero-result recall occurs", async () => {
+    await callTool(server, "context_session_start", { name: "recall-miss-session" });
+
+    const uniqueQuery = `recall-miss-test-${Date.now()}`;
+    await callTool(server, "context_auto_recall", { query: uniqueQuery });
+
+    // Give fire-and-forget a tick to resolve
+    await new Promise((r) => setTimeout(r, 20));
+
+    const eventStore = (server as unknown as { eventStore: { getDatabase: () => import("bun:sqlite").Database } }).eventStore;
+    const db = eventStore.getDatabase();
+    const row = db.prepare(
+      `SELECT COUNT(*) as count FROM events
+       WHERE event_type = 'RECALL_MISS'
+       AND json_extract(payload, '$.query') = ?`
+    ).get(uniqueQuery) as { count: number };
+
+    expect(row.count).toBe(1);
+  });
+
   it("should return formatted context when relevant memories exist", async () => {
     await callTool(server, "context_session_start", { name: "test-session" });
 
