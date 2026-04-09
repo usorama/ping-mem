@@ -15,6 +15,23 @@ verification_method: "4-agent binary verification (4 agents: codebase functions,
 
 # Full Capability Activation Plan
 
+## Judge Panel Results (2026-04-09)
+
+| Judge | Score | Verdict | Key Concerns |
+|-------|-------|---------|-------------|
+| Opus 4.6 (live codebase) | 62/80 | **GO** | GH issue number mapping confusion; stash-pop workflow imprecision; V3.1 premise; typecheck not in Phase 0 gate |
+| Gemini 3.1 Pro | 79/80 | **GO** | Scope Accuracy -1: main body still documents all phases, preamble has reduced scope |
+| GPT-5.4 (Codex, ran typecheck) | GO | **GO** | "No discrete correctness, security, or maintainability bugs. RECALL_MISS emission is non-blocking and guarded. Typecheck: PASS (0 errors)." |
+
+**PANEL VERDICT: GO** — 3/3 judges approved. Plan is ready for execution.
+
+**Pre-execution checklist from judges:**
+- [ ] Add `bun run typecheck` to Phase 0 gate (Opus finding)
+- [ ] Note in Phase 0 that stash already provides most regression fixes — edit-after-pop is minimal
+- [ ] queryBlastRadius also needs LIMIT added (not just queryImpact) — both LIMIT 100 in stash
+
+---
+
 ## VERIFY Amendments (Iteration 1 — 2026-04-09)
 
 Four parallel VERIFY agents ran. Critical findings drastically change implementation scope.
