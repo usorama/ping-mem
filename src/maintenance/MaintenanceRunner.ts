@@ -290,7 +290,7 @@ export class MaintenanceRunner {
         ).get(candidate.memory_id) as SessionRow | null;
 
         if (sessionRow) {
-          this.eventStore.createEvent(
+          await this.eventStore.createEvent(
             sessionRow.session_id,
             "MEMORY_SUPERSEDED",
             {

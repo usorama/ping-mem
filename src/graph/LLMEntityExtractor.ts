@@ -9,6 +9,8 @@
  */
 
 import { randomUUID } from "crypto";
+import * as fs from "fs";
+import * as path from "path";
 import { EntityType, RelationshipType } from "../types/graph.js";
 import type { Entity, Relationship, EntityExtractResult } from "../types/graph.js";
 import type { EntityExtractor } from "./EntityExtractor.js";
@@ -126,25 +128,18 @@ const RELATIONSHIP_TYPE_MAP: Record<string, RelationshipType> = {
 /**
  * System prompt instructing the LLM to extract entities and relationships as structured JSON.
  */
-const SYSTEM_PROMPT = `You are an entity and relationship extractor for a knowledge graph. Extract entities and relationships from the given text.
+const SYSTEM_PROMPT_FALLBACK = `Extract entities and relationships from text. Return JSON: { "entities": [...], "relationships": [...] }`;
 
-Return JSON with this exact structure:
-{
-  "entities": [
-    { "name": "EntityName", "type": "ENTITY_TYPE", "confidence": 0.95, "context": "brief context" }
-  ],
-  "relationships": [
-    { "source": "SourceEntity", "target": "TargetEntity", "type": "RELATIONSHIP_TYPE", "confidence": 0.85, "evidence": "supporting text" }
-  ]
+function loadEntityPrompt(): string {
+  try {
+    const promptPath = path.join(import.meta.dir, "prompts", "entity-extractor.md");
+    return fs.readFileSync(promptPath, "utf-8").trim();
+  } catch {
+    return SYSTEM_PROMPT_FALLBACK;
+  }
 }
 
-Entity types: CONCEPT, PERSON, ORGANIZATION, LOCATION, EVENT, CODE_FILE, CODE_FUNCTION, CODE_CLASS, DECISION, TASK, ERROR, FACT
-Relationship types: DEPENDS_ON, RELATED_TO, CAUSES, IMPLEMENTS, USES, REFERENCES, FOLLOWS, CONTAINS, DERIVED_FROM, BLOCKS
-
-Rules:
-- Only extract clearly mentioned entities (confidence > 0.7)
-- Use the most specific entity type available
-- Include evidence for each relationship`;
+const SYSTEM_PROMPT = loadEntityPrompt();
 
 // ============================================================================
 // LLMEntityExtractor Class

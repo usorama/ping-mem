@@ -92,6 +92,7 @@ export class CodeEmbeddingProvider implements EmbeddingProvider {
           model: this.model,
           output_dimension: this.dimensions,
         }),
+        signal: AbortSignal.timeout(30_000),
       });
 
       if (!response.ok) {

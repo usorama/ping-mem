@@ -85,7 +85,10 @@ export class TemporalCodeGraph {
         SET p.name = $name,
             p.rootPath = $rootPath,
             p.treeHash = $treeHash,
-            p.lastIngestedAt = $ingestedAt
+            p.lastIngestedAt = $ingestedAt,
+            p.filesCount = $filesCount,
+            p.chunksCount = $chunksCount,
+            p.commitsCount = $commitsCount
         `,
         {
           projectId: result.projectId,
@@ -93,6 +96,9 @@ export class TemporalCodeGraph {
           rootPath: result.projectManifest.rootPath,
           treeHash: result.projectManifest.treeHash,
           ingestedAt: result.ingestedAt,
+          filesCount: neo4j.int(result.codeFiles?.length ?? 0),
+          chunksCount: neo4j.int(result.codeFiles?.reduce((sum, f) => sum + (f.chunks?.length ?? 0), 0) ?? 0),
+          commitsCount: neo4j.int(result.gitHistory?.commits?.length ?? 0),
         }
       );
     } finally {
@@ -334,36 +340,30 @@ export class TemporalCodeGraph {
         `
         MATCH (p:Project)
         ${whereClause}
-        OPTIONAL MATCH (p)-[:HAS_FILE]->(f:File)
-        OPTIONAL MATCH (f)-[:HAS_CHUNK]->(c:Chunk)
-        OPTIONAL MATCH (p)-[:HAS_COMMIT]->(commit:Commit)
-        WITH p,
-             count(DISTINCT f) AS filesCount,
-             count(DISTINCT c) AS chunksCount,
-             count(DISTINCT commit) AS commitsCount
         RETURN p.projectId AS projectId,
                p.rootPath AS rootPath,
                p.treeHash AS treeHash,
                p.lastIngestedAt AS lastIngestedAt,
-               filesCount,
-               chunksCount,
-               commitsCount
+               p.filesCount AS filesCount,
+               p.chunksCount AS chunksCount,
+               p.commitsCount AS commitsCount
         ${orderByClause}
         LIMIT $limit
         `,
         {
           projectId: projectId ?? null,
           limit: neo4j.int(limit),
-        }
+        },
+        { timeout: 10000 }
       );
 
       return result.records.map((r) => ({
         projectId: r.get("projectId") as string,
         rootPath: r.get("rootPath") as string,
         treeHash: r.get("treeHash") as string,
-        filesCount: r.get("filesCount").toNumber() as number,
-        chunksCount: r.get("chunksCount").toNumber() as number,
-        commitsCount: r.get("commitsCount").toNumber() as number,
+        filesCount: r.get("filesCount")?.toNumber?.() ?? 0,
+        chunksCount: r.get("chunksCount")?.toNumber?.() ?? 0,
+        commitsCount: r.get("commitsCount")?.toNumber?.() ?? 0,
         lastIngestedAt: r.get("lastIngestedAt") as string,
       }));
     } catch (error) {
@@ -812,7 +812,7 @@ export class TemporalCodeGraph {
     } finally { await session.close(); }
   }
 
-  async queryBlastRadius(projectId: string, filePath: string, maxDepth: number = 5): Promise<Array<{ file: string; depth: number }>> {
+  async queryBlastRadius(projectId: string, filePath: string, maxDepth: number = 5, limit: number = 500): Promise<Array<{ file: string; depth: number }>> {
     const session = this.neo4j.getSession();
     try {
       const fileId = this.computeFileId(filePath);
@@ -821,13 +821,19 @@ export class TemporalCodeGraph {
         `MATCH path = (src:File { fileId: $fileId })-[:STRUCTURAL_EDGE*1..${d}]->(tgt:File)
          WHERE ALL(r IN relationships(path) WHERE r.projectId = $projectId AND r.kind = 'IMPORTS_FROM')
          WITH tgt, length(path) AS depth
-         RETURN DISTINCT tgt.path AS file, min(depth) AS depth ORDER BY depth, tgt.path`,
-        { fileId, projectId }
+         RETURN DISTINCT tgt.path AS file, min(depth) AS depth ORDER BY depth, tgt.path
+         LIMIT $limit`,
+        { fileId, projectId, limit: neo4j.int(limit) },
+        { timeout: 10000 }
       );
-      return result.records.map((r) => ({
+      const records = result.records.map((r) => ({
         file: r.get("file") as string,
         depth: typeof r.get("depth") === "object" ? (r.get("depth") as { toNumber: () => number }).toNumber() : (r.get("depth") as number),
       }));
+      if (records.length === limit) {
+        log.warn("queryBlastRadius hit limit — results may be incomplete", { filePath, limit });
+      }
+      return records;
     } finally { await session.close(); }
   }
 

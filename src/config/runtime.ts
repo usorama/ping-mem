@@ -20,6 +20,7 @@ import { HybridSearchEngine, createHybridSearchEngine, createKeywordOnlySearchEn
 import { createEmbeddingServiceFromEnv, type EmbeddingService } from "../search/EmbeddingService.js";
 import { LLMEntityExtractor, type LLMEntityExtractorConfig } from "../graph/LLMEntityExtractor.js";
 import { EntityExtractor } from "../graph/EntityExtractor.js";
+import { CausalGraphManager } from "../graph/CausalGraphManager.js";
 import OpenAI from "openai";
 import { createLogger } from "../util/logger.js";
 
@@ -55,6 +56,7 @@ export interface RuntimeServices {
   hybridSearchEngine?: HybridSearchEngine;
   embeddingService?: EmbeddingService;
   llmEntityExtractor?: LLMEntityExtractor;
+  causalGraphManager?: CausalGraphManager;
 }
 
 function getNeo4jUsername(): string | undefined {
@@ -138,6 +140,7 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
           temporalStore: services.temporalStore,
           graphManager: services.graphManager,
         });
+        services.causalGraphManager = new CausalGraphManager({ graphManager: services.graphManager });
         log.info("Neo4j connected", { attempt });
         break;
       } catch (err) {

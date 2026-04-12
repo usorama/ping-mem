@@ -12,6 +12,7 @@ import type { SessionState } from "./shared.js";
 import { ProjectScanner } from "../../ingest/ProjectScanner.js";
 import { AdminStore } from "../../admin/AdminStore.js";
 import { createLogger } from "../../util/logger.js";
+import { isProjectDirSafe } from "../../util/path-safety.js";
 
 const log = createLogger("CodebaseToolModule");
 import {
@@ -158,6 +159,12 @@ export class CodebaseToolModule implements ToolModule {
     }
 
     const projectDir = args.projectDir as string;
+    if (!projectDir || typeof projectDir !== "string") {
+      throw new Error("projectDir must be a non-empty string");
+    }
+    if (!isProjectDirSafe(projectDir)) {
+      throw new Error("projectDir is outside allowed roots");
+    }
     const forceReingest = args.forceReingest === true;
 
     const ingestOpts: import("../../ingest/IngestionService.js").IngestProjectOptions = {

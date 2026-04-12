@@ -1,0 +1,36 @@
+# Paro-scheduled autoresearch jobs for ping-mem LLM paths
+# Paro's heartbeat scans ~/Projects/*/paro-jobs.yaml hourly
+
+jobs:
+  - name: autoresearch-dreaming-baseline
+    description: Measure baseline PES for DreamingEngine deduction + generalization prompts
+    schedule: weekly
+    priority: P3
+    assign: projects
+    context:
+      cwd: ~/Projects/auto-os
+    actions:
+      - action: "bin/aos-autoresearch dreaming --project ~/Projects/ping-mem --baseline-only"
+        tier: T1
+
+  - name: autoresearch-transcript-miner
+    description: Run 5 autoresearch experiments on TranscriptMiner fact extraction quality
+    schedule: weekly
+    priority: P3
+    assign: projects
+    context:
+      cwd: ~/Projects/auto-os
+    actions:
+      - action: "bin/aos-autoresearch transcript-miner --project ~/Projects/ping-mem --max 5"
+        tier: T2
+
+  - name: autoresearch-entity-extractor
+    description: Run 3 autoresearch experiments on LLMEntityExtractor precision
+    schedule: biweekly
+    priority: P4
+    assign: projects
+    context:
+      cwd: ~/Projects/auto-os
+    actions:
+      - action: "bin/aos-autoresearch entity-extractor --project ~/Projects/ping-mem --max 3"
+        tier: T2

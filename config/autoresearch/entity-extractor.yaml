@@ -1,0 +1,15 @@
+# Autoresearch config for LLMEntityExtractor prompt
+# Run: aos-autoresearch entity-extractor --project ~/Projects/ping-mem --config config/autoresearch/entity-extractor.yaml
+
+mutable_artifacts:
+  - src/graph/prompts/entity-extractor.md
+
+benchmark_suite: config/evals/entity-extractor.yaml
+
+pes_weights:
+  entity_precision: 0.40
+  relation_precision: 0.35
+  completeness: 0.25
+
+budget_seconds: 120
+model: gpt-4o-mini

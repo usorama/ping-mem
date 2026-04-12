@@ -38,6 +38,14 @@ const DEFAULT_IGNORE_DIRS = new Set([
   ".terraform",
   ".serverless",
   "e2e-tests",
+  // Phase 2: Audit-driven additions (GH#114)
+  ".autoresearch",
+  ".beads",
+  ".mulch",
+  ".playwright-mcp",
+  ".deployments",
+  "snapshots",
+  "docs",
 ]);
 
 const DEFAULT_EXCLUDE_EXTENSIONS = new Set([
@@ -60,6 +68,11 @@ const DEFAULT_EXCLUDE_EXTENSIONS = new Set([
   // Phase 1.3: Extended exclude extensions
   ".d.ts", ".map", ".min.js", ".min.css", ".snap",
   ".csv", ".log", ".wasm",
+  // Phase 2: Audit-driven additions (GH#114)
+  ".pbxproj", ".xcworkspacedata", ".xcscheme", ".tsbuildinfo", ".plist",
+  ".sh", ".bat",
+  ".md",
+  ".jsonl",
 ]);
 
 const MANIFEST_SCHEMA_VERSION = 1;
@@ -209,9 +222,39 @@ export class ProjectScanner {
     if (this.useGitLsFiles) {
       const gitFiles = await this.tryGitLsFiles(rootPath);
       if (gitFiles !== null) {
-        log.info(`Using git ls-files: ${gitFiles.length} tracked files`);
-        return gitFiles
+        // Build effective ignore set: defaults + .gitignore + .pingmemignore patterns
+        const effectiveIgnoreDirs = new Set(this.ignoreDirs);
+        const ignorePathPrefixes: string[] = [];
+
+        // Parse .gitignore and .pingmemignore for directory patterns
+        for (const ignoreFile of [".gitignore", ".pingmemignore"]) {
+          try {
+            const content = fs.readFileSync(path.join(rootPath, ignoreFile), "utf-8");
+            for (const line of content.split("\n")) {
+              const trimmed = line.trim();
+              if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("!")) continue;
+              const cleaned = trimmed.replace(/^\//, "").replace(/\/+$/, "");
+              if (!cleaned) continue;
+              if (cleaned.includes("*") || cleaned.includes("?")) continue; // skip globs for now
+              // If it contains a slash, treat as path prefix (e.g., "docs/knowledge-base")
+              if (cleaned.includes("/")) {
+                ignorePathPrefixes.push(cleaned);
+              } else {
+                effectiveIgnoreDirs.add(cleaned);
+              }
+            }
+          } catch {
+            // File doesn't exist — skip
+          }
+        }
+
+        const preFilter = gitFiles.length;
+        const filtered = gitFiles
           .filter(f => {
+            // Filter out files in ignored directories or matching path prefixes
+            const parts = f.split(path.sep);
+            if (parts.some(part => effectiveIgnoreDirs.has(part))) return false;
+            if (ignorePathPrefixes.some(prefix => f.startsWith(prefix))) return false;
             const ext = path.extname(f).toLowerCase();
             // Phase 1.3: Check compound extensions like .d.ts, .min.js, .min.css
             const compoundExt = this.getCompoundExtension(f);
@@ -222,6 +265,9 @@ export class ProjectScanner {
           })
           .map(f => path.join(rootPath, f))
           .sort();
+        const skipped = preFilter - filtered.length;
+        log.info(`Using git ls-files: ${preFilter} tracked, ${skipped} filtered by ignore rules, ${filtered.length} to ingest`);
+        return filtered;
       }
     }
 

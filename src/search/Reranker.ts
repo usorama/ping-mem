@@ -107,6 +107,7 @@ export class Reranker {
           documents,
           top_n: Math.min(this.topK, documents.length),
         }),
+        signal: AbortSignal.timeout(30_000),
       });
 
       if (!response.ok) {

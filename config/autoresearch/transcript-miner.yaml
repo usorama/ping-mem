@@ -1,0 +1,15 @@
+# Autoresearch config for TranscriptMiner prompt
+# Run: aos-autoresearch transcript-miner --project ~/Projects/ping-mem --config config/autoresearch/transcript-miner.yaml
+
+mutable_artifacts:
+  - src/mining/prompts/transcript-miner.md
+
+benchmark_suite: config/evals/transcript-miner.yaml
+
+pes_weights:
+  accuracy: 0.40
+  coverage: 0.30
+  noise_rejection: 0.30
+
+budget_seconds: 120
+model: claude-haiku-4-5

@@ -50,7 +50,8 @@ export async function callClaude(
     "--no-session-persistence",
     "--max-turns",
     "1",
-    "--dangerously-skip-permissions",
+    "--allowedTools",
+    "",
   ];
 
   if (system) {

@@ -13,6 +13,7 @@ import type { SessionState } from "./shared.js";
 import { getActiveMemoryManager } from "./shared.js";
 import { MemoryManager, type MemoryManagerConfig } from "../../memory/MemoryManager.js";
 import { shouldUseLlmExtraction } from "../extractionRouting.js";
+import { isProjectDirSafe } from "../../util/path-safety.js";
 import type {
   SessionId,
   SessionStatus,
@@ -28,6 +29,10 @@ import { JunkFilter } from "../../memory/JunkFilter.js";
 
 const log = createLogger("ContextToolModule");
 const junkFilterInstance = new JunkFilter();
+let recallMissLastEmit = 0;
+
+/** Reset the RECALL_MISS cooldown timer — for testing only */
+export function _resetRecallMissCooldown(): void { recallMissLastEmit = 0; }
 
 // ============================================================================
 // Tool Schemas
@@ -302,19 +307,24 @@ export class ContextToolModule implements ToolModule {
     if (args.projectDir !== undefined && args.autoIngest === true && this.state.ingestionService) {
       try {
         const projectDir = args.projectDir as string;
-        const forceReingest = args.forceReingest as boolean ?? false;
+        if (!projectDir || !isProjectDirSafe(projectDir)) {
+          log.warn("autoIngest skipped: projectDir outside allowed roots", { projectDir });
+          ingestResult = { ingested: false, reason: "projectDir outside allowed roots" };
+        } else {
+          const forceReingest = args.forceReingest as boolean ?? false;
 
-        const ingestOpts: import("../../ingest/IngestionService.js").IngestProjectOptions = {
-          projectDir,
-          forceReingest,
-        };
-        if (typeof args.maxCommits === "number") {
-          ingestOpts.maxCommits = args.maxCommits;
+          const ingestOpts: import("../../ingest/IngestionService.js").IngestProjectOptions = {
+            projectDir,
+            forceReingest,
+          };
+          if (typeof args.maxCommits === "number") {
+            ingestOpts.maxCommits = args.maxCommits;
+          }
+
+          const result = await this.state.ingestionService.ingestProject(ingestOpts);
+
+          ingestResult = result ? (result as unknown as Record<string, unknown>) : { ingested: false, reason: "No changes detected" };
         }
-
-        const result = await this.state.ingestionService.ingestProject(ingestOpts);
-
-        ingestResult = result ? (result as unknown as Record<string, unknown>) : { ingested: false, reason: "No changes detected" };
       } catch (error) {
         // Don't fail session start if ingestion fails, but log the error
         const errorMessage = error instanceof Error ? error.message : "Unknown ingestion error";
@@ -441,54 +451,30 @@ export class ContextToolModule implements ToolModule {
 
     if (shouldExtract && this.state.graphManager) {
       if (useLlmExtraction && this.state.llmEntityExtractor) {
-        // LLM extraction for high-value memories — split into separate try blocks so a graph
-        // write failure does not trigger the regex fallback (which would re-attempt batchCreateEntities
-        // and risk creating duplicates).
-        let llmResult: Awaited<ReturnType<typeof this.state.llmEntityExtractor.extract>> | null = null;
-        try {
-          llmResult = await this.state.llmEntityExtractor.extract(value);
-        } catch (error) {
-          log.warn("LLM entity extraction failed, falling back to regex", { error: error instanceof Error ? error.message : String(error) });
-        }
-
-        if (llmResult) {
-          // Graph write — failure here does NOT trigger regex fallback
+        // LLM extraction is fire-and-forget to avoid blocking the context_save hot path (300-800ms).
+        // Entity IDs won't be in the response for LLM-extracted memories, but the graph gets populated async.
+        const llmExtractor = this.state.llmEntityExtractor;
+        const gm = this.state.graphManager;
+        void (async () => {
           try {
-            if (llmResult.entities.length > 0) {
-              const createdEntities = await this.state.graphManager.batchCreateEntities(llmResult.entities);
-              entityIds = createdEntities.map((e) => e.id);
-            } else {
-              entityIds = [];
+            const llmResult = await llmExtractor.extract(value);
+            if (llmResult) {
+              if (llmResult.entities.length > 0) {
+                await gm.batchCreateEntities(llmResult.entities);
+              }
+              for (const rel of llmResult.relationships) {
+                try {
+                  await gm.createRelationship(rel);
+                } catch (relErr) {
+                  log.warn("Relationship storage failed", { sourceId: rel.sourceId, targetId: rel.targetId, type: rel.type, error: relErr instanceof Error ? relErr.message : String(relErr) });
+                }
+              }
             }
           } catch (error) {
-            log.warn("Graph entity write failed after LLM extraction", { error: error instanceof Error ? error.message : String(error) });
+            log.warn("Background LLM entity extraction failed", { error: error instanceof Error ? error.message : String(error) });
           }
-
-          // Store relationships if any
-          for (const rel of llmResult.relationships) {
-            try {
-              await this.state.graphManager.createRelationship(rel);
-            } catch (error) {
-              log.warn("Relationship storage failed", { sourceId: rel.sourceId, targetId: rel.targetId, type: rel.type, error: error instanceof Error ? error.message : String(error) });
-            }
-          }
-        } else if (this.state.entityExtractor) {
-          // Fallback to regex extraction on LLM failure
-          const extractionContext: { key: string; value: string; category?: string } = {
-            key: args.key as string,
-            value,
-          };
-          if (category !== undefined) {
-            extractionContext.category = category;
-          }
-          const extractResult = this.state.entityExtractor.extractFromContext(extractionContext);
-          if (extractResult.entities.length > 0) {
-            const createdEntities = await this.state.graphManager.batchCreateEntities(extractResult.entities);
-            entityIds = createdEntities.map((e) => e.id);
-          } else {
-            entityIds = [];
-          }
-        }
+        })();
+        entityIds = [];
       } else if (this.state.entityExtractor) {
         // Regex extraction for standard memories
         const extractionContext: { key: string; value: string; category?: string } = {
@@ -971,12 +957,16 @@ export class ContextToolModule implements ToolModule {
     const filtered = results.filter((r) => (r.score ?? 0) >= minScore);
 
     if (filtered.length === 0) {
-      // Emit RECALL_MISS event fire-and-forget for observability and future consolidation triggers
-      void this.state.eventStore.createEvent(
-        this.state.currentSessionId ?? "system",
-        "RECALL_MISS",
-        { query: queryText, timestamp: Date.now() }
-      ).catch((err) => { log.warn("Failed to emit RECALL_MISS event", { error: err instanceof Error ? err.message : String(err) }); });
+      // Emit RECALL_MISS event fire-and-forget with 60s cooldown to prevent EventStore flooding
+      const now = Date.now();
+      if (now - recallMissLastEmit > 60_000) {
+        recallMissLastEmit = now;
+        void this.state.eventStore.createEvent(
+          this.state.currentSessionId ?? "system",
+          "RECALL_MISS",
+          { query: queryText, timestamp: now }
+        ).catch((err) => { log.warn("Failed to emit RECALL_MISS event", { error: err instanceof Error ? err.message : String(err) }); });
+      }
       return { recalled: false, reason: "no relevant memories found", context: "" };
     }
 

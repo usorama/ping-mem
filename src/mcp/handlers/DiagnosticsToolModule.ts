@@ -92,7 +92,7 @@ export const DIAGNOSTICS_TOOLS: ToolDefinition[] = [
   },
   {
     name: "diagnostics_summary",
-    description: "Summarize findings for a specific analysisId.",
+    description: "Get deterministic severity count breakdown for an analysis (no LLM). Use diagnostics_summarize for LLM-powered narrative.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -136,7 +136,7 @@ export const DIAGNOSTICS_TOOLS: ToolDefinition[] = [
   },
   {
     name: "diagnostics_summarize",
-    description: "Generate or retrieve LLM-powered summary of diagnostic findings.",
+    description: "Generate LLM-powered narrative summary of diagnostic findings (requires OPENAI_API_KEY). Use diagnostics_summary for deterministic counts.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -371,7 +371,15 @@ export class DiagnosticsToolModule implements ToolModule {
 
     // Generate LLM summary
     if (!this.state.summaryGenerator) {
-      throw new Error("Summary generator not configured. Provide LLM API key for diagnostics summarization.");
+      return {
+        content: [{
+          type: "text" as const,
+          text: JSON.stringify({
+            error: "NOT_CONFIGURED",
+            message: "Summary generator not configured. Provide LLM API key (OPENAI_API_KEY) for diagnostics summarization. Non-LLM summary is available via diagnostics_summary tool.",
+          }),
+        }],
+      };
     }
 
     try {

@@ -343,8 +343,9 @@ export class RESTPingMemServer {
           const authHeader = c.req.header("Authorization") ?? "";
           if (authHeader.startsWith("Basic ")) {
             const decoded = atob(authHeader.slice(6));
-            const [user, pass] = decoded.split(":");
-            if (user === adminUser && pass === adminPass) {
+            const [user, ...passParts] = decoded.split(":");
+            const pass = passParts.join(":");
+            if (timingSafeStringEqual(user ?? "", adminUser) && timingSafeStringEqual(pass ?? "", adminPass)) {
               return next();
             }
           }
@@ -397,14 +398,22 @@ export class RESTPingMemServer {
       const components: Record<string, string> = { sqlite: "ok" };
       let degraded = false;
 
-      const snapshot = this.healthMonitor?.getStatus()?.lastSnapshot;
+      const monitorStatus = this.healthMonitor?.getStatus();
+      const snapshot = monitorStatus?.lastSnapshot;
       if (snapshot) {
         // Extract .status from HealthComponent objects — do NOT assign raw objects
         for (const [key, component] of Object.entries(snapshot.components)) {
           components[key] = typeof component === "string" ? component : (component as { status: string }).status;
         }
         degraded = snapshot.status !== "ok";
-      } else {
+      }
+      // Surface critical alerts even when the fast-tick snapshot says "ok"
+      // (fast tick skips expensive checks like PRAGMA quick_check)
+      if (!degraded && monitorStatus?.activeAlerts) {
+        const hasCritical = monitorStatus.activeAlerts.some((a: { severity: string }) => a.severity === "critical");
+        if (hasCritical) degraded = true;
+      }
+      if (!snapshot) {
         // No snapshot yet (initializing): passive fallback with "initializing" status
         if (this.graphManager) {
           components["neo4j"] = "initializing";
@@ -1073,10 +1082,10 @@ export class RESTPingMemServer {
 
         const forceReingest = parseResult.data.forceReingest;
 
-        const result = await this.config.ingestionService.ingestProject({
-          projectDir,
-          forceReingest,
-        });
+        // Route through IngestionQueue to prevent concurrent Neo4j writes (deadlock)
+        const result = this.ingestionQueue
+          ? await this.ingestionQueue.enqueueAndWait({ projectDir, forceReingest })
+          : await this.config.ingestionService.ingestProject({ projectDir, forceReingest });
 
         if (result) {
           if (this.config.adminStore) {
@@ -2552,7 +2561,7 @@ export class RESTPingMemServer {
         const direction = VALID_DIRECTIONS_LIN.has(dirRawLin) ? dirRawLin as "upstream" | "downstream" | "both" : "both";
         const rawMaxDepth = c.req.query("maxDepth") ? parseInt(c.req.query("maxDepth") as string, 10) : undefined;
         const maxDepth = rawMaxDepth !== undefined && !Number.isNaN(rawMaxDepth)
-          ? Math.min(Math.max(rawMaxDepth, 1), 50)
+          ? Math.min(Math.max(rawMaxDepth, 1), 10)
           : undefined;
 
         let upstream: Entity[] = [];
@@ -3065,10 +3074,7 @@ export class RESTPingMemServer {
       try {
         const sessionId = this.currentSessionId;
         if (!sessionId) {
-          return c.json<RESTErrorResponse>(
-            { error: "Bad Request", message: "No active session. Start a session first." },
-            400
-          );
+          return c.json({ data: [] }, 200);
         }
 
         const memoryManager = await this.getMemoryManager(sessionId);
@@ -3356,18 +3362,24 @@ export class RESTPingMemServer {
 
     this.app.delete("/api/v1/codebase/projects/:id", async (c) => {
       try {
-        // Destructive operation — require admin credentials when configured
+        // Destructive operation — require admin credentials (default-deny when unconfigured)
         const adminUser = process.env.PING_MEM_ADMIN_USER;
         const adminPass = process.env.PING_MEM_ADMIN_PASS;
-        if (adminUser && adminPass) {
-          const authHeader = c.req.header("Authorization") ?? "";
-          const expected = "Basic " + Buffer.from(`${adminUser}:${adminPass}`).toString("base64");
-          if (authHeader !== expected) {
-            return c.json<RESTErrorResponse>(
-              { error: "Forbidden", message: "Project deletion requires admin credentials (Basic Auth)" },
-              403
-            );
-          }
+        if (!adminUser || !adminPass) {
+          return c.json<RESTErrorResponse>(
+            { error: "Forbidden", message: "Project deletion disabled: admin credentials not configured" },
+            403
+          );
+        }
+        const authHeader = c.req.header("Authorization") ?? "";
+        const [, encoded] = authHeader.split(" ", 2);
+        const decoded = encoded ? Buffer.from(encoded, "base64").toString() : "";
+        const [user, pass] = decoded.split(":", 2);
+        if (!timingSafeStringEqual(user ?? "", adminUser) || !timingSafeStringEqual(pass ?? "", adminPass)) {
+          return c.json<RESTErrorResponse>(
+            { error: "Forbidden", message: "Project deletion requires admin credentials (Basic Auth)" },
+            403
+          );
         }
 
         if (!this.config.ingestionService) {
@@ -3562,17 +3574,24 @@ export class RESTPingMemServer {
     this.app.post("/api/v1/tools/:name/invoke", async (c) => {
       try {
         // Require admin credentials for tool invocation (defense in depth)
+        // Default-deny: if admin creds are not configured, reject all requests (SEC-1 fix)
         const adminUser = process.env.PING_MEM_ADMIN_USER;
         const adminPass = process.env.PING_MEM_ADMIN_PASS;
-        if (adminUser && adminPass) {
-          const authHeader = c.req.header("Authorization") ?? "";
-          const expected = "Basic " + Buffer.from(`${adminUser}:${adminPass}`).toString("base64");
-          if (authHeader !== expected) {
-            return c.json<RESTErrorResponse>(
-              { error: "Forbidden", message: "Tool invocation requires admin credentials (Basic Auth)" },
-              403
-            );
-          }
+        if (!adminUser || !adminPass) {
+          return c.json<RESTErrorResponse>(
+            { error: "Forbidden", message: "Tool invocation disabled: admin credentials not configured" },
+            403
+          );
+        }
+        const authHeader = c.req.header("Authorization") ?? "";
+        const [, encoded] = authHeader.split(" ", 2);
+        const decoded = encoded ? Buffer.from(encoded, "base64").toString() : "";
+        const [user, pass] = decoded.split(":", 2);
+        if (!timingSafeStringEqual(user ?? "", adminUser) || !timingSafeStringEqual(pass ?? "", adminPass)) {
+          return c.json<RESTErrorResponse>(
+            { error: "Forbidden", message: "Tool invocation requires admin credentials (Basic Auth)" },
+            403
+          );
         }
 
         const name = c.req.param("name");
@@ -3978,14 +3997,14 @@ export class RESTPingMemServer {
       if (codeErr.code === "AGENT_EXPIRED") return 410;
       // Fallback to message-based detection — only for known domain error types
       const isDomainError = "code" in error ||
-        /Memory|Agent|Quota|Lock|Evidence|Schema|Scope/.test(error.constructor.name);
+        /Memory|Agent|Quota|Lock|Evidence|Schema|Scope/.test(error.name ?? "");
       if (isDomainError) {
         if (error.message.includes("not found")) {
-          console.warn(`[REST Server] getStatusCode: message-based 404 for '${error.name}': ${error.message.slice(0, 80)}`);
+          log.warn(`getStatusCode: message-based 404 for '${error.name}'`, { message: error.message.slice(0, 80) });
           return 404;
         }
         if (error.message.includes("invalid") || error.message.includes("required")) {
-          console.warn(`[REST Server] getStatusCode: message-based 400 for '${error.name}': ${error.message.slice(0, 80)}`);
+          log.warn(`getStatusCode: message-based 400 for '${error.name}'`, { message: error.message.slice(0, 80) });
           return 400;
         }
       }

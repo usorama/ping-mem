@@ -65,7 +65,7 @@ const QUALITY_QUERIES = {
     UNION ALL
     MATCH (n:Chunk) WHERE n.content IS NULL RETURN count(n) AS cnt
     UNION ALL
-    MATCH (n:Commit) WHERE n.sha IS NULL RETURN count(n) AS cnt
+    MATCH (n:Commit) WHERE n.hash IS NULL RETURN count(n) AS cnt
   `,
   orphanNodes: `
     MATCH (n) WHERE (n:File OR n:Chunk OR n:Commit OR n:Project) AND NOT (n)-[]-() RETURN count(n) AS cnt

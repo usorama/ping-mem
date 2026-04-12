@@ -113,6 +113,7 @@ export class SemanticCompressor {
             "Content-Type": "application/json",
             Authorization: `Bearer ${this.apiKey}`,
           },
+          signal: AbortSignal.timeout(60_000),
           body: JSON.stringify({
             model: this.model,
             messages: [

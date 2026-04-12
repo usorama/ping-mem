@@ -306,7 +306,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         model: this.model,
         input: text,
         dimensions: this.dimensions,
-      });
+      }, { signal: AbortSignal.timeout(30_000) });
 
       const embeddingData = response.data[0]?.embedding;
       if (!embeddingData) {
@@ -381,6 +381,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
           content: { parts: [{ text }] },
           outputDimensionality: this.dimensions,
         }),
+        signal: AbortSignal.timeout(30_000),
       });
 
       if (!response.ok) {
@@ -449,6 +450,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: this.model, input: text }),
+        signal: AbortSignal.timeout(30_000),
       });
 
       if (!response.ok) {

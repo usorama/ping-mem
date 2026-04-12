@@ -1,0 +1,16 @@
+# Autoresearch config for DreamingEngine prompts
+# Run: aos-autoresearch dreaming --project ~/Projects/ping-mem --config config/autoresearch/dreaming.yaml
+
+mutable_artifacts:
+  - src/dreaming/prompts/deduction.md
+  - src/dreaming/prompts/generalization.md
+
+benchmark_suite: config/evals/dreaming.yaml
+
+pes_weights:
+  novelty: 0.35
+  groundedness: 0.35
+  precision: 0.30
+
+budget_seconds: 180
+model: claude-sonnet-4-6

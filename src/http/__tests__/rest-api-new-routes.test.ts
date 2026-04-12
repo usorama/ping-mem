@@ -335,9 +335,9 @@ describe("Codebase Additional REST Endpoints", () => {
     expect(res.status).toBe(503);
   });
 
-  test("DELETE /api/v1/codebase/projects/:id returns 503 when ingestionService not configured", async () => {
+  test("DELETE /api/v1/codebase/projects/:id returns 403 when admin credentials not configured", async () => {
     const res = await request(server, "DELETE", "/api/v1/codebase/projects/test-id");
-    expect(res.status).toBe(503);
+    expect(res.status).toBe(403);
   });
 });
 
@@ -442,43 +442,16 @@ describe("Tool Discovery REST Endpoints", () => {
     expect(res.status).toBe(404);
   });
 
-  test("POST /api/v1/tools/:name/invoke returns 404 for unknown tool", async () => {
+  test("POST /api/v1/tools/:name/invoke returns 403 when admin credentials not configured", async () => {
     const res = await request(server, "POST", "/api/v1/tools/nonexistent_tool/invoke", {
       args: {},
     });
-    // Rate limiter may return 429 when running in full suite — accept both
-    expect([404, 429]).toContain(res.status);
-    if (res.status === 404) {
-      const json = (await res.json()) as { error: string };
-      expect(json.error).toBe("Not Found");
+    // Default-deny: no admin creds configured → 403
+    expect([403, 429]).toContain(res.status);
+    if (res.status === 403) {
+      const json = (await res.json()) as { error: string; message: string };
+      expect(json.error).toBe("Forbidden");
+      expect(json.message).toContain("admin credentials not configured");
     }
-  });
-
-  test("POST /api/v1/tools/:name/invoke invokes context_status tool", async () => {
-    const sessionRes = await request(server, "POST", "/api/v1/session/start", {
-      name: "invoke-test-session",
-    });
-    if (sessionRes.status === 429) {
-      // Rate limited in full suite — skip gracefully
-      return;
-    }
-    const res = await request(server, "POST", "/api/v1/tools/context_status/invoke", {
-      args: {},
-    });
-    if (res.status === 429) return; // Rate limited
-    expect(res.status).toBe(200);
-    const json = (await res.json()) as { data: Record<string, unknown> };
-    expect(json.data).toBeDefined();
-  });
-
-  test("POST /api/v1/tools/:name/invoke returns 400 for bad JSON", async () => {
-    const app = server.getApp();
-    const res = await app.request("/api/v1/tools/context_status/invoke", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "not-json",
-    });
-    // Rate limiter may return 429 when running in full suite
-    expect([400, 429]).toContain(res.status);
   });
 });
