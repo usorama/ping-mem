@@ -9,6 +9,9 @@
 set -euo pipefail
 
 URL="${PING_MEM_URL:-http://localhost:3003}"
+ADMIN_USER="${PING_MEM_ADMIN_USER:-admin}"
+ADMIN_PASS="${PING_MEM_ADMIN_PASS:-admin}"
+ADMIN_AUTH="$(printf '%s:%s' "$ADMIN_USER" "$ADMIN_PASS" | base64)"
 PASS=0
 FAIL=0
 SKIP=0
@@ -159,8 +162,8 @@ echo "--- Memory Management (6 tools) ---"
 check "memory_stats" GET "/api/v1/memory/stats" "" "data" "x-session-id: $SID"
 check "memory_consolidate" POST "/api/v1/memory/consolidate" '{}' "" "x-session-id: $SID"
 check "memory_compress" POST "/api/v1/memory/compress" '{}' "" "x-session-id: $SID"
-check "memory_maintain" POST "/api/v1/tools/memory_maintain/invoke" '{"args":{}}' "result" "x-session-id: $SID"
-check "memory_conflicts" POST "/api/v1/tools/memory_conflicts/invoke" '{"args":{}}' "data" "x-session-id: $SID"
+check "memory_maintain" POST "/api/v1/tools/memory_maintain/invoke" '{"args":{}}' "result" "Authorization: Basic $ADMIN_AUTH"
+check "memory_conflicts" POST "/api/v1/tools/memory_conflicts/invoke" '{"args":{}}' "data" "Authorization: Basic $ADMIN_AUTH"
 check "memory_subscribe" POST "/api/v1/memory/subscribe" '{"pattern":"*"}' "" "x-session-id: $SID"
 
 # Search (2 tools)
@@ -187,7 +190,7 @@ check "search_causes" GET "/api/v1/causal/causes?entityId=test-entity" "" ""
 check "search_effects" GET "/api/v1/causal/effects?entityId=test-entity" "" ""
 check "get_causal_chain" GET "/api/v1/causal/chain?startEntityId=a&endEntityId=b" "" ""
 check "trigger_causal_discovery" POST "/api/v1/tools/trigger_causal_discovery/invoke" \
-  "{\"args\":{\"text\":\"A caused B because of C\"}}" "" "x-session-id: $SID"
+  "{\"args\":{\"text\":\"A caused B because of C\"}}" "" "Authorization: Basic $ADMIN_AUTH"
 
 # Codebase (7 tools)
 echo ""
@@ -254,7 +257,7 @@ check "transcript_mine_endpoint" POST "/api/v1/mining/start" \
 echo ""
 echo "--- Project Management (1 tool) ---"
 # project_delete tested with a non-existent project (should return 404 or success)
-check "project_delete" DELETE "/api/v1/codebase/projects/nonexistent-project-id" "" ""
+check "project_delete" DELETE "/api/v1/codebase/projects/nonexistent-project-id" "" "" "Authorization: Basic $ADMIN_AUTH"
 
 # End session
 echo ""
