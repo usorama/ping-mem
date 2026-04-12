@@ -1268,7 +1268,11 @@ export class RESTPingMemServer {
           503
         );
       }
-      return c.json(this.ingestionQueue.getQueueStatus());
+      const status = this.ingestionQueue.getQueueStatus();
+      return c.json({
+        ...status,
+        runs: status.runs.map(({ originalError: _oe, ...r }) => r),
+      });
     });
 
     this.app.get("/api/v1/ingestion/run/:runId", (c) => {
@@ -1287,7 +1291,8 @@ export class RESTPingMemServer {
       if (!run) {
         return c.json({ error: "NotFound", message: "Run not found" }, 404);
       }
-      return c.json(run);
+      const { originalError: _oe, ...runResponse } = run;
+      return c.json(runResponse);
     });
 
     // ============================================================================
