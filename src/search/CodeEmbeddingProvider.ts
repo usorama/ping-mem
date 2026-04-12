@@ -115,12 +115,11 @@ export class CodeEmbeddingProvider implements EmbeddingProvider {
 
       return new Float32Array(embeddingData);
     } catch (error) {
-      if (error instanceof EmbeddingGenerationError) {
-        throw error;
+      if (error instanceof EmbeddingGenerationError) throw error;
+      if (error instanceof Error && error.name === "TimeoutError") {
+        throw new EmbeddingGenerationError("Voyage AI embedding request timed out after 30s", "TIMEOUT", error);
       }
-
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
       throw new EmbeddingGenerationError(
         `Failed to generate Voyage AI embedding: ${errorMessage}`,
         "GENERATION_FAILED",

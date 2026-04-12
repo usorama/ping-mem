@@ -371,15 +371,9 @@ export class DiagnosticsToolModule implements ToolModule {
 
     // Generate LLM summary
     if (!this.state.summaryGenerator) {
-      return {
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
-            error: "NOT_CONFIGURED",
-            message: "Summary generator not configured. Provide LLM API key (OPENAI_API_KEY) for diagnostics summarization. Non-LLM summary is available via diagnostics_summary tool.",
-          }),
-        }],
-      };
+      throw new Error(
+        "Summary generator not configured. Provide OPENAI_API_KEY for diagnostics summarization. Use diagnostics_summary tool for deterministic counts."
+      );
     }
 
     try {

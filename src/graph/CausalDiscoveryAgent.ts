@@ -80,7 +80,13 @@ function loadCausalPrompt(): string {
   try {
     const promptPath = path.join(import.meta.dir, "prompts", "causal-discovery.md");
     return fs.readFileSync(promptPath, "utf-8").trim();
-  } catch {
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      log.warn("Prompt file not found, using fallback", { filename: "causal-discovery.md" });
+    } else {
+      log.error("Failed to load prompt file, using fallback", { filename: "causal-discovery.md", error: err instanceof Error ? err.message : String(err) });
+    }
     return CAUSAL_PROMPT_FALLBACK;
   }
 }

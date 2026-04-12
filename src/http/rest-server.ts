@@ -3374,8 +3374,10 @@ export class RESTPingMemServer {
         const authHeader = c.req.header("Authorization") ?? "";
         const [, encoded] = authHeader.split(" ", 2);
         const decoded = encoded ? Buffer.from(encoded, "base64").toString() : "";
-        const [user, pass] = decoded.split(":", 2);
-        if (!timingSafeStringEqual(user ?? "", adminUser) || !timingSafeStringEqual(pass ?? "", adminPass)) {
+        const colonIdx = decoded.indexOf(":");
+        const user = colonIdx === -1 ? decoded : decoded.slice(0, colonIdx);
+        const pass = colonIdx === -1 ? "" : decoded.slice(colonIdx + 1);
+        if (!timingSafeStringEqual(user, adminUser) || !timingSafeStringEqual(pass, adminPass)) {
           return c.json<RESTErrorResponse>(
             { error: "Forbidden", message: "Project deletion requires admin credentials (Basic Auth)" },
             403
@@ -3586,8 +3588,10 @@ export class RESTPingMemServer {
         const authHeader = c.req.header("Authorization") ?? "";
         const [, encoded] = authHeader.split(" ", 2);
         const decoded = encoded ? Buffer.from(encoded, "base64").toString() : "";
-        const [user, pass] = decoded.split(":", 2);
-        if (!timingSafeStringEqual(user ?? "", adminUser) || !timingSafeStringEqual(pass ?? "", adminPass)) {
+        const colonIdx = decoded.indexOf(":");
+        const user = colonIdx === -1 ? decoded : decoded.slice(0, colonIdx);
+        const pass = colonIdx === -1 ? "" : decoded.slice(colonIdx + 1);
+        if (!timingSafeStringEqual(user, adminUser) || !timingSafeStringEqual(pass, adminPass)) {
           return c.json<RESTErrorResponse>(
             { error: "Forbidden", message: "Tool invocation requires admin credentials (Basic Auth)" },
             403

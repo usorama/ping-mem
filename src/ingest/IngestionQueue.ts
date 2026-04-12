@@ -29,6 +29,7 @@ export interface IngestionRun {
   startedAt: string;
   completedAt: string | null;
   error: string | null;
+  originalError?: Error;
   progress: { phase: string; current: number; total: number } | null;
   result: IngestProjectResult | null;
 }
@@ -144,7 +145,8 @@ export class IngestionQueue {
           });
         } catch (err) {
           run.status = "failed";
-          run.error = sanitizeHealthError(err instanceof Error ? err : new Error(String(err)));
+          run.originalError = err instanceof Error ? err : new Error(String(err));
+          run.error = sanitizeHealthError(run.originalError);
           log.error(`Ingestion run ${runId} failed`, { error: run.error });
         } finally {
           run.completedAt = new Date().toISOString();
@@ -156,7 +158,7 @@ export class IngestionQueue {
 
     await done;
     if (run.status === "failed") {
-      throw new Error(run.error ?? "Ingestion failed");
+      throw new Error(run.error ?? "Ingestion failed", { cause: run.originalError });
     }
     return run.result;
   }

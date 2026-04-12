@@ -203,6 +203,9 @@ export class CodebaseToolModule implements ToolModule {
     }
 
     const projectDir = args.projectDir as string;
+    if (!isProjectDirSafe(projectDir)) {
+      throw new Error(`projectDir '${projectDir}' is outside allowed roots`);
+    }
     const result = await this.state.ingestionService.verifyProject(projectDir);
 
     return {
@@ -375,6 +378,9 @@ export class CodebaseToolModule implements ToolModule {
     }
 
     const validated: DeleteProjectInput = parseResult.data;
+    if (!isProjectDirSafe(validated.projectDir)) {
+      throw new Error(`projectDir '${validated.projectDir}' is outside allowed roots`);
+    }
     const normalized = path.resolve(validated.projectDir);
 
     let projectId: string | null = null;

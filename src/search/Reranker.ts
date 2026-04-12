@@ -125,7 +125,11 @@ export class Reranker {
         }))
         .sort((a, b) => b.relevanceScore - a.relevanceScore);
     } catch (error) {
-      log.error("Reranking failed, returning un-reranked results", { error: error instanceof Error ? error.message : String(error) });
+      const isTimeout = error instanceof Error && error.name === "TimeoutError";
+      log.error(isTimeout ? "Reranking timed out after 30s" : "Reranking failed, returning un-reranked results", {
+        error: error instanceof Error ? error.message : String(error),
+        timeout: isTimeout,
+      });
       return null;
     }
   }

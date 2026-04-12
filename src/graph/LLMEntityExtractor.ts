@@ -134,7 +134,13 @@ function loadEntityPrompt(): string {
   try {
     const promptPath = path.join(import.meta.dir, "prompts", "entity-extractor.md");
     return fs.readFileSync(promptPath, "utf-8").trim();
-  } catch {
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      log.warn("Prompt file not found, using fallback", { filename: "entity-extractor.md" });
+    } else {
+      log.error("Failed to load prompt file, using fallback", { filename: "entity-extractor.md", error: err instanceof Error ? err.message : String(err) });
+    }
     return SYSTEM_PROMPT_FALLBACK;
   }
 }
