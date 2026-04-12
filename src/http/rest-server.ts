@@ -2636,7 +2636,15 @@ export class RESTPingMemServer {
           queryOptions.endTime = d;
         }
 
-        const evolution = await this.config.evolutionEngine.getEvolution(entityId, queryOptions);
+        let evolution;
+        try {
+          evolution = await this.config.evolutionEngine.getEvolution(entityId, queryOptions);
+        } catch (evoError) {
+          if (evoError instanceof Error && evoError.name === "EntityEvolutionNotFoundError") {
+            return c.json({ data: { entityId, changes: [], totalChanges: 0 } });
+          }
+          throw evoError;
+        }
 
         return c.json({
           data: {
