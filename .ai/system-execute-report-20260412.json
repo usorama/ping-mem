@@ -1,0 +1,100 @@
+{
+  "date": "2026-04-12",
+  "verifySource": ".ai/system-verify-report-20260412.json",
+  "phase": "Phase 3 — Execution",
+  "summary": {
+    "totalFindings": 38,
+    "executed": 37,
+    "ghIssuesCreated": 1,
+    "blocked": 0,
+    "falsePositives": 0
+  },
+  "executionPhases": [
+    {
+      "phase": 1,
+      "name": "Additive-critical (security + timeouts)",
+      "findings": ["SEC-1", "SEC-2", "TO-1", "TO-2", "TO-3", "TO-4", "TO-5", "TO-6", "TO-7"],
+      "status": "COMPLETE",
+      "qualityGate": "typecheck PASS"
+    },
+    {
+      "phase": 2,
+      "name": "Additive-normal (error handling, API mismatch, stubs)",
+      "findings": ["BH-1", "BH-2", "AC-1"],
+      "status": "COMPLETE",
+      "qualityGate": "typecheck PASS"
+    },
+    {
+      "phase": 3,
+      "name": "Subtractive (dead code deletion)",
+      "findings": ["DC-1", "DC-2", "DC-3", "DC-4", "DC-5", "DC-6", "DC-7", "DC-8", "DC-9", "DC-10", "DC-11", "DC-12", "DC-13", "DC-14", "DC-15", "DC-16", "DC-17", "DR-1", "DR-2", "DR-3", "DR-4", "DR-5", "DR-6", "DR-7"],
+      "status": "COMPLETE",
+      "filesDeleted": 30,
+      "qualityGate": "typecheck PASS, 2046 tests PASS"
+    },
+    {
+      "phase": 4,
+      "name": "Structural (naming clarity)",
+      "findings": ["NA-1"],
+      "status": "COMPLETE",
+      "qualityGate": "typecheck PASS"
+    }
+  ],
+  "ghIssues": [
+    {
+      "finding": "TC-1",
+      "url": "https://github.com/usorama/ping-mem/issues/118",
+      "title": "MCP tool test coverage: 43/52 tools untested"
+    }
+  ],
+  "testUpdates": [
+    {
+      "file": "src/http/__tests__/rest-api-new-routes.test.ts",
+      "change": "Updated project-delete and tool-invoke tests to expect 403 (default-deny when admin creds unset)"
+    }
+  ],
+  "filesModified": [
+    "src/http/rest-server.ts",
+    "src/search/EmbeddingService.ts",
+    "src/search/Reranker.ts",
+    "src/search/CodeEmbeddingProvider.ts",
+    "src/diagnostics/SummaryGenerator.ts",
+    "src/memory/SemanticCompressor.ts",
+    "src/mcp/handlers/DiagnosticsToolModule.ts",
+    "src/mcp/handlers/MemoryToolModule.ts",
+    "src/http/__tests__/rest-api-new-routes.test.ts"
+  ],
+  "filesDeleted": [
+    "src/ingest/UnifiedIngestionService.ts",
+    "src/ingest/UnifiedIngestionOrchestrator.ts",
+    "src/ingest/DocumentParser.ts",
+    "src/graph/DocumentGraph.ts",
+    "src/migration/MigrationVerifier.ts",
+    "src/migration/MigrationLedger.ts",
+    "src/migration/MemoryKeeperReader.ts",
+    "src/eval/suite.ts",
+    "src/eval/llm-judge.ts",
+    "src/eval/metrics.ts",
+    "src/eval/improvement-loop.ts",
+    "src/diagnostics/eslint-sarif.ts",
+    "src/diagnostics/prettier-sarif.ts",
+    "src/diagnostics/tsc-sarif.ts",
+    "src/metrics/MetricsCollector.ts",
+    "src/metrics/types.ts",
+    "src/metrics/index.ts",
+    "src/http/routes/graph.ts",
+    "src/http/routes/causal.ts",
+    "src/http/routes/worklog.ts",
+    "src/http/routes/codebase-extra.ts",
+    "src/http/routes/diagnostics-extra.ts",
+    "src/http/routes/memory-extra.ts",
+    "src/http/routes/tool-discovery.ts",
+    "src/http/routes/index.ts",
+    "src/migration/__tests__/MemoryKeeperReader.test.ts",
+    "src/migration/__tests__/MigrationLedger.test.ts",
+    "src/eval/__tests__/metrics.test.ts",
+    "src/eval/__tests__/suite.test.ts",
+    "src/eval/__tests__/improvement-loop.test.ts",
+    "src/metrics/__tests__/MetricsCollector.test.ts"
+  ]
+}

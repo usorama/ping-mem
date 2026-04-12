@@ -169,15 +169,11 @@ export class MemoryToolModule implements ToolModule {
   }
 
   private async handleMemorySubscribe(_args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    // MCP tool calls are request-response — creating a real subscription
-    // here would leak a zombie listener with a no-op handler.
-    // Direct callers to the SSE endpoint instead.
-    return {
-      content: [{ type: "text", text: JSON.stringify({
-        success: false,
-        message: "MCP subscriptions are not supported. Use the SSE endpoint /api/v1/events/stream for real-time events.",
-      }) }],
-    };
+    // MCP tool calls are request-response — real subscriptions would leak zombie listeners.
+    // Throw so the dispatch layer sets isError: true on the CallToolResult.
+    throw new Error(
+      "MCP subscriptions are not supported via tool calls (request-response only). Use the SSE endpoint GET /api/v1/events/stream for real-time memory change events."
+    );
   }
 
   private async handleMemoryUnsubscribe(args: Record<string, unknown>): Promise<Record<string, unknown>> {

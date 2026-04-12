@@ -29,6 +29,7 @@ export interface IngestionRun {
   startedAt: string;
   completedAt: string | null;
   error: string | null;
+  originalError?: Error;
   progress: { phase: string; current: number; total: number } | null;
   result: IngestProjectResult | null;
 }
@@ -103,6 +104,63 @@ export class IngestionQueue {
     });
 
     return runId;
+  }
+
+  async enqueueAndWait(options: IngestProjectOptions): Promise<IngestProjectResult | null> {
+    if (this.pendingCount >= this.maxQueueDepth) {
+      throw new Error("Ingestion queue full — try again later");
+    }
+
+    const runId = crypto.randomUUID();
+    const run: IngestionRun = {
+      runId,
+      projectDir: options.projectDir,
+      projectId: null,
+      status: "queued",
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      error: null,
+      progress: null,
+      result: null,
+    };
+    this.runs.set(runId, run);
+    this.pendingCount++;
+    this.pruneHistory();
+
+    // Create a per-run promise that resolves when THIS run completes
+    const done = new Promise<void>((resolve) => {
+      this.chain = this.chain.then(async () => {
+        this.pendingCount--;
+        this.activeCount++;
+        try {
+          run.status = "scanning";
+          log.info(`Starting ingestion run ${runId}`, { projectDir: options.projectDir });
+          const result = await this.ingestionService.ingestProject(options);
+          run.status = "completed";
+          run.result = result;
+          run.projectId = result?.projectId ?? null;
+          log.info(`Ingestion run ${runId} completed`, {
+            projectId: run.projectId,
+            filesIndexed: result?.filesIndexed ?? 0,
+          });
+        } catch (err) {
+          run.status = "failed";
+          run.originalError = err instanceof Error ? err : new Error(String(err));
+          run.error = sanitizeHealthError(run.originalError);
+          log.error(`Ingestion run ${runId} failed`, { error: run.error });
+        } finally {
+          run.completedAt = new Date().toISOString();
+          this.activeCount--;
+          resolve();
+        }
+      });
+    });
+
+    await done;
+    if (run.status === "failed") {
+      throw new Error(run.error ?? "Ingestion failed", { cause: run.originalError });
+    }
+    return run.result;
   }
 
   getRun(runId: string): IngestionRun | undefined {

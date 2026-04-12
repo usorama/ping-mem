@@ -306,7 +306,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
         model: this.model,
         input: text,
         dimensions: this.dimensions,
-      });
+      }, { signal: AbortSignal.timeout(30_000) });
 
       const embeddingData = response.data[0]?.embedding;
       if (!embeddingData) {
@@ -318,10 +318,10 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
 
       return new Float32Array(embeddingData);
     } catch (error) {
-      if (error instanceof EmbeddingServiceError) {
-        throw error;
+      if (error instanceof EmbeddingServiceError) throw error;
+      if (error instanceof Error && error.name === "TimeoutError") {
+        throw new EmbeddingGenerationError("OpenAI embedding request timed out after 30s", "TIMEOUT", error);
       }
-
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new EmbeddingGenerationError(
         `Failed to generate embedding: ${errorMessage}`,
@@ -381,6 +381,7 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
           content: { parts: [{ text }] },
           outputDimensionality: this.dimensions,
         }),
+        signal: AbortSignal.timeout(30_000),
       });
 
       if (!response.ok) {
@@ -403,10 +404,10 @@ export class GeminiEmbeddingProvider implements EmbeddingProvider {
 
       return new Float32Array(values);
     } catch (error) {
-      if (error instanceof EmbeddingServiceError) {
-        throw error;
+      if (error instanceof EmbeddingServiceError) throw error;
+      if (error instanceof Error && error.name === "TimeoutError") {
+        throw new EmbeddingGenerationError("Gemini embedding request timed out after 30s", "TIMEOUT", error);
       }
-
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new EmbeddingGenerationError(
         `Failed to generate Gemini embedding: ${errorMessage}`,
@@ -449,6 +450,7 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: this.model, input: text }),
+        signal: AbortSignal.timeout(30_000),
       });
 
       if (!response.ok) {
@@ -469,6 +471,9 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
       return new Float32Array(values);
     } catch (error) {
       if (error instanceof EmbeddingServiceError) throw error;
+      if (error instanceof Error && error.name === "TimeoutError") {
+        throw new EmbeddingGenerationError("Ollama embedding request timed out after 30s", "TIMEOUT", error);
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       throw new EmbeddingGenerationError(
         `Failed to generate Ollama embedding: ${errorMessage}`,

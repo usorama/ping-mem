@@ -17,6 +17,8 @@
  * @requires Claude Code CLI — uses callClaude() directly; Ollama/OpenAI fallback not available for dreaming.
  */
 
+import * as fs from "fs";
+import * as path from "path";
 import type { Memory, SessionId } from "../types/index.js";
 import type { MemoryManager } from "../memory/MemoryManager.js";
 import type { ContradictionDetector } from "../graph/ContradictionDetector.js";
@@ -26,6 +28,21 @@ import { createLogger } from "../util/logger.js";
 import { callClaude } from "../llm/ClaudeCli.js";
 
 const log = createLogger("DreamingEngine");
+
+function loadPrompt(filename: string, fallback: string): string {
+  try {
+    const promptPath = path.join(import.meta.dir, "prompts", filename);
+    return fs.readFileSync(promptPath, "utf-8").trim();
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      log.warn("Prompt file not found, using fallback", { filename });
+    } else {
+      log.error("Failed to load prompt file, using fallback", { filename, error: err instanceof Error ? err.message : String(err) });
+    }
+    return fallback;
+  }
+}
 
 // ============================================================================
 // Configuration & Result Types
@@ -63,32 +80,11 @@ export interface DreamResult {
 // Prompts
 // ============================================================================
 
-const DEDUCTION_SYSTEM = `You are a memory reasoning engine. Given a set of memories from an AI assistant's user, derive implicit facts that are NOT already stated but can be logically inferred.
+const DEDUCTION_FALLBACK = `You are a memory reasoning engine. Derive implicit facts from memories. Return JSON array of strings. Max 5 facts.`;
+const GENERALIZATION_FALLBACK = `You are a user behavior analyst. Return JSON: { "traits": [], "expertise": [], "projects": [], "workStyle": [] }`;
 
-Rules:
-- Only derive facts that are clearly implied by multiple memories
-- Do NOT include facts already stated verbatim in the memories
-- Prefer concrete, specific facts over vague generalizations
-- Return a JSON array of strings, each a derived fact
-- Limit to 5 most important derived facts
-- If nothing meaningful can be derived, return an empty array []
-
-Example output: ["User prefers TypeScript over JavaScript based on consistent corrections", "Project X appears to be complete since it stopped being mentioned after March 2026"]`;
-
-const GENERALIZATION_SYSTEM = `You are a user behavior analyst. Given memories from an AI assistant's interactions with a user, identify personality traits, work preferences, and behavioral patterns.
-
-Rules:
-- Focus on consistent patterns across multiple memories
-- Identify: technical preferences, work style, communication style, domain expertise
-- Return a JSON object with these exact fields:
-  {
-    "traits": ["trait1", "trait2"],
-    "expertise": ["domain1", "domain2"],
-    "projects": ["project1", "project2"],
-    "workStyle": ["style1", "style2"]
-  }
-- Only include fields where you have at least 2 supporting memories
-- If no patterns are clear, return empty arrays for each field`;
+const DEDUCTION_SYSTEM = loadPrompt("deduction.md", DEDUCTION_FALLBACK);
+const GENERALIZATION_SYSTEM = loadPrompt("generalization.md", GENERALIZATION_FALLBACK);
 
 // ============================================================================
 // DreamingEngine Implementation

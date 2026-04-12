@@ -1,83 +1,8 @@
 {
   "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
   "rootPath": "/projects/ping-mem",
-  "treeHash": "64724a0938dc334870d47d3e6f4f358e4859175ee20e5e8aa70bda00c244b580",
+  "treeHash": "faf1b038aae8dae42d5948309e7f7126deeff968b390bd425b6d7baa54bd9268",
   "files": [
-    {
-      "path": ".ai/decisions.jsonl",
-      "sha256": "2ffbe42706d2484a1e34f89818d6feb4f2d19f706c16bc627bda0a9828b0529f",
-      "bytes": 28443
-    },
-    {
-      "path": ".ai/eval/labeled-queries.jsonl",
-      "sha256": "27459e533560801483a5f854d533321d2de8bf5d39f243656f1c03453e588172",
-      "bytes": 9421
-    },
-    {
-      "path": ".ai/forge-runs/forge-2026-03-15-2667270.json",
-      "sha256": "197a0c3a9c2b7d3ac015f93f982a38fb388da02d996eded254da499d669d9373",
-      "bytes": 795
-    },
-    {
-      "path": ".ai/forge-runs/forge-2026-03-15-intelligence-platform.json",
-      "sha256": "98d7bbfb54cd5e15734b1749e0d0b8da72146596bbbd80c8851fb179fac4a8b2",
-      "bytes": 2636
-    },
-    {
-      "path": ".ai/forge-runs/forge-2026-03-22-31829f.json",
-      "sha256": "4e6dfbc86907b95ca90d2fca1f3b0f31fc635cfe7b27926df47326620ce22f9c",
-      "bytes": 628
-    },
-    {
-      "path": ".ai/handoff/capability-closure-gaps.json",
-      "sha256": "1f13b6baa1d3e79c4392a89285abb8cfb2eee90426dca89004fef900e72d483f",
-      "bytes": 1593
-    },
-    {
-      "path": ".ai/handoff/gap-W0-G1.json",
-      "sha256": "ab6a98ad542cc78dc9c18c6940515b2246ae926ebdd449371c67e15f985ddc07",
-      "bytes": 597
-    },
-    {
-      "path": ".ai/implementation-reviews/2026-03-15-fix-container-restart-review.md",
-      "sha256": "9825c64ea6bb4490e8246c08d7e4ad2e9aa4c61a0ec97ecfd738f1fbd195a10a",
-      "bytes": 7028
-    },
-    {
-      "path": ".ai/implementation-reviews/2026-03-15-intelligence-platform-review.md",
-      "sha256": "acc9463b2c34c73b2da3c0532545b0efe62879cf6743df35d85263d1afb10b10",
-      "bytes": 19734
-    },
-    {
-      "path": ".ai/implementation-reviews/2026-03-21-memory-evolution-review.md",
-      "sha256": "fc3077e2b2e137a0faf62d78fdfb42cc1e5a3e267aeaaf852cf31a1c3bd62167",
-      "bytes": 13916
-    },
-    {
-      "path": ".ai/implementation-reviews/2026-04-09-capability-closure-review.md",
-      "sha256": "4499c85f1d09ff9f73ebc5729034e9dd6432859a2bfd76baddeef4218922bcdb",
-      "bytes": 3243
-    },
-    {
-      "path": ".ai/implementation-reviews/wave-review-enhancements.md",
-      "sha256": "6c4524ccb8ed71332fb7cab24021c4447e960144f5689664cf91332199bd26a8",
-      "bytes": 5829
-    },
-    {
-      "path": ".ai/project.md",
-      "sha256": "14cd73cf3948682762ae1957e6e4f6365e615e32e0417bb7db65bb39acd2834e",
-      "bytes": 3583
-    },
-    {
-      "path": ".ai/uat-zero/cycle-1-auto-capture.md",
-      "sha256": "1af74231a492e27a3738682abd357d61b630c98dbe2951c7c0d6583c043359e8",
-      "bytes": 1844
-    },
-    {
-      "path": ".claude/skills/local-deploy/SKILL.md",
-      "sha256": "9459baafd21888992a5d081200c5fa5d3ec967736ce76865629ce501a09a7843",
-      "bytes": 3588
-    },
     {
       "path": ".cursor/mcp.json",
       "sha256": "8a751f92269d579b1963227fc93d535809239edcbc56285e195f98a20adf7f1e",
@@ -105,13 +30,8 @@
     },
     {
       "path": ".gitignore",
-      "sha256": "198ad9198d6594664bf3a50b459e8a95bcdcb045a55412e439b571bfa21fbe72",
-      "bytes": 455
-    },
-    {
-      "path": ".ping-mem/manifest.json",
-      "sha256": "21af09dd71895425c4a8982f6f17cf7cdf83f67f6146f5afc29d95e653c8d47a",
-      "bytes": 88495
+      "sha256": "b69b253ad6438600102807026f0f8ffb420fcdc54c8cb45296d82363630e83ae",
+      "bytes": 520
     },
     {
       "path": ".serena/.gitignore",
@@ -124,31 +44,6 @@
       "bytes": 9450
     },
     {
-      "path": "AGENT_INSTRUCTIONS.md",
-      "sha256": "7ec550115120ebfe32c0db0347fa0bd680f742be1d129e372b9f3dcc09182521",
-      "bytes": 7425
-    },
-    {
-      "path": "CHANGELOG.md",
-      "sha256": "6c81a9c7a719962c239e2bf769bad6c13ebb163f81bb8ab90779310d463743e0",
-      "bytes": 1706
-    },
-    {
-      "path": "CLAUDE.md",
-      "sha256": "22b4c9125c90ea36fc59d2fa15c40436b27c0398e2c00962a5be412046230f3a",
-      "bytes": 4147
-    },
-    {
-      "path": "DIAGNOSTICS_IMPLEMENTATION.md",
-      "sha256": "7ac76eddc3882fa1929d1d07481d1cdfe5e4960732a3650275c277ca87e9add9",
-      "bytes": 16300
-    },
-    {
-      "path": "DOCKER.md",
-      "sha256": "7782a6b381f33253e56f45a32e014031e811ab28468bdbe3c9b5a38682fc526b",
-      "bytes": 5157
-    },
-    {
       "path": "Dockerfile",
       "sha256": "fe10a048981ff4f5de28e3e9caa8d9815c16895cd4e7d7755f8b9860639fd0bf",
       "bytes": 1264
@@ -157,21 +52,6 @@
       "path": "LICENSE",
       "sha256": "35c3e6191683f5663deb424ec99ca876f180c00469383653372675c40b0a07c0",
       "bytes": 1069
-    },
-    {
-      "path": "README.md",
-      "sha256": "67831d28777713b117cfd258f091ca260123a7bef9c0135368650d1abaf97300",
-      "bytes": 13332
-    },
-    {
-      "path": "SECURITY_AUDIT_REPORT.md",
-      "sha256": "4430711c8c797393f92b70dc1367ee8014054532f4441f806762e3bac3e5c367",
-      "bytes": 14075
-    },
-    {
-      "path": "agents.md",
-      "sha256": "f3f068fd1e8c739bf023c45888608d453cac634303f58de256f527f1bf5de6ae",
-      "bytes": 38481
     },
     {
       "path": "benchmarks/bench-cold-start.ts",
@@ -224,491 +104,6 @@
       "bytes": 3884
     },
     {
-      "path": "docs/AGENT_INTEGRATION_GUIDE.md",
-      "sha256": "925c1261e373741d6ec8ee3815d3e10e9098127c024719dba98c459f8d24524e",
-      "bytes": 24176
-    },
-    {
-      "path": "docs/AGENT_WORKFLOW.md",
-      "sha256": "da6522c558cb29eb7e05522e5075ff3fde67fbbb5634a3e1e6f51d98f1ae7732",
-      "bytes": 7466
-    },
-    {
-      "path": "docs/BUG_FIXES_2026-01-29.md",
-      "sha256": "7ebb761b93222c1c03c6bf9f4f00f42385e01417ceef3c6349b5c5b636df6d3b",
-      "bytes": 7939
-    },
-    {
-      "path": "docs/DEPLOYMENT_ARCHITECTURE.md",
-      "sha256": "dfb6f1e233112598f87c42873a5a26cdbb7a81a11bdddc5dc71ae3a48e38f8a7",
-      "bytes": 14111
-    },
-    {
-      "path": "docs/DIAGNOSTICS_COLLECTOR.md",
-      "sha256": "8e00465357b76f3196f8752f48763e330e7cac2f9411d6f7d6b7564b9d22e659",
-      "bytes": 906
-    },
-    {
-      "path": "docs/DIAGNOSTICS_SYSTEM.md",
-      "sha256": "b9a27785fb3752e7aa19b16c194602e3c14ab96a103a6ad458ed6198644b2a8b",
-      "bytes": 1669
-    },
-    {
-      "path": "docs/IMPLEMENTATION_COMPLETE.md",
-      "sha256": "b304ea57c510504fd1efd6a51a39f2393d24807beab02e73eaa7667a5e493881",
-      "bytes": 10169
-    },
-    {
-      "path": "docs/IMPLEMENTATION_SUMMARY.md",
-      "sha256": "699af8d6f5c6b1d6751b68cc2f10717900ac348ffcba255bae86f5a64d0abfa2",
-      "bytes": 9953
-    },
-    {
-      "path": "docs/INSTALLATION.md",
-      "sha256": "a5753a27981b3293b6e3061baee9ad7ee264000e8dfbde1b95740626ade8d0bb",
-      "bytes": 11008
-    },
-    {
-      "path": "docs/INSTITUTIONAL_LEARNINGS_2026-03-08.md",
-      "sha256": "008d865dfd119b86e4ca10b2406a886602f34cd029863098081713a968395b3d",
-      "bytes": 5958
-    },
-    {
-      "path": "docs/PERFORMANCE.md",
-      "sha256": "7666beb3e59bc4211d5fb0ce81a297817c2608870bea8ea43890889ce6834298",
-      "bytes": 6788
-    },
-    {
-      "path": "docs/SERENA_INTEGRATION.md",
-      "sha256": "1354d13890abb46c3dd38860a0cb58cd5bf7adb99be94552a991b7c606f2561d",
-      "bytes": 12513
-    },
-    {
-      "path": "docs/SERENA_QUICK_REF.md",
-      "sha256": "4f1484120bd859280065f37973dbaabc8b08936786d58fd0bdcba699e7236e86",
-      "bytes": 3009
-    },
-    {
-      "path": "docs/UAT-2026-03-09.md",
-      "sha256": "a7cfd1ab87d5e4c8f73a9a43d80414b6fa8d73f175ca072f7743a86fdec8e7c5",
-      "bytes": 4406
-    },
-    {
-      "path": "docs/V1.3.0_IMPLEMENTATION_SUMMARY.md",
-      "sha256": "5a0cfb75c8d0ca9aff12bcfe02ed98bf44ad2eff249e604617ff06e0b3b492c2",
-      "bytes": 15170
-    },
-    {
-      "path": "docs/VERIFICATION_2026-01-29.md",
-      "sha256": "4dfca1247392372b2b9aed49edde274a8cefddfcae679e5ac43bdc9ab6933907",
-      "bytes": 9906
-    },
-    {
-      "path": "docs/auto-capture-research/01-current-implementation-audit.md",
-      "sha256": "475f5a33da212adc0bd2800ed094417e27e21a02c77b4117df441d998f60df8d",
-      "bytes": 25045
-    },
-    {
-      "path": "docs/auto-capture-research/02-claude-mem-architecture.md",
-      "sha256": "484588e09cdb012705623a74f0324d7f7b2861d12815847293b650a774a55e1a",
-      "bytes": 26430
-    },
-    {
-      "path": "docs/auto-capture-research/03-claude-code-hooks-api.md",
-      "sha256": "e0baa61f4d4ff0d808020af8c6f50bd8ac03c42cd768d331a0eef4a3b9f0ed8c",
-      "bytes": 26423
-    },
-    {
-      "path": "docs/auto-capture-research/04-forgetting-curves-research.md",
-      "sha256": "3d4979b391f0f9267c4d54bb4885980bf77f4539ce5aa18e6134f0a05ee1c108",
-      "bytes": 27493
-    },
-    {
-      "path": "docs/auto-capture-research/05-synthesis.md",
-      "sha256": "9e85e6a896db4473bac942bce20937f59b0158107841969387539addacf6a40a",
-      "bytes": 4056
-    },
-    {
-      "path": "docs/brainstorms/2026-02-01-universal-memory-multi-project-brainstorm.md",
-      "sha256": "5f234011574a8abfc247ee227d0bc87894f71b0161a44ca3efc69d594d26a60b",
-      "bytes": 10543
-    },
-    {
-      "path": "docs/brainstorms/2026-02-18-ping-mem-web-ui-brainstorm.md",
-      "sha256": "804b6a8685a84cedbbde5f14f6a2b286aa5e546c5ca5b901236728d5f42125e8",
-      "bytes": 7864
-    },
-    {
-      "path": "docs/claude/api-contract.md",
-      "sha256": "c14256c8d71253c6f4a67f9be3d208bbd36fca12661a3c4091a2fa5e2c286fa2",
-      "bytes": 2816
-    },
-    {
-      "path": "docs/claude/architecture.md",
-      "sha256": "3556cdbf881a82bd914579adf8fdb2b8e4b2f4e21ae7685aad45dc14d9260fd4",
-      "bytes": 5091
-    },
-    {
-      "path": "docs/claude/deployment.md",
-      "sha256": "4a0a71173324a854335de4172d16cc03a3169987c34508d2da24337772d0c73b",
-      "bytes": 2749
-    },
-    {
-      "path": "docs/claude/ingestion-diagnostics.md",
-      "sha256": "7d309e0739fb4fe918d46f855203964698fd76c72f925b2dea2b6725cd2c7196",
-      "bytes": 2669
-    },
-    {
-      "path": "docs/claude/integration-examples.md",
-      "sha256": "ee26891391cefa60bfff96a39e186551fb18feb57693cf3dcbdec2b00079692f",
-      "bytes": 1648
-    },
-    {
-      "path": "docs/continuation-packages/continuation_20260313_pr_zero_cycle23.md",
-      "sha256": "3e95e681321996438c339fb9f8dc0605e2e7e243a7ba7a61145a4b65b7083a5f",
-      "bytes": 9095
-    },
-    {
-      "path": "docs/debt-registry.md",
-      "sha256": "84b56e027d2103c56e2fe2d7edba18b03e81c427b19491861b05754287a8ce2a",
-      "bytes": 1339
-    },
-    {
-      "path": "docs/dreaming-research/01-transcript-format.md",
-      "sha256": "96fcce78957e2d951ea4b7c3c114b87c94d56fe0e8a2d6e49bb91211090038df",
-      "bytes": 2423
-    },
-    {
-      "path": "docs/dreaming-research/02-existing-infrastructure.md",
-      "sha256": "bfa6c6adb6d409d17a592466bace71337efa79a0d76ba461c7964cadf257413e",
-      "bytes": 3211
-    },
-    {
-      "path": "docs/dreaming-research/03-honcho-competitors.md",
-      "sha256": "601cc9f8c5c603fdb53c63a7ea6e86671d952309431d86244172ba0c32f45778",
-      "bytes": 19363
-    },
-    {
-      "path": "docs/dreaming-research/04-synthesis.md",
-      "sha256": "59593ef882e4ebc4c48e780021154400f7bc918413da6eb417baf36b54d8552b",
-      "bytes": 4827
-    },
-    {
-      "path": "docs/memory-evolution-research/1-synthesis.md",
-      "sha256": "557b4157d71ffd07cd87201e9769f29a668f00c5685213a296192a81cd2841d4",
-      "bytes": 4216
-    },
-    {
-      "path": "docs/ping-mem-cli-research/01-sdk-cli-patterns.md",
-      "sha256": "776c903e2ea8d316a1475e704ff6730c036d60467ca482af06e023a07cda6bd3",
-      "bytes": 21899
-    },
-    {
-      "path": "docs/ping-mem-cli-research/02-synthesis.md",
-      "sha256": "a2012c9e627d42a24ec051cda768982c5720ec463ca59102167df6284ce107a3",
-      "bytes": 17506
-    },
-    {
-      "path": "docs/ping-mem-consolidation-research/01-competitive-analysis.md",
-      "sha256": "7700f453708871c2663c48482c0a65740ddbd8b2e7017d1826817b7fc34c2e74",
-      "bytes": 29538
-    },
-    {
-      "path": "docs/ping-mem-consolidation-research/02-multi-client-config.md",
-      "sha256": "343c1644878195c4fd845568722f82bbd0ca1a5be3517d330ac0a947ee5d80be",
-      "bytes": 23117
-    },
-    {
-      "path": "docs/ping-mem-consolidation-research/03-context-engineering-evals.md",
-      "sha256": "8f42e46ffe90aecaba4160e700315fbd2d2ac8a95fb41448ef8a6625166e81fb",
-      "bytes": 35001
-    },
-    {
-      "path": "docs/ping-mem-consolidation-research/04-current-data-model-audit.md",
-      "sha256": "47be022451419109fc1c0e9fbce14e177de59d713a852c35fe9cc2c86ae16b27",
-      "bytes": 29165
-    },
-    {
-      "path": "docs/ping-mem-consolidation-research/05-synthesis.md",
-      "sha256": "6fe32f777138acdceec37d5ef18a950c78c6a55e40c4e53c47a2d89a9a825470",
-      "bytes": 42715
-    },
-    {
-      "path": "docs/ping-mem-consolidation-research/06-specflow-analysis.md",
-      "sha256": "ba625c9bb34934b126a24c7cd89188b766ff75c8b9a8efd041179266dcade446",
-      "bytes": 28206
-    },
-    {
-      "path": "docs/ping-mem-research/03-ingestion-queue-patterns.md",
-      "sha256": "befddcfe892db22437259553b7ca9d96a67168e5ade9f4ab9648f16ce59cf5e0",
-      "bytes": 26514
-    },
-    {
-      "path": "docs/ping-mem-research/05-ingestion-failure-analysis.md",
-      "sha256": "311f3f6791b0832f0ae41c628e22ffab9d8a24ccd7fafd4ed520348b9976eda0",
-      "bytes": 16828
-    },
-    {
-      "path": "docs/ping-mem-research/06-synthesis.md",
-      "sha256": "0f9d0ea83b3462ffb6e24e132ae0ffe2ac74e91c35887ef2a6c5ed5e7dcb5e7e",
-      "bytes": 5425
-    },
-    {
-      "path": "docs/ping-mem-research/capability-audit-verified.md",
-      "sha256": "203961ae0b98b16ad99905dda06243e674d3d10e42d614312c48b782ecb61acd",
-      "bytes": 14949
-    },
-    {
-      "path": "docs/plans/2026-02-01-feat-multi-project-discovery-and-session-support-plan.md",
-      "sha256": "b15f171f675ef5b4a4a6ef8d684cec8d212a7e9186bd04a5326ec42c2a36062e",
-      "bytes": 16742
-    },
-    {
-      "path": "docs/plans/2026-02-06-feat-paro-memory-migration-and-enhancement-plan.md",
-      "sha256": "f7a71dc3a39731c202a7fa9b65db77094cbb0b6670e6ceeacaef8b30c38f8506",
-      "bytes": 22773
-    },
-    {
-      "path": "docs/plans/2026-02-18-feat-ping-mem-web-ui-observability-dashboard-plan.md",
-      "sha256": "cadd2c6b57a0e12471d758a59d9dd4c194584570732be469ccd98e27e5a05a9f",
-      "bytes": 18503
-    },
-    {
-      "path": "docs/plans/2026-02-18-fix-uat-ui-security-and-streaming-bugs-plan.md",
-      "sha256": "80b4686fe4b003f978ae6dd77e7936874ba29012fe72576ec37b6b3852888878",
-      "bytes": 1791
-    },
-    {
-      "path": "docs/plans/2026-02-20-memory-enhancement-design.md",
-      "sha256": "e149cd5c44d3c1f63f2bef0125bdfd4f65f1fd77ffc30eadf96c41a1d76638b7",
-      "bytes": 20134
-    },
-    {
-      "path": "docs/plans/2026-02-20-memory-enhancement-plan.md",
-      "sha256": "0d74b528e0f9daaa9404e3f8fcc8540b1520e1e5446f436435b5ac23f575b88e",
-      "bytes": 37783
-    },
-    {
-      "path": "docs/plans/2026-03-06-feat-multi-agent-memory-orchestration-plan.md",
-      "sha256": "23ca5de3712cc3ea5a88f7aa6a6d837ef99e5ef70f4d346f672ee8cd1503e806",
-      "bytes": 33608
-    },
-    {
-      "path": "docs/plans/2026-03-08-feat-self-healing-observability-system-plan.md",
-      "sha256": "d43b5cb650cae36fedbdcbb35bf088a7fb8b571acf734abd22f9c32ae24f4125",
-      "bytes": 13455
-    },
-    {
-      "path": "docs/plans/2026-03-08-fix-veracity-audit-production-issues-plan.md",
-      "sha256": "8a2c327a6e6358e946f1a9641a8fcc25539be69df10e520c6216618b8c4880de",
-      "bytes": 30729
-    },
-    {
-      "path": "docs/plans/2026-03-09-code-structural-intelligence.md",
-      "sha256": "cbf12a2212f18e872b6b34af673e0c78280faac00c7463109fcb540866eae17d",
-      "bytes": 62790
-    },
-    {
-      "path": "docs/plans/2026-03-09-deterministic-search-quality.md",
-      "sha256": "3943fdf55fdf1b7872ac2c35b7ac39ef1eeacd077d64e1fc8f26c44636a65304",
-      "bytes": 58603
-    },
-    {
-      "path": "docs/plans/2026-03-15-feat-intelligence-platform-self-improvement-plan.md",
-      "sha256": "11a9884f0fd2261cd4b6ce7a3403e4fc81f11ea0be2b7b8cafa4a8d2083bb1db",
-      "bytes": 52212
-    },
-    {
-      "path": "docs/plans/2026-03-15-feat-self-monitoring-ingestion-pipeline-plan.md",
-      "sha256": "813a750f66be6c2b25ab87adc11df9fbc43b4b47aae6f6df43c24ea975a246ab",
-      "bytes": 35624
-    },
-    {
-      "path": "docs/plans/2026-03-15-fix-branch-hygiene-and-prevention-plan.md",
-      "sha256": "e0ea1b24ed25bdf0b049b19e90d332f4cb92901434770a5b1b5646ad37d63b0b",
-      "bytes": 23038
-    },
-    {
-      "path": "docs/plans/2026-03-15-fix-container-restart-data-loss-plan.md",
-      "sha256": "b99cedac322b2a10245d238de515c1bd72b809d2739a991a8365e8919fea99fb",
-      "bytes": 14233
-    },
-    {
-      "path": "docs/plans/2026-03-16-feat-ping-mem-cli-rest-api-plan.md",
-      "sha256": "33877cc1c2da28c439939f596b0194b5e83ec1fd0e89c30b4cf9cdc87a30765d",
-      "bytes": 35766
-    },
-    {
-      "path": "docs/plans/2026-03-17-feat-universal-intelligence-consolidation-plan.md",
-      "sha256": "8eaa6b4b83efad3a5e2e2a8906a20e9ec07a581128a04d25aff7bc24557030db",
-      "bytes": 102451
-    },
-    {
-      "path": "docs/plans/2026-03-21-feat-memory-evolution-auto-recall-quality-maintenance-plan.md",
-      "sha256": "ada6b3fb3c5dcc1e17b2d3678d4f4b296c7d570b9534874840ee820763cd8873",
-      "bytes": 44096
-    },
-    {
-      "path": "docs/plans/2026-03-22-arch-single-owner-mcp-proxy-plan.md",
-      "sha256": "8503e8702d1555db0b7b1f297fa17263a15fa130b2d7f9af80f3dc0bb98b9193",
-      "bytes": 11404
-    },
-    {
-      "path": "docs/plans/2026-03-22-feat-auto-capture-progressive-disclosure-memory-decay-plan.md",
-      "sha256": "3db039014bf0c819d0d4fe8f298eca97e2f5ae1efd3bcc44231851a1d4755aa4",
-      "bytes": 34765
-    },
-    {
-      "path": "docs/plans/2026-03-22-feat-conversation-mining-dreaming-engine-plan-review.md",
-      "sha256": "212053483e61f9a50febc32d3aa1eadd5e3b82fde0d6f44044b3195682a126ff",
-      "bytes": 15546
-    },
-    {
-      "path": "docs/plans/2026-03-22-feat-conversation-mining-dreaming-engine-plan.md",
-      "sha256": "94059a9fe84277d4c612de652b476ce23e5b273254fb7240e0c58d5fee0ddb96",
-      "bytes": 23445
-    },
-    {
-      "path": "docs/plans/2026-04-08-feat-capability-closure-plan.md",
-      "sha256": "2fcc1c6bc99e09792ea7f549495c55dabc2b1d92ca2d099be1c8c82e73c45225",
-      "bytes": 48055
-    },
-    {
-      "path": "docs/plans/2026-04-08-feat-client-reachability-reliability-plan.md",
-      "sha256": "3f8b7c0ac6bf02c8364bfa2c1a582c47c9d3c4335a692921177853f6c0c95e8c",
-      "bytes": 64306
-    },
-    {
-      "path": "docs/plans/2026-04-09-feat-full-capability-activation-plan.md",
-      "sha256": "c06c1d30ed74b583e52b4df7c9e14abe7fe035940f0023961bbdadd6fc5350a9",
-      "bytes": 59694
-    },
-    {
-      "path": "docs/plans/understory-integration-spec.md",
-      "sha256": "b87c426c25fb3bbd76118e56da0aee27f3946cba995d6eaa629ef7a583d60164",
-      "bytes": 58109
-    },
-    {
-      "path": "docs/proxy-research/01-mcp-proxy-architecture.md",
-      "sha256": "ea2bf498aab5d8b88401e696883058191db65ff3bba592728bdcf1934bf75c72",
-      "bytes": 21730
-    },
-    {
-      "path": "docs/research/01-contextgraph-video.md",
-      "sha256": "58984f35d9ec62fb19f0ffb090c46206664a047311759099e4cbdbc592d441e3",
-      "bytes": 4929
-    },
-    {
-      "path": "docs/research/02-kg-memory-encoding-paper.md",
-      "sha256": "e0d3c717ba0b8c7005799334e0ced91a0618ffaeadce2796b6e16f68a36aa17a",
-      "bytes": 4719
-    },
-    {
-      "path": "docs/research/03-contextgraph-repo.md",
-      "sha256": "ffb44ee29e2581b05c2811f48d18f82f9147a669b324f9c51b8695d5e1173993",
-      "bytes": 5506
-    },
-    {
-      "path": "docs/research/04-pingmem-architecture.md",
-      "sha256": "9df257b7e5accc3c1322fb1a3aa6d13c6c4695f22338b67e19f3543931a4ed5f",
-      "bytes": 7809
-    },
-    {
-      "path": "docs/research/05-synthesis-pros-cons.md",
-      "sha256": "112315300cf32ded17723a8b9dbc14395c5c3c650ddf4d4b31f39f12b98da594",
-      "bytes": 8731
-    },
-    {
-      "path": "docs/research/2026-03-09-code-structural-intelligence/01-codebase-audit.md",
-      "sha256": "558c1f20b682febe620c248b04e6a0aa09a1bdb807aabb3312a4cee36092760b",
-      "bytes": 10329
-    },
-    {
-      "path": "docs/research/2026-03-09-code-structural-intelligence/02-static-analysis-tools.md",
-      "sha256": "16585f811b850c7d9e2fe6628849bb4fa853414702128f2c15a98f22787855fe",
-      "bytes": 26894
-    },
-    {
-      "path": "docs/research/2026-03-09-code-structural-intelligence/03-neo4j-schema-and-queries.md",
-      "sha256": "f2e1ff0ae3f03a8e49ce932e571a70bcf5cb4e4735e60bd10a7d847f1db2f5fa",
-      "bytes": 29535
-    },
-    {
-      "path": "docs/research/2026-03-09-code-structural-intelligence/04-algorithms-and-scoring.md",
-      "sha256": "b47772238f41566e0c8e1b8976a6915c4f468f341f7b78d5450215c11e6d9f52",
-      "bytes": 27138
-    },
-    {
-      "path": "docs/research/2026-03-09-code-structural-intelligence/05-competitive-analysis.md",
-      "sha256": "9dd1788cba571d9e0c9af2872f5d77346d70fc16407f83eb3d9972623ed330ab",
-      "bytes": 27571
-    },
-    {
-      "path": "docs/research/2026-03-09-code-structural-intelligence/06-synthesis.md",
-      "sha256": "26b610fe258dbb83d32218b051033f9329b2acdb3e8fd0c8095561e84e2b23e5",
-      "bytes": 15131
-    },
-    {
-      "path": "docs/research/2026-03-09-code-structural-intelligence/07-specflow-analysis.md",
-      "sha256": "97e59be24c46e38d1cab6cae0087051603de4e5add5fd3fb54a8fecf68e12693",
-      "bytes": 43990
-    },
-    {
-      "path": "docs/research/2026-03-09-code-structural-intelligence/08-lessons-learned.md",
-      "sha256": "fc91bb9640e19384dfa72659d7ca2f642a46cb3bcb3bc96cc63da46b09d3a7b4",
-      "bytes": 5461
-    },
-    {
-      "path": "docs/research/2026-03-09-deterministic-search/01-bm25-code-search.md",
-      "sha256": "0921f58c6b240343afd11815683c84da611481934a0161ade6c853f81c85e97c",
-      "bytes": 6775
-    },
-    {
-      "path": "docs/research/2026-03-09-deterministic-search/02-mcp-streamable-http.md",
-      "sha256": "0ca5342d8fc2afc798b7e9c5d6184c7c122ae5d39547eff023ba25f633743571",
-      "bytes": 7254
-    },
-    {
-      "path": "docs/research/2026-03-09-deterministic-search/03-eval-metrics.md",
-      "sha256": "4c71b451f8b25c81dfa3eecc78dba1d13880ff1e2a556f6c4b5ecb893cb5a5a2",
-      "bytes": 8298
-    },
-    {
-      "path": "docs/research/2026-03-09-deterministic-search/04-fts5-advanced.md",
-      "sha256": "a558af32fb2e123720f720a7d07412c622a032b629b610713376dc224b36ede8",
-      "bytes": 34831
-    },
-    {
-      "path": "docs/research/2026-03-09-deterministic-search/05-codebase-current-state.md",
-      "sha256": "728041b91d2cac133be56d5598c5aa6607bd2662557abcd6a52604190f34c1f2",
-      "bytes": 6713
-    },
-    {
-      "path": "docs/research/2026-03-09-deterministic-search/06-synthesis.md",
-      "sha256": "798b767b8ca2cbb0dd8237c82d48855e078711ee39e93ec084eeec2fe7f910c4",
-      "bytes": 6300
-    },
-    {
-      "path": "docs/research/2026-03-09-deterministic-search/07-lessons-learned.md",
-      "sha256": "4e37fab962059b5bea62afb894e45b245f077f9094c6ef9b2a236482f794d79e",
-      "bytes": 6019
-    },
-    {
-      "path": "docs/research/INDEX.md",
-      "sha256": "cdb48978ba3a6878f890adf5c9807e5f773c7e8e24f53a55371c41261e98911e",
-      "bytes": 3760
-    },
-    {
-      "path": "examples/multi-tool-diagnostics/README.md",
-      "sha256": "c8fa5797c044b28b3b43756a044c9a2ca22e2a646cd464e4b7fc2ed16ec770e3",
-      "bytes": 5754
-    },
-    {
-      "path": "examples/resume-tracking/.ping-mem/manifest.json",
-      "sha256": "1e3bbc06982a3a01ce198dab91081a7c0dcfb9849280e8a985a95ef6851325ff",
-      "bytes": 774
-    },
-    {
       "path": "examples/resume-tracking/applications.json",
       "sha256": "3c4c33f83c155ca4a0f358580be001cce4abbe4790576a5008c8a7c9ff918f08",
       "bytes": 1539
@@ -717,11 +112,6 @@
       "path": "examples/resume-tracking/decisions.yaml",
       "sha256": "1b557540f98bd0e107a2724b69a0fa064a039e870a6f360f8dbfec5d52aab703",
       "bytes": 823
-    },
-    {
-      "path": "examples/resume-tracking/my-resume.md",
-      "sha256": "310974d09f2d5c87894eebd06b63e10b3ece1a1b4d379d738114f66dd6271faf",
-      "bytes": 1151
     },
     {
       "path": "nginx.prod.conf",
@@ -734,29 +124,9 @@
       "bytes": 2761
     },
     {
-      "path": "scripts/agent-path-audit.sh",
-      "sha256": "1ca65c2cac5c1341bbbd6416072c8e44547db1f6c67f0242dc2e3128dccd277a",
-      "bytes": 5295
-    },
-    {
-      "path": "scripts/backup-r2.sh",
-      "sha256": "95075cf17a30813a2040b15549a9fb4ec7204bd1706cf2a0c3d15d22a6e5d4e3",
-      "bytes": 1328
-    },
-    {
-      "path": "scripts/backup.sh",
-      "sha256": "993b6a13a6058e754540dc05db70b61ff91b717118e9d537ccb677207c9a1897",
-      "bytes": 11878
-    },
-    {
       "path": "scripts/cleanup-env-vectors.ts",
       "sha256": "239e5705ec4291a7846ef4f9534a0388b38740cb7bdfe47eb21b50dea0f04cd2",
       "bytes": 3362
-    },
-    {
-      "path": "scripts/deploy-prod.sh",
-      "sha256": "0704a3bb0add3549fa344aae9b408ea214a265feab5968a5b7de7691fa6d1729",
-      "bytes": 899
     },
     {
       "path": "scripts/direct-ingest.ts",
@@ -774,29 +144,9 @@
       "bytes": 1245
     },
     {
-      "path": "scripts/ingest-project.sh",
-      "sha256": "6906d8d99c634a27ad367a396af30997fe20f901e5796a684cdb8d35c63f3743",
-      "bytes": 6776
-    },
-    {
-      "path": "scripts/install-client.sh",
-      "sha256": "84e54c04520ee900e0d4fe230e3e32781ea55103952e2dbedf72890bee47cfaa",
-      "bytes": 9047
-    },
-    {
       "path": "scripts/migrate-from-memory-keeper.ts",
       "sha256": "16bc38dccd0e9d219622bd82b1fd0ca421ccc48f7958525be9dee0d9406d2ab8",
       "bytes": 12966
-    },
-    {
-      "path": "scripts/migrate-v2.sh",
-      "sha256": "33e513c6a76117c6d1e569c97565a8598fdee49e4424afef7f1e02ad789d6c95",
-      "bytes": 3622
-    },
-    {
-      "path": "scripts/nightly-improvement.sh",
-      "sha256": "28c208ab2aff1e70242a790bfba8684d14cc8aaa0de494a5f18aa7c4c29a7345",
-      "bytes": 5469
     },
     {
       "path": "scripts/reindex-qdrant.ts",
@@ -804,34 +154,9 @@
       "bytes": 1260
     },
     {
-      "path": "scripts/restore.sh",
-      "sha256": "8a31bff632477c18b6f2bd2c568cf7383b1c328d90e025e07bb7c1b5c6009121",
-      "bytes": 19772
-    },
-    {
-      "path": "scripts/rotate-api-key.sh",
-      "sha256": "9f91d0f171f1534f365f9b5b96f215755bd56e0f5adf37e152b7046e6dde7d00",
-      "bytes": 2906
-    },
-    {
       "path": "scripts/seed-knowledge.ts",
       "sha256": "b695988d420c2481e0c384910916ca66dcf97e68fa71dc5bc794d2b5a2004009",
       "bytes": 9074
-    },
-    {
-      "path": "scripts/setup.sh",
-      "sha256": "f5a37edb00911755a63026fac4c31c64774e27c1f8a7efd22cf8d6dc3f787a2b",
-      "bytes": 6286
-    },
-    {
-      "path": "scripts/smoke-test.sh",
-      "sha256": "3c174e3b491034d148819b9b4b960c6e1c6654ec21ce2d7709037415a2aaf7ca",
-      "bytes": 6636
-    },
-    {
-      "path": "scripts/test-all-capabilities.sh",
-      "sha256": "e7911fc4524d3e138fb767b3ecfc8580d9ec5a361eb8962913822d9e1bee320c",
-      "bytes": 13003
     },
     {
       "path": "scripts/verify-persistence.ts",
@@ -1044,11 +369,6 @@
       "bytes": 527
     },
     {
-      "path": "src/client/README.md",
-      "sha256": "c0c7a6ca86b7b618288a4fcb350965f82cf28ca28d5148cbca9cb64e308ae730",
-      "bytes": 7357
-    },
-    {
       "path": "src/client/__tests__/rest-client.test.ts",
       "sha256": "6a7aaa046f5489e775f91415bd91ed619a9c7c9d2d21cfc1ca0f332285434299",
       "bytes": 10716
@@ -1090,8 +410,8 @@
     },
     {
       "path": "src/config/runtime.ts",
-      "sha256": "2dcaf3d2a9feb9fdcaeeff18ee9e8e5e28c40fe6c1716d8c51c055c3dd6adcc3",
-      "bytes": 9119
+      "sha256": "4bfe2761d4c5dc99f538738300b4abe19ba06f3f8cba05775eb94a94fe2a9b0e",
+      "bytes": 9334
     },
     {
       "path": "src/diagnostics/DiagnosticsStore.ts",
@@ -1195,8 +515,8 @@
     },
     {
       "path": "src/dreaming/DreamingEngine.ts",
-      "sha256": "a50fa44904e9c49f994f0e3ef537d62422539e2fc2566c068ccba0ac18e5ea9c",
-      "bytes": 17496
+      "sha256": "0114060facd76a74a15dc146dc465a31ca6c2647dab11fb7097feda6f6170298",
+      "bytes": 16818
     },
     {
       "path": "src/dreaming/__tests__/DreamingEngine.test.ts",
@@ -1250,8 +570,8 @@
     },
     {
       "path": "src/graph/CausalDiscoveryAgent.ts",
-      "sha256": "f9469fbcef8c3e57528a4b384facf517368560e5da83c5561ec553a98cbc9233",
-      "bytes": 7480
+      "sha256": "1621ec51e7cb25f756e4e3b00b7023326b8fadde0d296db0cbfbe68319267c73",
+      "bytes": 7547
     },
     {
       "path": "src/graph/CausalGraphManager.ts",
@@ -1285,13 +605,13 @@
     },
     {
       "path": "src/graph/LLMEntityExtractor.ts",
-      "sha256": "a432359b4d3b4fc06f26d5deb0bb9ab1bc7aab978167fcd1e63ec41402a87041",
-      "bytes": 10067
+      "sha256": "7ece7a2164c5af9106d72397a1b8e625d1b513c9e22e0ce6a729bfeae1ad2c74",
+      "bytes": 9661
     },
     {
       "path": "src/graph/LineageEngine.ts",
-      "sha256": "318b314b07dfd809e420e55765c518ea7c2bb59bda120110aa7ec040ce64ad36",
-      "bytes": 27037
+      "sha256": "3abacaaffebd876f96366ae843b1726202158a92e60d14c62bb441da7d01a353",
+      "bytes": 27294
     },
     {
       "path": "src/graph/Neo4jClient.ts",
@@ -1310,8 +630,8 @@
     },
     {
       "path": "src/graph/TemporalCodeGraph.ts",
-      "sha256": "290d1847531ad1af81bfd0f118325b2e1b1685a62d84fe6e4a34643ac2d3b79d",
-      "bytes": 30717
+      "sha256": "585e44332580aeaed494477e5d053f698190d71149c1642181eb70f3619be189",
+      "bytes": 31120
     },
     {
       "path": "src/graph/TemporalStore.ts",
@@ -1455,8 +775,8 @@
     },
     {
       "path": "src/http/rest-server.ts",
-      "sha256": "82a7df919dc9beaeb550597cf9628918876410e1c9c8858a3a2350403136a6a7",
-      "bytes": 167846
+      "sha256": "eb19a52d660bd46bf5a916266b18109c0c482ef13aa682bb3c2a35fc9b1c2184",
+      "bytes": 168406
     },
     {
       "path": "src/http/routes/__tests__/shell.test.ts",
@@ -1515,8 +835,8 @@
     },
     {
       "path": "src/http/server.ts",
-      "sha256": "eaaf33be41b1e91951fd45b7e5c86cd6ffd1e9e938bccace7f2bbc2fc7a840b2",
-      "bytes": 11107
+      "sha256": "e8f0f92e40a98d7977fa91fa33cdee36056e2b618398b1e45ddc88b6895b2757",
+      "bytes": 11222
     },
     {
       "path": "src/http/sse-server.ts",
@@ -1655,8 +975,8 @@
     },
     {
       "path": "src/http/ui/partials/insights.ts",
-      "sha256": "6837f61ea214c0bcb7c2a43076d9d9b4f1644e4fd0a6281763f6b8bde40a9e3d",
-      "bytes": 5052
+      "sha256": "36cf3094541973a9621fccab908b9e016583e98875a25561bdbf6fae5bfc3760",
+      "bytes": 5154
     },
     {
       "path": "src/http/ui/partials/knowledge.ts",
@@ -1730,13 +1050,13 @@
     },
     {
       "path": "src/ingest/IngestionQueue.ts",
-      "sha256": "652d5f9e48500fec2e118f6e045804a7ca1bd396292739a62c7caf399ecb8c60",
-      "bytes": 3808
+      "sha256": "2455f3fd77114e6adf76412458b614a7934480619a88ecfd5ade7886195ed761",
+      "bytes": 5662
     },
     {
       "path": "src/ingest/IngestionService.ts",
-      "sha256": "9ad86478416e2a2c4f7f5912f3312ca7f6267f72502db3497efec8d0d595218f",
-      "bytes": 19542
+      "sha256": "2883ab3c9c5f4b05389b0b05f10845cc0a347fd79fe3a29d0d518f19fbdd3766",
+      "bytes": 19626
     },
     {
       "path": "src/ingest/ManifestStore.ts",
@@ -1745,8 +1065,8 @@
     },
     {
       "path": "src/ingest/ProjectScanner.ts",
-      "sha256": "1d262d60559010ff06a400d835a0b02d9b3645510031f18dc1864305a0d873bf",
-      "bytes": 12895
+      "sha256": "17e71f0e31dd18f4a257d3bcd14dbb12b9810e94093b481489fd8b9c907895cd",
+      "bytes": 14903
     },
     {
       "path": "src/ingest/SafeGit.ts",
@@ -1850,8 +1170,8 @@
     },
     {
       "path": "src/llm/ClaudeCli.ts",
-      "sha256": "5416aabb36f945e516907d933de5364a405e1c6f7a0a959f3df893829f288b9c",
-      "bytes": 3448
+      "sha256": "d314f67c8e1139b88db4a5dafe5e13c67610b834f0a25914435fcd6a8de25867",
+      "bytes": 3440
     },
     {
       "path": "src/llm/LLMProxy.ts",
@@ -1875,8 +1195,8 @@
     },
     {
       "path": "src/maintenance/MaintenanceRunner.ts",
-      "sha256": "ab21bedb09653c140666374fb59ceed7f9871acb0fdce45a70bb0a0963009485",
-      "bytes": 12372
+      "sha256": "b557197e8e8dac8e0c7096d12dbe3b7d779ca74829c04e727bffe9fbc2529b07",
+      "bytes": 12378
     },
     {
       "path": "src/maintenance/__tests__/MaintenanceRunner.test.ts",
@@ -1920,8 +1240,8 @@
     },
     {
       "path": "src/mcp/__tests__/auto-recall.test.ts",
-      "sha256": "dafc9c772df5772c8ed481ce42846711e0b0e884c090db10436a901c35e16934",
-      "bytes": 4809
+      "sha256": "7a1ff0a83e7adcfd881c7aacbc16d136d288c4645f180026ebc1734843e0be43",
+      "bytes": 4918
     },
     {
       "path": "src/mcp/__tests__/contradiction-on-save.test.ts",
@@ -1985,13 +1305,13 @@
     },
     {
       "path": "src/mcp/handlers/CodebaseToolModule.ts",
-      "sha256": "b50a93474b84900d88a0dcac1062c862490163541ea0c3e533865f6da7563f69",
-      "bytes": 15847
+      "sha256": "e0fa2914344d297cc965c7c49beff23c687e43d5f44cffd8e4f3d279ab2e32f5",
+      "bytes": 16145
     },
     {
       "path": "src/mcp/handlers/ContextToolModule.ts",
-      "sha256": "78fe6e5d4dc21213a2a399e18cad32b906aebe43bd245db398622d175825dad0",
-      "bytes": 38088
+      "sha256": "bc77de50c3f2a2a5096549842dfc5341bfcecfc2c05c713f9a49637b9a004e02",
+      "bytes": 37566
     },
     {
       "path": "src/mcp/handlers/DiagnosticsToolModule.ts",
@@ -2075,8 +1395,8 @@
     },
     {
       "path": "src/memory/MemoryManager.ts",
-      "sha256": "cf45125dc7a8b80a2ab50c227fe52e2da32f016bc3abde37fa0677f0ec9da67b",
-      "bytes": 57613
+      "sha256": "548249ab129b5161ba71e256096f2c10b42b85b117fc41094aab013644c8162f",
+      "bytes": 57603
     },
     {
       "path": "src/memory/RelevanceEngine.ts",
@@ -2175,8 +1495,8 @@
     },
     {
       "path": "src/mining/TranscriptMiner.ts",
-      "sha256": "7aa8ad90bd16ac3196cd27a56cd75c72cf2c85869f2a488d7bee9c7e90c77586",
-      "bytes": 19750
+      "sha256": "46fd53b57ff37b4b3b5d83835d24fc5983cd4b48b048119c815f53715e304216",
+      "bytes": 19307
     },
     {
       "path": "src/mining/__tests__/TranscriptMiner.test.ts",
@@ -2190,8 +1510,8 @@
     },
     {
       "path": "src/observability/HealthMonitor.ts",
-      "sha256": "4b62b81b633425f983e713a369840f5e756173a2d273378fa2c75bb220018044",
-      "bytes": 21383
+      "sha256": "80b35202b26ee820735096eb96cc8c99b11fff1e508affaf4f1a26cc3d963b3b",
+      "bytes": 21384
     },
     {
       "path": "src/observability/__tests__/HealthMonitor.test.ts",
@@ -2225,8 +1545,8 @@
     },
     {
       "path": "src/pubsub/MemoryPubSub.ts",
-      "sha256": "186ba3a0ef0fde2c2c4cf8ccb2330530e533134dcb1685e902c7c720256c393d",
-      "bytes": 5274
+      "sha256": "27461ca5389a7ba6c9d22a4d80c13f818a103829a3171d9369cc30a27a1a8597",
+      "bytes": 5339
     },
     {
       "path": "src/pubsub/__tests__/MemoryPubSub.test.ts",
@@ -2240,8 +1560,8 @@
     },
     {
       "path": "src/search/BM25Scorer.ts",
-      "sha256": "5d293d2f91ace7e5da25afa39189a5d0771450949e8a631fe596cbec157ba86d",
-      "bytes": 7322
+      "sha256": "dc3c8131131ec52a2a535a86d9809bd6fa70b8a2779f01b69c5e08f922e9e609",
+      "bytes": 7554
     },
     {
       "path": "src/search/BM25Store.ts",
@@ -2395,8 +1715,8 @@
     },
     {
       "path": "src/session/SessionManager.ts",
-      "sha256": "b66adaab52ac4a179931e98d526349e1a6b5e88f16dc1a09f46856700251627e",
-      "bytes": 19173
+      "sha256": "2c443e5a0422e794da77e5acc6be1ac9a662ac844a3cf436ca88207d95bde038",
+      "bytes": 19192
     },
     {
       "path": "src/session/__tests__/SessionManager.test.ts",
@@ -2584,6 +1904,6 @@
       "bytes": 849
     }
   ],
-  "generatedAt": "2026-04-09T09:25:27.326Z",
+  "generatedAt": "2026-04-12T12:44:08.106Z",
   "schemaVersion": 1
 }

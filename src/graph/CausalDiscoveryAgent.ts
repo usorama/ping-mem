@@ -8,6 +8,8 @@
  * @version 1.0.0
  */
 
+import * as fs from "fs";
+import * as path from "path";
 import type { CausalGraphManager } from "./CausalGraphManager.js";
 import type { GraphManager } from "./GraphManager.js";
 import { createLogger } from "../util/logger.js";
@@ -72,9 +74,24 @@ const DEFAULT_MODEL = "gpt-4o-mini";
 const DEFAULT_CONFIDENCE_THRESHOLD = 0.7;
 
 /** System prompt for causal relationship extraction */
-const CAUSAL_EXTRACTION_PROMPT = `You are a causal relationship extractor. Given text, identify cause-effect relationships.
-Return JSON: { "causal_links": [{ "cause": "entity name", "effect": "entity name", "confidence": 0.0-1.0, "evidence": "brief explanation" }] }
-Only include relationships where the causal direction is clear. Set confidence based on how explicitly the causation is stated.`;
+const CAUSAL_PROMPT_FALLBACK = `Extract causal relationships from text. Return JSON: { "causal_links": [...] }`;
+
+function loadCausalPrompt(): string {
+  try {
+    const promptPath = path.join(import.meta.dir, "prompts", "causal-discovery.md");
+    return fs.readFileSync(promptPath, "utf-8").trim();
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      log.warn("Prompt file not found, using fallback", { filename: "causal-discovery.md" });
+    } else {
+      log.error("Failed to load prompt file, using fallback", { filename: "causal-discovery.md", error: err instanceof Error ? err.message : String(err) });
+    }
+    return CAUSAL_PROMPT_FALLBACK;
+  }
+}
+
+const CAUSAL_EXTRACTION_PROMPT = loadCausalPrompt();
 
 // ============================================================================
 // Internal Types

@@ -182,9 +182,10 @@ export class LineageEngine {
    * @throws {LineageEngineError} If the operation fails
    */
   async getAncestors(entityId: string, maxDepth: number = DEFAULT_MAX_DEPTH): Promise<Entity[]> {
+    const clampedDepth = Math.max(1, Math.min(maxDepth, DEFAULT_MAX_DEPTH));
     const cypher = `
       MATCH (start:Entity {id: $entityId})
-      MATCH path = (start)-[:DERIVED_FROM*1..${maxDepth}]->(ancestor:Entity)
+      MATCH path = (start)-[:DERIVED_FROM*1..${clampedDepth}]->(ancestor:Entity)
       WITH ancestor, length(path) as depth
       ORDER BY depth ASC
       RETURN DISTINCT ancestor.id as id, ancestor.type as type, ancestor.name as name,
@@ -224,9 +225,10 @@ export class LineageEngine {
    * @throws {LineageEngineError} If the operation fails
    */
   async getDescendants(entityId: string, maxDepth: number = DEFAULT_MAX_DEPTH): Promise<Entity[]> {
+    const clampedDepth = Math.max(1, Math.min(maxDepth, DEFAULT_MAX_DEPTH));
     const cypher = `
       MATCH (start:Entity {id: $entityId})
-      MATCH path = (descendant:Entity)-[:DERIVED_FROM*1..${maxDepth}]->(start)
+      MATCH path = (descendant:Entity)-[:DERIVED_FROM*1..${clampedDepth}]->(start)
       WITH descendant, length(path) as depth
       ORDER BY depth ASC
       RETURN DISTINCT descendant.id as id, descendant.type as type, descendant.name as name,
@@ -528,14 +530,15 @@ export class LineageEngine {
    * @throws {LineageEngineError} If the operation fails
    */
   async buildLineageGraph(entityId: string, depth: number = DEFAULT_GRAPH_DEPTH): Promise<LineageGraph> {
+    const clampedDepth = Math.max(1, Math.min(depth, DEFAULT_MAX_DEPTH));
     const cypher = `
       MATCH (center:Entity {id: $entityId})
 
       // Get ancestors
-      OPTIONAL MATCH ancestorPath = (center)-[:DERIVED_FROM*1..${depth}]->(ancestor:Entity)
+      OPTIONAL MATCH ancestorPath = (center)-[:DERIVED_FROM*1..${clampedDepth}]->(ancestor:Entity)
 
       // Get descendants
-      OPTIONAL MATCH descendantPath = (descendant:Entity)-[:DERIVED_FROM*1..${depth}]->(center)
+      OPTIONAL MATCH descendantPath = (descendant:Entity)-[:DERIVED_FROM*1..${clampedDepth}]->(center)
 
       // Collect all entities
       WITH center,
@@ -561,7 +564,7 @@ export class LineageEngine {
            CASE WHEN ancestor IS NOT NULL THEN -length(ancestorPath) ELSE null END as ancestorDepth
 
       // Get descendants with depth
-      OPTIONAL MATCH descendantPath = (descendant:Entity)-[:DERIVED_FROM*1..${depth}]->(center)
+      OPTIONAL MATCH descendantPath = (descendant:Entity)-[:DERIVED_FROM*1..${clampedDepth}]->(center)
 
       // Combine into union of all nodes
       WITH center,

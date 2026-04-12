@@ -143,12 +143,17 @@ export class BM25Scorer {
   }
 
   indexDocumentsBatch(docs: Array<{ chunkId: string; content: string }>): void {
-    const txn = this.db.transaction(() => {
-      for (const doc of docs) {
-        this.indexDocument(doc.chunkId, doc.content);
-      }
-    });
-    txn();
+    // Batch into smaller transactions to avoid SQLITE_IOERR on large ingestions (18K+ docs)
+    const BATCH = 500;
+    for (let i = 0; i < docs.length; i += BATCH) {
+      const batch = docs.slice(i, i + BATCH);
+      const txn = this.db.transaction(() => {
+        for (const doc of batch) {
+          this.indexDocument(doc.chunkId, doc.content);
+        }
+      });
+      txn();
+    }
   }
 
   search(query: string, limit = 10, filterChunkIds?: Set<string>): BM25SearchResult[] {

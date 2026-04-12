@@ -1,0 +1,367 @@
+{
+  "date": "2026-04-12",
+  "auditSource": ".ai/system-zero-audit-20260412.md",
+  "phase": "Phase 2 — Deterministic Verification",
+  "totalFindings": 38,
+  "verified": 38,
+  "falsePositives": 0,
+  "verificationRate": "100%",
+  "findings": [
+    {
+      "id": "SEC-1",
+      "type": "auth-bypass",
+      "path": "src/http/rest-server.ts:3573",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "if (adminUser && adminPass) { ... } — auth skipped when env vars unset",
+      "executionPhase": 1,
+      "severity": "HIGH"
+    },
+    {
+      "id": "SEC-2",
+      "type": "timing-oracle",
+      "path": "src/http/rest-server.ts:3575-3576",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "authHeader !== expected — uses !== instead of timingSafeStringEqual",
+      "executionPhase": 1,
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "TO-1",
+      "type": "missing-timeout",
+      "path": "src/search/EmbeddingService.ts:373",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "Gemini embedContent fetch() — no AbortSignal",
+      "executionPhase": 1,
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "TO-2",
+      "type": "missing-timeout",
+      "path": "src/search/EmbeddingService.ts:448",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "Ollama /api/embed fetch() — no AbortSignal",
+      "executionPhase": 1,
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "TO-3",
+      "type": "missing-timeout",
+      "path": "src/search/EmbeddingService.ts:305",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "OpenAI SDK embeddings.create() — no timeout option",
+      "executionPhase": 1,
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "TO-4",
+      "type": "missing-timeout",
+      "path": "src/search/Reranker.ts:98",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "Cohere rerank fetch() — no AbortSignal",
+      "executionPhase": 1,
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "TO-5",
+      "type": "missing-timeout",
+      "path": "src/search/CodeEmbeddingProvider.ts:84",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "Voyage AI fetch() — no AbortSignal",
+      "executionPhase": 1,
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "TO-6",
+      "type": "missing-timeout",
+      "path": "src/diagnostics/SummaryGenerator.ts:124",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "OpenAI chat completions fetch() — no AbortSignal",
+      "executionPhase": 1,
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "TO-7",
+      "type": "missing-timeout",
+      "path": "src/memory/SemanticCompressor.ts:108",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "OpenAI chat completions fetch() — no AbortSignal",
+      "executionPhase": 1,
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "DC-1",
+      "type": "dead-file",
+      "path": "src/ingest/UnifiedIngestionService.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 1 (4 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-2",
+      "type": "dead-file",
+      "path": "src/ingest/UnifiedIngestionOrchestrator.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 1 (4 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-3",
+      "type": "dead-file",
+      "path": "src/ingest/DocumentParser.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 1 (4 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-4",
+      "type": "dead-file",
+      "path": "src/graph/DocumentGraph.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 1 (4 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-5",
+      "type": "dead-file",
+      "path": "src/migration/MigrationVerifier.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 2 (3 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-6",
+      "type": "dead-file",
+      "path": "src/migration/MigrationLedger.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 2 (3 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-7",
+      "type": "dead-file",
+      "path": "src/migration/MemoryKeeperReader.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 2 (3 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-8",
+      "type": "dead-file",
+      "path": "src/eval/suite.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 3 (4 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-9",
+      "type": "dead-file",
+      "path": "src/eval/llm-judge.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 3 (4 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-10",
+      "type": "dead-file",
+      "path": "src/eval/metrics.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 3 (4 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-11",
+      "type": "dead-file",
+      "path": "src/eval/improvement-loop.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 3 (4 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-12",
+      "type": "dead-file",
+      "path": "src/diagnostics/eslint-sarif.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 4 (3 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-13",
+      "type": "dead-file",
+      "path": "src/diagnostics/prettier-sarif.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 4 (3 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-14",
+      "type": "dead-file",
+      "path": "src/diagnostics/tsc-sarif.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 4 (3 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-15",
+      "type": "dead-file",
+      "path": "src/metrics/MetricsCollector.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 5 (3 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-16",
+      "type": "dead-file",
+      "path": "src/metrics/types.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 5 (3 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DC-17",
+      "type": "dead-file",
+      "path": "src/metrics/index.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "Cluster 5 (3 files) removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DR-1",
+      "type": "dead-route",
+      "path": "src/http/routes/graph.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "7 route files + index.ts removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DR-2",
+      "type": "dead-route",
+      "path": "src/http/routes/causal.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "7 route files + index.ts removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DR-3",
+      "type": "dead-route",
+      "path": "src/http/routes/worklog.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "7 route files + index.ts removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DR-4",
+      "type": "dead-route",
+      "path": "src/http/routes/codebase-extra.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "7 route files + index.ts removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DR-5",
+      "type": "dead-route",
+      "path": "src/http/routes/diagnostics-extra.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "7 route files + index.ts removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DR-6",
+      "type": "dead-route",
+      "path": "src/http/routes/memory-extra.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "7 route files + index.ts removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "DR-7",
+      "type": "dead-route",
+      "path": "src/http/routes/tool-discovery.ts",
+      "verdict": "VERIFIED",
+      "method": "delete-and-typecheck",
+      "evidence": "7 route files + index.ts removed — tsc --noEmit exits 0",
+      "executionPhase": 3
+    },
+    {
+      "id": "BH-1",
+      "type": "error-handling",
+      "path": "src/mcp/handlers/DiagnosticsToolModule.ts:373-374",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "throw new Error('Summary generator not configured...') — throws raw Error, not structured MCP response",
+      "executionPhase": 2,
+      "severity": "MEDIUM"
+    },
+    {
+      "id": "BH-2",
+      "type": "stub-tool",
+      "path": "src/mcp/handlers/MemoryToolModule.ts:171-180",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "Returns { success: false, message: 'MCP subscriptions are not supported...' } — redirect without NOT_IMPLEMENTED code; description promises subscriptionId that's never returned",
+      "executionPhase": 2,
+      "severity": "LOW"
+    },
+    {
+      "id": "AC-1",
+      "type": "api-mismatch",
+      "path": "src/graph/LineageEngine.ts:185 + src/http/rest-server.ts:2564",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "REST clamps to 50, LineageEngine clamps to 10 — 5x mismatch",
+      "executionPhase": 2,
+      "severity": "LOW"
+    },
+    {
+      "id": "NA-1",
+      "type": "naming-ambiguity",
+      "path": "src/mcp/handlers/DiagnosticsToolModule.ts",
+      "verdict": "VERIFIED",
+      "method": "code-read",
+      "evidence": "diagnostics_summary='Summarize findings...' vs diagnostics_summarize='Generate or retrieve LLM-powered summary...' — both say summarize, no hint summary is deterministic",
+      "executionPhase": 4,
+      "severity": "LOW"
+    },
+    {
+      "id": "TC-1",
+      "type": "untested-tools",
+      "verdict": "VERIFIED",
+      "method": "grep-inventory",
+      "evidence": "Phase 0 scan: 9/52 tools tested (17.3%). 43 tools have zero handler-execution tests.",
+      "executionPhase": 2,
+      "severity": "MEDIUM",
+      "note": "Test coverage is a separate workstream — creating GH issues, not fixing in this run"
+    }
+  ]
+}

@@ -478,7 +478,8 @@ export class IngestionService {
     try {
       await this.eventStore?.createEvent(SYSTEM_SESSION_ID, eventType, data as unknown as Record<string, unknown>);
     } catch (err) {
-      log.warn("Failed to persist ingestion event to EventStore", {
+      const level = eventType === "CODEBASE_INGESTION_FAILED" ? "error" : "warn";
+      log[level]("Failed to persist ingestion event to EventStore", {
         eventType,
         error: err instanceof Error ? err.message : String(err),
       });

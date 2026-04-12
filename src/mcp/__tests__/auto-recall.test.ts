@@ -6,6 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { PingMemServer } from "../PingMemServer.js";
+import { _resetRecallMissCooldown } from "../handlers/ContextToolModule.js";
 
 async function callTool(
   server: PingMemServer,
@@ -58,6 +59,7 @@ describe("context_auto_recall", () => {
   });
 
   it("emits RECALL_MISS event when zero-result recall occurs", async () => {
+    _resetRecallMissCooldown();
     await callTool(server, "context_session_start", { name: "recall-miss-session" });
 
     const uniqueQuery = `recall-miss-test-${Date.now()}`;

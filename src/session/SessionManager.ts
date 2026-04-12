@@ -601,6 +601,7 @@ export class SessionManager {
       }
     }, this.config.autoCheckpointInterval);
 
+    timer.unref();
     this.checkpointTimers.set(sessionId, timer);
   }
 
