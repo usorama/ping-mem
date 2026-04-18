@@ -147,13 +147,16 @@ Each file exports `export const <category>Gates: Gate[] = [...]`.
 | `last-ingest-within-24h` | warning | `(Date.now() - lastIngestedAt) / 3600_000 < 24` |
 | `sync-lag-below-60s` | warning | sentinel memory write + poll — see P5.1 implementation detail below |
 
-**`src/doctor/checks/self-heal.ts`** (3 gates):
+**`src/doctor/checks/self-heal.ts`** (6 gates — adds P7 soak-contract gates):
 
 | id | severity | check |
 |----|----------|-------|
 | `pattern-confidence-nonzero` | warning (soft) | `sqlite3 ~/.ping-guard/guard.db "SELECT COUNT(*) FROM patterns WHERE confidence>=0.3"` ≥5 |
 | `aos-reconcile-absent` | warning | `! grep 'aos-reconcile-scheduled' ~/Projects/ping-guard/scripts/wake_detector.py` (verifies P3.4 fully applied) |
 | `ollama-chain-reachable` | critical | preflight all 3 Ollama tiers within 10s |
+| `orbstack-warm-latency` | warning (soft) | `time curl -sf --max-time 3 http://localhost:3003/health \| …` — round-trip ≤2s post-wake (P7 soft gate) |
+| `auto-os-cross-project-hit` | warning (soft) | verify P6 auto-os cross-project search returns ≥1 hit (P7 soft gate). Uses `scripts/verify-cross-project-search.sh`. |
+| `ping-mem-doctor-exec-time-below-10s` | warning (soft) | self-reported: doctor run's own `durationMs.sum < 10000` on previous run — read from last `doctor-runs/*.jsonl` (P7 soft gate + AC-NF1) |
 
 **`src/doctor/checks/log-hygiene.ts`** (3 gates — owns P4 hand-off #2 + #3):
 
@@ -173,15 +176,16 @@ Each file exports `export const <category>Gates: Gate[] = [...]`.
 | `query-pr-236-jwt` | critical | `/api/v1/search?query=PR+236+JWT+secret+isolation` ≥1 |
 | `query-dpdp-consent-18` | critical | `/api/v1/search?query=DPDP+consent+age+18` ≥1 |
 
-**`src/doctor/checks/alerts.ts`** (1 gate + 2 watchdog gates, total 3 to reach 29):
+**`src/doctor/checks/alerts.ts`** (4 gates — adds `doctor-launchd-ran` required by P7 hard-gate contract):
 
 | id | severity | check |
 |----|----------|-------|
 | `alerts-db-writable` | critical | `sqlite3 ~/.ping-mem/alerts.db "SELECT 1"` |
 | `supervisor-watchdog-loaded` | critical | `launchctl list \| grep com.ping-guard.watchdog` shows PID ≥0 entry (P4.6 hand-off #4) |
 | `posttooluse-sync-recent-errors` | warning (soft) | `grep "ERROR\|FAIL" ~/.ping-mem/post-tool-sync.log` within last 60 min → zero hits (closes Gemini's silent-failure concern from P1.7) |
+| `doctor-launchd-ran` | critical | newest file in `~/.ping-mem/doctor-runs/*.jsonl` has mtime within last 20 min (proves P5 launchd timer fired within expected 15-min interval + 5-min tolerance). Required by P7 hard-gate list for O10 soak accounting. |
 
-**Total: 6+7+4+3+3+5+3 = 31 gates.** ≥29 requirement met.
+**Total: 6+7+4+6+3+5+4 = 35 gates.** ≥29 requirement exceeded; every P7 soak gate is covered by a matching P5 gate ID.
 
 **Thresholds externalized** to `~/.ping-mem/thresholds.json` (created by doctor on first run with defaults). Gate checks read this file so you can tune without redeploy:
 
@@ -397,13 +401,19 @@ export default defineCommand({
       });
 
       // Write to ring buffer
+      // Filename convention is ISO-8601 with `:` replaced by `-` (filesystem-safe),
+      // prefixed by calendar-day `YYYY-MM-DD` so P7's `find ... -name "${day}T*.jsonl"`
+      // pattern matches deterministically. Do NOT change to epoch seconds —
+      // phase-7's soak-monitor.sh depends on this naming contract.
       const runsDir = join(homedir(), ".ping-mem", "doctor-runs");
       fs.mkdirSync(runsDir, { recursive: true });
-      const filename = join(runsDir, `${Math.floor(Date.now() / 1000)}.jsonl`);
+      const iso = new Date().toISOString().replace(/:/g, "-"); // e.g. 2026-04-18T06-00-15.123Z
+      const filename = join(runsDir, `${iso}.jsonl`);
       fs.writeFileSync(filename, JSON.stringify(result) + "\n");
 
-      // Trim ring buffer to last 96 runs (24h @ 15min intervals)
-      const files = fs.readdirSync(runsDir).sort();
+      // Trim ring buffer to last 96 runs (24h @ 15min intervals).
+      // Lexicographic sort works because ISO-8601 is lexicographically ordered.
+      const files = fs.readdirSync(runsDir).filter((f) => f.endsWith(".jsonl")).sort();
       for (const f of files.slice(0, Math.max(0, files.length - 96))) {
         fs.unlinkSync(join(runsDir, f));
       }

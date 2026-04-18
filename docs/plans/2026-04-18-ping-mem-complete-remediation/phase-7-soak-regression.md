@@ -229,16 +229,26 @@ SOAK_STATE_FILE="${SOAK_STATE_FILE:-$HOME/.ping-mem/soak-state.json}"
 WINDOW_DAYS="${WINDOW_DAYS:-30}"
 SOFT_TOLERANCE="${SOFT_TOLERANCE:-6}"
 
+#
+# HARD and SOFT gate IDs MUST match P5's gate registry IDs exactly.
+# P5 emits `{id: "<slug>", status: "pass"|"fail"|"skip", ...}` — this script
+# matches on `.id` and maps `pass→green`, `fail→red`, `skip→red` (safety).
+# If you add/rename a gate in P5, update this list in the same PR.
+#
 HARD_GATES=(
-  "rest-health"
+  "rest-health-200"
   "mcp-proxy-stdio"
-  "regression-5-of-5"
-  "ingestion-coverage-ping-learn"
-  "ingestion-coverage-5-projects"
-  "self-heal-ollama-reachable"
-  "disk-below-90"
-  "session-cap-below-80"
-  "supervisor-no-rollback"
+  "query-ping-learn-pricing"
+  "query-firebase-fcm"
+  "query-classroom-redesign"
+  "query-pr-236-jwt"
+  "query-dpdp-consent-18"
+  "coverage-commits-ge-95pct"
+  "coverage-files-ge-95pct"
+  "ollama-reachable"
+  "disk-below-85"
+  "session-cap-below-80pct"
+  "supervisor-no-rollback-24h"
   "doctor-launchd-ran"
 )
 
@@ -267,34 +277,39 @@ for ((i = WINDOW_DAYS - 1; i >= 0; i--)); do
   DAY_KEYS+=("$(date -v-"$i"d +%Y-%m-%d)")
 done
 
-# For a given gate and day, return "green" if >=1 run that day shows green AND no run shows red; "red" otherwise.
+# For a given gate and day, return "green" if >=1 P5 run that day shows `status=pass`
+# AND no run shows `status=fail`; "red" otherwise.
+# Matches on `.id` (P5's stable slug) — NOT `.name` (human display).
+# Maps P5 status: pass→green, fail→red, skip→red (safety default).
 # Absence of runs for that day = "red" (safety default).
+# File naming: P5 writes `<ISO8601>.jsonl` e.g. `2026-04-18T06:00:15Z.jsonl` — matches `${day}T*.jsonl`.
 gate_day_status() {
   local gate="$1"
   local day="$2"
   local files
-  files=$(find "$DOCTOR_RUNS_DIR" -type f -name "${day}*.jsonl" 2>/dev/null || true)
+  files=$(find "$DOCTOR_RUNS_DIR" -type f -name "${day}T*.jsonl" 2>/dev/null || true)
   if [ -z "$files" ]; then
     echo "red"
     return
   fi
-  local any_green="no"
-  local any_red="no"
+  local any_pass="no"
+  local any_fail="no"
   while IFS= read -r f; do
     [ -f "$f" ] || continue
     while IFS= read -r line; do
       local status
-      status=$(echo "$line" | jq -r --arg g "$gate" '.gates[]? | select(.name == $g) | .status' 2>/dev/null || true)
+      status=$(echo "$line" | jq -r --arg g "$gate" '.gates[]? | select(.id == $g) | .status' 2>/dev/null || true)
       [ -z "$status" ] && continue
       case "$status" in
-        green) any_green="yes" ;;
-        red)   any_red="yes"   ;;
+        pass) any_pass="yes" ;;
+        fail) any_fail="yes" ;;
+        skip) any_fail="yes" ;;  # skip treated as red for soak accounting (safety default)
       esac
     done < "$f"
   done <<< "$files"
-  if [ "$any_red" = "yes" ]; then
+  if [ "$any_fail" = "yes" ]; then
     echo "red"
-  elif [ "$any_green" = "yes" ]; then
+  elif [ "$any_pass" = "yes" ]; then
     echo "green"
   else
     echo "red"
@@ -543,7 +558,84 @@ jobs:
         run: docker compose down -v
 ```
 
-**Note on `scripts/seed-regression-fixtures.sh`**: this is a thin wrapper (out of scope for P7 to author beyond stubbing) that `POST`s 5 known key/value pairs matching each canonical query's expected content. If this script is missing from the tree, the first workflow run fails cleanly with the missing-file error — detectable by V7.6 / F7.4 during local dry-run. The actual authorship of `scripts/seed-regression-fixtures.sh` is owned by P8 (docs handoff phase) since it's a pure-data fixture, but it MUST exist before this workflow runs green in CI. P7 declares the dependency here and flags it; if P8 slips, P7 verifies pass-in-main by setting `continue-on-error: true` on the `Seed canonical memories` step temporarily — but that is not the merged state.
+### P7.4b — `scripts/seed-regression-fixtures.sh` (authored in P7, not deferred)
+
+**Outcome**: F6 / W29. The CI workflow above depends on this fixture script. **P7 authors it in this phase** — no deferral to P8.
+
+Create `scripts/seed-regression-fixtures.sh`:
+
+```bash
+#!/usr/bin/env bash
+# scripts/seed-regression-fixtures.sh
+# Seeds 5 canonical key/value pairs for regression-p7 session. Used by CI and
+# local dry-run. Idempotent — re-running overwrites existing keys.
+# Matches the 5 canonical queries asserted in tests/regression/memory-sync-coverage.test.ts.
+set -euo pipefail
+
+PING_MEM_URL="${PING_MEM_URL:-http://localhost:3003}"
+ADMIN_USER="${PING_MEM_ADMIN_USER:?PING_MEM_ADMIN_USER required}"
+ADMIN_PASS="${PING_MEM_ADMIN_PASS:?PING_MEM_ADMIN_PASS required}"
+SESSION="${REGRESSION_SESSION:-regression-p7}"
+
+# Start session (idempotent — 409 is fine if it already exists)
+curl -sf -u "$ADMIN_USER:$ADMIN_PASS" -X POST "$PING_MEM_URL/api/v1/session/start" \
+  -H 'content-type: application/json' \
+  -d "{\"name\":\"$SESSION\",\"metadata\":{\"purpose\":\"regression\"}}" \
+  >/dev/null 2>&1 || true
+
+# 5 canonical fixtures — keys and substrings MUST match CANONICAL_QUERIES in the test
+declare -a FIXTURES=(
+  'native/pinglearn/MEMORY.md|CANARY_FIXTURE_PINGLEARN: PingLearn is a voice tutor product for Class IX-X students running on Next.js 15.5.9 with LiveKit.'
+  'native/ping-mem/MEMORY.md|CANARY_FIXTURE_PING_MEM: ping-mem is a universal memory layer providing REST + MCP + Neo4j + Qdrant for AI agent context persistence.'
+  'claude-md/root|CANARY_FIXTURE_CLAUDE_MD: superpowers skill establishes how to find and use skills, invoking via Skill tool before any response.'
+  'learnings/testing|CANARY_FIXTURE_LEARNINGS_TESTING: always use bun test — vitest is 17x slower. bun mock.module() is process-global and must export every named export of the target module.'
+  'learnings/auto-memory|CANARY_FIXTURE_AUTO_MEMORY: feedback memory is a memory that contains feedback the user gave, directly informing how to collaborate in future conversations.'
+)
+
+for fx in "${FIXTURES[@]}"; do
+  KEY="${fx%%|*}"
+  VALUE="${fx#*|}"
+  RESP=$(curl -sf -u "$ADMIN_USER:$ADMIN_PASS" -X POST "$PING_MEM_URL/api/v1/context" \
+    -H 'content-type: application/json' \
+    -d "$(jq -n --arg k "$KEY" --arg v "$VALUE" --arg s "$SESSION" \
+          '{key:$k, value:$v, sessionName:$s, category:"regression-fixture", priority:"low"}')")
+  echo "seeded $KEY"
+done
+
+# Verify seed — all 5 keys searchable
+MISS=0
+for fx in "${FIXTURES[@]}"; do
+  KEY="${fx%%|*}"
+  FOUND=$(curl -sf -u "$ADMIN_USER:$ADMIN_PASS" "$PING_MEM_URL/api/v1/context/$(jq -rn --arg k "$KEY" '$k|@uri')" \
+    | jq -r '.data.key // ""')
+  if [ "$FOUND" != "$KEY" ]; then
+    echo "MISS $KEY" >&2
+    MISS=$((MISS+1))
+  fi
+done
+
+if [ "$MISS" -gt 0 ]; then
+  echo "seed failed: $MISS/5 missing"
+  exit 1
+fi
+echo "seed OK: 5/5 fixtures written and verified"
+```
+
+```bash
+chmod +x scripts/seed-regression-fixtures.sh
+shellcheck scripts/seed-regression-fixtures.sh
+```
+
+**P7 verification**:
+
+| # | Check | Command | Expected |
+|---|-------|---------|----------|
+| V7.6a | Script exists and executable | `test -x scripts/seed-regression-fixtures.sh` | exit 0 |
+| V7.6b | Shellcheck clean | `shellcheck scripts/seed-regression-fixtures.sh; echo $?` | `0` |
+| V7.6c | Dry-run seeds 5/5 | `PING_MEM_URL=http://localhost:3003 PING_MEM_ADMIN_USER=admin PING_MEM_ADMIN_PASS=ping-mem-dev-local bash scripts/seed-regression-fixtures.sh` | last line `seed OK: 5/5 fixtures written and verified` |
+| V7.6d | Fixtures present in ping-mem | `curl -sf -u admin:ping-mem-dev-local http://localhost:3003/api/v1/search?query=CANARY_FIXTURE_PINGLEARN \| jq '.data \| length'` | `>= 1` |
+
+**P8's role (docs only)**: P8 documents the script in `docs/AGENT_INTEGRATION_GUIDE.md` §14 (operational runbook). P8 does NOT author the script — P7 owns authorship, matching the "writes zero product code" frontmatter rule in P8.
 
 ### P7.5 — Reaper allowlist handshake with P1
 
@@ -690,8 +782,9 @@ gate_day_status "<gate-name>" "<YYYY-MM-DD>"   # echoes "green" | "red"
 | P7.4 | `.github/workflows/regression.yml` | NEW | CI regression suite |
 | P7.5 | `src/session/SessionManager.ts` | P1 allowlist amend | add `"regression-p7"` |
 | P7.6 | (this file) | documentation | schema + examples |
+| P7.4b | `scripts/seed-regression-fixtures.sh` | NEW (P7 authored) | Seeds 5 canonical fixtures for CI + local dry-run |
 
-External file referenced but not authored here: `scripts/seed-regression-fixtures.sh` (P8 authors it; P7 declares the CI dependency).
+`scripts/seed-regression-fixtures.sh` is authored in P7.4b above (NOT deferred to P8). P8 only documents the script in the agent integration guide.
 
 ## Wiring Matrix Rows Owned
 
@@ -750,7 +843,7 @@ Per-day soak state (F7.4–F7.8) is proven with synthetic fixtures so the math i
 |---|------|----------|------------|
 | R7.1 | CI secrets `PING_MEM_ADMIN_USER/PASS` missing from repo settings → workflow fails authentication | MED | Workflow references `${{ secrets.PING_MEM_ADMIN_USER }}`; P0 added to task list for human to set them once in GitHub UI. V7.10 detects YAML-valid but runs require manual secret setup. |
 | R7.2 | Docker compose stack slow to start in GitHub Actions (free runner) | MED | 60-iter × 2s wait loop (120s budget) in `Start ping-mem stack` step; typical healthy by ~30s. If GitHub runner is under-provisioned, bump iterations. |
-| R7.3 | `scripts/seed-regression-fixtures.sh` missing at P7 merge time | HIGH (for CI green) | P7 declares dependency on P8 in Integration Points. If P8 slips, create the fixtures script inline as a 20-line POST loop — out-of-scope to author in P7 by default, but the fallback is mechanical. |
+| R7.3 | Fixture seed command fails in CI (API drift) | MED | P7.4b authors `seed-regression-fixtures.sh` in-phase with `set -euo pipefail` and per-key verification. Any POST failure aborts; V7.6a–V7.6d all gate the script before merge. |
 | R7.4 | Timezone mismatch between Mac (IST) and CI runner (UTC) | LOW | soak-monitor.sh uses `date -v-Nd +%Y-%m-%d` which honours the system TZ. CI only runs the Bun test, not the soak script — so no cross-TZ math in CI. |
 | R7.5 | Clock skew across `date`/`jq -r` invocations on very long shell runs | NEGLIGIBLE | Day-bucket granularity is calendar day; worst case a run spanning midnight attributes a run to whichever day the timestamp in the jsonl filename carries (P5's writer). |
 | R7.6 | `find ... -name "${day}*.jsonl"` collides if day-string appears non-prefix in filename | LOW | P5 writes doctor-runs as `<ISO-timestamp>.jsonl` with the calendar day as the leading substring → glob `2026-04-19*.jsonl` only matches that day. |
@@ -762,8 +855,8 @@ Per-day soak state (F7.4–F7.8) is proven with synthetic fixtures so the math i
 ## Dependencies
 
 - **Hard**: P0 (baseline + disk + creds), P1 (MCP auth + allowlist), P2 (ingestion coverage so queries hit), P3 (self-heal so hard gate `self-heal-ollama-reachable` has green days), P4 (disk + supervisor + watchdog + orbstack — 3 hard/soft gates), P5 (doctor JSONL writer — the ONLY input source for soak-monitor.sh), P6 (auto-os cross-project — 1 soft gate).
-- **External**: GitHub repo secrets set (`PING_MEM_ADMIN_USER`, `PING_MEM_ADMIN_PASS`); Docker images buildable from compose; `scripts/seed-regression-fixtures.sh` (P8 owns, but P7 declares the dependency).
-- **Forward dependency from P8**: P8 must not land without `seed-regression-fixtures.sh`.
+- **External**: GitHub repo secrets set (`PING_MEM_ADMIN_USER`, `PING_MEM_ADMIN_PASS`); Docker images buildable from compose.
+- **Internal**: `scripts/seed-regression-fixtures.sh` is authored by P7.4b (same phase — no cross-phase forward dependency).
 
 ## Exit state
 

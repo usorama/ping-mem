@@ -76,11 +76,11 @@ stat -f '%Lp' ~/.claude.json  # MUST print 600
 
 **Gate**: After Claude Code restarts, invoke `mcp__ping-mem__context_health` → expect healthy JSON, NOT 403.
 
-### P1.2 — Raise hook truncation 2000 → 30000
+### P1.2 — Raise hook truncation 2000 → 1000000 (match server schema)
 
 **Outcome**: O3.
 
-Edit `~/.claude/hooks/ping-mem-native-sync.sh:78`. Server cap is already 1 MB per `ContextSaveSchema.value.max(1_000_000)` (verified) — no schema change needed. Hook is the sole truncation point.
+Edit `~/.claude/hooks/ping-mem-native-sync.sh:78`. Server cap is already 1 MB per `ContextSaveSchema.value.max(1_000_000)` at `src/validation/api-schemas.ts:39` (verified). The hook is the sole truncation point — setting the hook cap equal to the schema cap honors O3's "full content / no truncation" requirement.
 
 ```bash
 # Backup
@@ -88,12 +88,12 @@ cp -a ~/.claude/hooks/ping-mem-native-sync.sh ~/.claude/hooks/ping-mem-native-sy
 
 # In-place patch at line 78
 # Before: local VALUE=$(echo "$CONTENT" | head -c 2000)
-# After : local VALUE=$(echo "$CONTENT" | head -c 30000)
-sed -i.tmp 's|head -c 2000|head -c 30000|' ~/.claude/hooks/ping-mem-native-sync.sh
+# After : local VALUE=$(echo "$CONTENT" | head -c 1000000)
+sed -i.tmp 's|head -c 2000|head -c 1000000|' ~/.claude/hooks/ping-mem-native-sync.sh
 rm ~/.claude/hooks/ping-mem-native-sync.sh.tmp
 ```
 
-Rationale for 30 KB (not 1 MB): most Claude Code CLAUDE.md + memory files are 5–20 KB. 30 KB covers the p99 case without blowing up the search embedding cost per memory. If a file >30 KB appears, P5's doctor gate `memory-truncation-observed` will warn.
+Rationale for 1 MB (exact schema match): overview O3 requires "ALL projects, full content, no truncation." Any client cap below the server's `max(1_000_000)` creates a silent-loss window for files in that range — directly contradicting O3. Matching the schema cap exactly converts silent truncation into a LOUD server-side 400 (`value exceeds 1000000`) for the rare >1 MB file, which is exactly what O3 demands. P5's doctor gate `memory-truncation-observed` surfaces those rare cases for manual chunking review.
 
 ### P1.3 — Fix hash-marker collision (SS2 — GPT-5.4)
 
@@ -247,7 +247,7 @@ ping_mem_import_native_file() {
   [ -z "$CONTENT" ] && return 0
   [ ${#CONTENT} -lt 20 ] && return 0
 
-  local VALUE=$(echo "$CONTENT" | head -c 30000)
+  local VALUE=$(echo "$CONTENT" | head -c 1000000)
 
   # Derive KEY_PREFIX from path
   local KEY_PREFIX
@@ -519,7 +519,7 @@ ping_mem_import_native_file() {
 | Task | File | Line(s) | Change |
 |------|------|---------|--------|
 | P1.1 | `~/.claude.json` | `mcpServers["ping-mem"].env` | add `PING_MEM_ADMIN_USER`, `PING_MEM_ADMIN_PASS` |
-| P1.2 | `~/.claude/hooks/ping-mem-native-sync.sh` | 78 | `head -c 2000` → `head -c 30000` |
+| P1.2 | `~/.claude/hooks/ping-mem-native-sync.sh` | 78 | `head -c 2000` → `head -c 1000000` (match `ContextSaveSchema.value.max(1_000_000)`) |
 | P1.3 | `~/.claude/hooks/ping-mem-native-sync.sh` | 59, 61 | add `PATH_HASH`; marker becomes `${PATH_HASH}-${FILENAME}.hash` |
 | P1.4 | `~/.claude/hooks/ping-mem-native-sync.sh` | 79 | per-project `KEY_PREFIX` case stmt |
 | P1.4a | REST `/api/v1/context/:key` | runtime | DELETE orphans |
@@ -550,7 +550,7 @@ ping_mem_import_native_file() {
 |---|-------|---------|----------|
 | V1.1 | MCP creds in claude.json | `jq '.mcpServers["ping-mem"].env \| has("PING_MEM_ADMIN_USER")' ~/.claude.json` | `true` |
 | V1.2 | claude.json perm 600 | `stat -f '%Lp' ~/.claude.json` | `600` |
-| V1.3 | Hook truncation 30000 | `grep 'head -c 30000' ~/.claude/hooks/ping-mem-native-sync.sh` | match |
+| V1.3 | Hook truncation 1000000 (schema-aligned, no silent loss) | `grep 'head -c 1000000' ~/.claude/hooks/ping-mem-native-sync.sh && ! grep -qE 'head -c (2000\|30000)(\$\|[^0-9])' ~/.claude/hooks/ping-mem-native-sync.sh && echo OK` | `OK` |
 | V1.4 | Marker path includes PATH_HASH | `grep 'PATH_HASH' ~/.claude/hooks/ping-mem-native-sync.sh` | match |
 | V1.5 | KEY_PREFIX case stmt present | `grep 'KEY_PREFIX="native/proj' ~/.claude/hooks/ping-mem-native-sync.sh` | match |
 | V1.6 | Flock guard present | `grep 'flock -n 9' ~/.claude/hooks/ping-mem-native-sync.sh` | match |
@@ -594,7 +594,7 @@ ping_mem_import_native_file() {
 |---|------|----------|------------|
 | R1.1 | `jq` patch of `~/.claude.json` corrupts file | HIGH | Backup before patch (P1.1 shows `cp -a ... .bak`); re-chmod after mv |
 | R1.2 | Creds in `.env` don't match running container | MED | Read from `~/Projects/ping-mem/.env` (source of truth); verify via REST `/api/v1/stats` 200 response post-edit |
-| R1.3 | 30 KB truncation still loses >30 KB files | LOW | P5 doctor gate `memory-truncation-observed` tracks avg memory size; if >20 KB avg, raise to 100 KB |
+| R1.3 | Files >1 MB hit server 400 (schema-enforced LOUD failure) | LOW | Schema-aligned cap is deliberate — silent truncation would violate O3. P5 doctor gate `memory-truncation-observed` surfaces the rare >1 MB case. If >5 such files in 30 days, consider a chunking strategy (file GH issue; not in P1 scope). |
 | R1.4 | PATH_HASH collision (16 hex chars = 64 bits) | NEGLIGIBLE | Birthday-bound: need 2^32 paths for 50% collision. Fewer than 1M files plausible. |
 | R1.5 | Rekey migration DELETEs a legit non-orphan row | MED | Regex `^native/[^/]+$` matches ONLY old-scheme single-segment keys; new scheme always has ≥2 segments. Dry-run prints candidates before DELETE. |
 | R1.6 | Flock leaves stale lock on crash | LOW | macOS releases flock on process exit automatically; no stale state possible |

@@ -52,7 +52,7 @@ Raise ingestion coverage from the 2026-04-18 baseline (ping-learn: 133/653 commi
 | pre.2 | Baseline coverage snapshot captured by P0 | `jq '.baseline.coverage \| keys' /tmp/ping-mem-remediation-baseline.json` | includes `ping-learn`, `ping-mem`, `auto-os`, `ping-guard`, `thrivetree` |
 | pre.3 | Disk <85 % | `df -P /System/Volumes/Data \| awk 'NR==2 {sub(/%/,"",$5); exit ($5<85?0:1)}'` | exit 0 |
 | pre.4 | ping-mem typecheck clean | `cd ~/Projects/ping-mem && bun run typecheck 2>&1 \| tail -1` | `Found 0 errors` |
-| pre.5 | ping-mem REST reachable | `curl -sf -u admin:ping-mem-dev-local http://localhost:3003/api/v1/health \| jq '.status'` | `"healthy"` |
+| pre.5 | ping-mem REST reachable | `curl -sf http://localhost:3003/health \| jq -r '.status'` | `ok` |
 | pre.6 | Neo4j + Qdrant up | `curl -sf http://localhost:7474 >/dev/null && curl -sf http://localhost:6333/collections >/dev/null` | exit 0 |
 | pre.7 | Ingestion queue configured | `curl -sf -u admin:ping-mem-dev-local http://localhost:3003/api/v1/ingestion/queue \| jq '.maxConcurrent'` | non-null integer |
 
@@ -367,18 +367,108 @@ launchctl print "gui/$(id -u)/com.ping-mem.periodic-ingest" 2>/dev/null | grep -
 
 ---
 
-### P2.6 — If coverage <95 % after P2.1 + P2.2, investigate root cause
+### P2.6 — Scanner-defaults override (in-scope; NOT deferred)
 
-Run the diagnosis matrix below. Each row has an explicit command and a decision rule. Stop at the first ROW that fires; do not batch all 4 investigations.
+**Outcome**: O4 file-coverage target ≥95% for the 5 active projects. Prior scoping note deferred this to a "future ADR" — that was the exact anti-pattern #46 shape overview.md committed to eliminate, and `ProjectScanner.ts` exclusions dominate the 41% file-coverage gap (verified: baseline 17–30% across 5 projects vs ≥95% target). The scanner's global defaults stay safe; per-project overrides land in-phase.
+
+#### P2.6.a — Add `ignoreDirs` / `excludeExtensions` to `IngestProjectOptions`
+
+`src/ingest/IngestionService.ts:43-48`:
+
+```ts
+// New:
+export interface IngestProjectOptions {
+  projectDir: string;
+  forceReingest?: boolean;
+  maxCommits?: number;
+  maxCommitAgeDays?: number;
+  ignoreDirs?: string[] | undefined;          // NEW — overrides DEFAULT_IGNORE_DIRS subset when provided
+  excludeExtensions?: string[] | undefined;   // NEW — overrides DEFAULT_EXCLUDE_EXTENSIONS subset when provided
+}
+```
+
+#### P2.6.b — Thread overrides through `ProjectScanner.scanProject`
+
+`src/ingest/ProjectScanner.ts` gains optional `options.ignoreDirs` and `options.excludeExtensions`. When provided, they are **subtracted** from the global defaults (inclusion overrides) — they are *not* a full replacement, so a mis-scoped override can't widen the scanner unexpectedly:
+
+```ts
+function resolveIgnoreDirs(override?: string[]): Set<string> {
+  const base = new Set(DEFAULT_IGNORE_DIRS);
+  if (override) for (const d of override) base.delete(d);
+  return base;
+}
+// Same pattern for extensions.
+```
+
+This way, passing `ignoreDirs: ["docs"]` RE-INCLUDES `docs/` for that project only, and passing `excludeExtensions: [".md", ".jsonl", ".sh", ".bat", ".csv", ".log"]` RE-INCLUDES those extensions.
+
+#### P2.6.c — Extend `IngestionEnqueueSchema` in `src/validation/api-schemas.ts`
+
+Add two fields so `POST /api/v1/ingestion/enqueue` accepts the overrides without a breaking schema change. Both are optional arrays of short strings, each bounded to prevent DoS:
+
+```ts
+ignoreDirs: z.array(z.string().min(1).max(100)).max(50).optional(),
+excludeExtensions: z.array(z.string().regex(/^\.[a-z0-9]+$/i).max(20)).max(50).optional(),
+```
+
+#### P2.6.d — Update `scripts/reingest-active-projects.sh`
+
+Pass the 5-project override set so each project's specific ingest request re-includes the relevant dirs/extensions:
+
+```bash
+# Shared override — re-include docs directory and documentation-like extensions
+# for every active project. This is the concrete scanner-default correction
+# that brings files-coverage from ~18-30% to ≥95%.
+IGNORE_DIRS_OVERRIDE='["docs"]'
+EXCLUDE_EXT_OVERRIDE='[".md",".jsonl",".csv",".log",".sh",".bat"]'
+
+for project in ping-learn ping-mem auto-os ping-guard thrivetree; do
+  curl -sf -u "$PING_MEM_ADMIN_USER:$PING_MEM_ADMIN_PASS" -X POST \
+    "$PING_MEM_URL/api/v1/ingestion/enqueue" \
+    -H 'content-type: application/json' \
+    -d "$(jq -n \
+          --arg root "$HOME/Projects/$project" \
+          --argjson dirs "$IGNORE_DIRS_OVERRIDE" \
+          --argjson exts "$EXCLUDE_EXT_OVERRIDE" \
+          '{projectDir:$root, forceReingest:true, ignoreDirs:$dirs, excludeExtensions:$exts}')" \
+    | jq -r '.data.runId'
+  # ...poll run until completed (same loop as P2.2)
+done
+```
+
+#### P2.6.e — Measurement: denominator = `git ls-files` including overrides
+
+`scripts/verify-coverage.sh` computes the denominator from the SAME inclusion set the overrides apply, so the 95% target is internally consistent:
+
+```bash
+# Per project:
+git -C "$HOME/Projects/$project" ls-files \
+  | grep -vE '(^node_modules/|^\.next/|^dist/|^build/|\.(png|jpg|jpeg|gif|pdf|zip|tar|gz)$)' \
+  | wc -l
+# vs /api/v1/codebase/projects filesCount for that project.
+# Ratio must be ≥ 0.95.
+```
+
+Global exclusions that do NOT change in P2: lock files, compiled binaries, media, archives. Only documentation dirs and text-like extensions return via the override.
+
+#### P2.6.f — Verification
+
+| # | Check | Command | Expected |
+|---|-------|---------|----------|
+| V2.10 | Overrides accepted by schema | `echo '{"projectDir":"/tmp/x","ignoreDirs":["docs"],"excludeExtensions":[".md"]}' \| curl -sf -u admin:ping-mem-dev-local -X POST http://localhost:3003/api/v1/ingestion/enqueue -H 'content-type: application/json' --data-binary @-` | HTTP 202 with `runId` |
+| V2.11 | Files-coverage ≥95% per project after reingest | `bash scripts/verify-coverage.sh \| jq '.[].pctFiles \| . >= 0.95'` | `true` for all 5 projects |
+| V2.12 | Commits-coverage ≥95% per project after reingest | same script, `.pctCommits >= 0.95` | `true` for all 5 |
+
+#### P2.6.g — Diagnosis fallback (only if V2.11 still fails)
+
+Reserved for genuinely unexpected situations:
 
 | # | Candidate | Diagnosis command | Fire when | Fix path |
 |---|-----------|-------------------|-----------|----------|
-| a | Git log truncation (other cap beyond line 61) | `grep -nE 'maxCommits\|--max-count\|-n [0-9]+' src/ingest/*.ts src/http/rest-server.ts` | any hit other than the P2.1.a patch site returns a numeric literal ≤ 200 | patch that call site analogously; re-run P2.2+P2.3 |
-| b | File-extension exclusion (`ProjectScanner.ts:51-76`) | `jq '[.[].project, .[].pctFiles] \| _nwise(2)' /tmp/ping-mem-coverage-*.json \| tail -10`  and  `grep -c '\.md\|\.sh\|\.bat\|\.jsonl\|\.csv\|\.log' <project>/.git/index-ls` | per-project file gap dominated by these extensions | (a) pass `excludeExtensions` override in the enqueue payload (requires adding `excludeExtensions?: string[]` to `IngestionEnqueueSchema` — flag as follow-up; do NOT patch scanner defaults silently — ADR required) |
-| c | `DEFAULT_IGNORE_DIRS` drops `docs` (`ProjectScanner.ts:48`) | `grep -n '"docs"' src/ingest/ProjectScanner.ts` → hit at line 48 | gap per project shows many missing `docs/**` paths | Same ADR route as (b); do not unilaterally remove `"docs"`. File GH issue `ping-mem`, `phase-2`, `scanner-defaults` and surface to orchestrator for new ADR |
 | d | `.gitignore` vs scanner divergence | `cd <project> && git check-ignore -v $(git ls-files \| head -50) \| grep -c :`  vs  `jq '.data.projects[] \| select(.rootPath \| endswith("<project>")) \| .filesCount' <projects.json>` | many tracked files flagged as ignored (rare) | escalate to orchestrator — likely global `.pingmemignore` mis-write |
+| e | Override rejected but schema claims accepted | `grep -c 'ignoreDirs\|excludeExtensions' src/validation/api-schemas.ts src/ingest/IngestionService.ts src/ingest/ProjectScanner.ts` | count <3 files | missed a plumbing step — re-apply P2.6.a/b/c |
 
-Every investigation output is appended to `/tmp/ping-mem-p2-investigation.log` and referenced in the Phase 2 ledger entry in `overview.md` CHANGELOG.
+Any diagnosis output appends to `/tmp/ping-mem-p2-investigation.log` and is referenced in `overview.md`'s CHANGELOG.
 
 ---
 
@@ -457,8 +547,12 @@ P2.4 asserts this shape. P5 (W23) depends on `commitsCount` + `filesCount`.
 | `src/http/rest-server.ts:1292-1293` | `const runId = await this.ingestionQueue.enqueue(...); return c.json({ runId }, 202);` | consumed by P2.2 (no patch — contract confirmed) | `grep -n 'runId }, 202' src/http/rest-server.ts` → `1293:` |
 | `src/http/rest-server.ts:1317-1335` | `this.app.get("/api/v1/ingestion/run/:runId", ...)` returning `{...run}` including `status` | consumed by P2.2 poll loop (no patch) | `grep -n 'api/v1/ingestion/run/:runId' src/http/rest-server.ts` → `1317:` |
 | `src/http/rest-server.ts:3399-3409` | `projects.map((p) => ({ ... filesCount, chunksCount, commitsCount ... }))` | consumed by P2.3 + P2.4 (no patch) | `grep -nE 'filesCount|commitsCount' src/http/rest-server.ts` → `3405:` |
-| `src/ingest/ProjectScanner.ts:48` | `"docs",` in `DEFAULT_IGNORE_DIRS` | NOT patched in P2 — P2.6(c) triggers GH issue if this is root cause | `grep -n '"docs"' src/ingest/ProjectScanner.ts` → `48:` |
-| `src/ingest/ProjectScanner.ts:51-76` | `DEFAULT_EXCLUDE_EXTENSIONS` contains `.md, .jsonl, .csv, .log, .sh, .bat` | NOT patched in P2 — P2.6(b) triggers GH issue if this is root cause | `grep -nE '"\\.md"\|"\\.jsonl"\|"\\.sh"' src/ingest/ProjectScanner.ts` |
+| `src/ingest/ProjectScanner.ts:48` | `"docs",` in `DEFAULT_IGNORE_DIRS` | **P2.6.b** (global default kept; per-request override added so `docs/` ingests for 5 active projects) | `grep -n '"docs"' src/ingest/ProjectScanner.ts` → `48:` |
+| `src/ingest/ProjectScanner.ts:51-76` | `DEFAULT_EXCLUDE_EXTENSIONS` contains `.md, .jsonl, .csv, .log, .sh, .bat` | **P2.6.b** (global default kept; per-request override accepts these extensions for active projects) | `grep -nE '"\\.md"\|"\\.jsonl"\|"\\.sh"' src/ingest/ProjectScanner.ts` |
+| `src/ingest/IngestionService.ts:43-48` (`IngestProjectOptions`) | 4-field interface (no overrides) | **P2.6.a** (adds `ignoreDirs?`, `excludeExtensions?`) | `grep -n 'ignoreDirs?: string\[\]' src/ingest/IngestionService.ts` → expect match |
+| `src/validation/api-schemas.ts` (`IngestionEnqueueSchema`) | pre-P2.6: no scanner overrides | **P2.6.c** (adds `ignoreDirs`, `excludeExtensions` optional arrays) | `grep -n 'ignoreDirs\|excludeExtensions' src/validation/api-schemas.ts` → ≥2 hits |
+| `scripts/reingest-active-projects.sh` | pre-P2.6: no override JSON | **P2.6.d** (passes per-project override JSON for 5 active projects) | `grep -c 'IGNORE_DIRS_OVERRIDE\|EXCLUDE_EXT_OVERRIDE' scripts/reingest-active-projects.sh` → ≥2 |
+| `scripts/verify-coverage.sh` | pre-P2.6: no canonical denominator | **P2.6.e** (computes `git ls-files` denominator consistent with overrides) | `test -x scripts/verify-coverage.sh` → exit 0 |
 
 ---
 

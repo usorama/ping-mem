@@ -185,7 +185,7 @@ Each phase file expands its own rows with file:line precision. This table is the
 |---|-------|-------|--------|------|------|--------|
 | P0 | Prep | Worktree + disk cleanup stub + test baseline + `~/.claude.json` chmod 600 + kill stale processes | 1h | disk <85%, typecheck clean, test count baseline snapshot | `phase-0-prep.md` | pending |
 | P1 | Memory sync + MCP auth + session cap | A + B + E.4. Fix native-sync.sh (truncation, scope, per-project prefix, marker hash-path, flock guard). Extract `ping-mem-sync-lib.sh`. Add PostToolUse hook detached. Migrate old keys (P1.4a). Update `~/.claude.json` env. SessionManager cap→50 + reaper + setInterval + _reaperInterval field. Verify REST `ContextSaveSchema.max` supports 30000-byte values. | 5h | F1–F6 pass; O1+O2+O3+O8 green | `phase-1-memory-sync-mcp-auth.md` | pending |
-| P2 | Ingestion coverage | C. Patch BOTH `IngestionService.ts:46` default AND `GitHistoryReader.ts:61` runtime default. Enqueue + poll `runId` until `completed`. Re-ingest 5 projects. Verify schema shape of `/api/v1/codebase/projects`. | 4h | F7–F9 pass; O4 green | `phase-2-ingestion-coverage.md` | pending |
+| P2 | Ingestion coverage | C. Patch `IngestionService.ts:46` comment + `IngestionService.ts:129` age default + `GitHistoryReader.ts:61` runtime commit default. Add per-request scanner overrides (`ignoreDirs`, `excludeExtensions`) to `IngestProjectOptions` + `IngestionEnqueueSchema` + `ProjectScanner.scanProject` (P2.6.a-c). Update reingest script to re-include `docs/` + text extensions for 5 active projects (P2.6.d). Enqueue + poll `runId` until `completed`. Re-ingest 5 projects. Verify schema shape of `/api/v1/codebase/projects`. | 5h | F7–F9 pass; O4 green (files AND commits ≥95% on all 5 projects) | `phase-2-ingestion-coverage.md` | pending |
 | P3 | Ollama self-heal | D. Write `ollama-tier.sh` (`--arg kl "15m"` not `--argjson`). Update manifest 3-tier chain. Seed pattern confidences (`path.join(homedir(),...)`, `WHERE confidence<0.5`). Remove `_reconcile_scheduled()` function (lines 40-51 + call at line 95). Bump `ollama_memory_hog` threshold 4→14 GB; evict `gpt-oss:20b` first. | 4h | F10–F12 pass; O5 green | `phase-3-ollama-selfheal.md` | pending |
 | P4 | Lifecycle + supervisor + OrbStack + logs | E.1–E.3, E.5. `cleanup-disk.sh` with pgrep guards. newsyslog conf + user-space launchd fallback. Supervisor rewrite (keep-forward + 3-retry + STOP). `com.ping-guard.watchdog.plist` defined + loaded. `wake_detector.py` `_start_orbstack()` added at ~line 52 + call at ~line 91. launchd plist hardening (ProcessType=Interactive for daemon, Background+LowPriorityIO for doctor). | 4h | F15–F19 pass; O6+O7+O9 green | `phase-4-lifecycle-supervisor.md` | pending |
 | P5 | Observability: doctor + /ui/health + alerts + watchdog gate | F. `src/cli/commands/doctor.ts` citty defineCommand registered in `src/cli/index.ts` subCommands. `src/doctor/gates.ts` registry + 7 grouped files. `com.ping-mem.doctor.plist` (uses `dist/cli/index.js` — NOT cli.js). `src/http/ui/health.ts` + POST `/ui/health/run`. SQLite `alerts.db` schema. Parallel gate execution via `Promise.all` + per-gate AbortController (5s). | 5h | F20–F24 pass | `phase-5-observability-doctor.md` | pending |
@@ -218,26 +218,34 @@ Each phase file expands its own rows with file:line precision. This table is the
 
 ## 30-Day Soak Acceptance (user-selected: Realistic bar)
 
-**HARD gates** (all 10 must be green 30/30 consecutive days — any red day resets clock):
-1. `rest-health` (ping-mem REST returns 200)
-2. `mcp-proxy-stdio` (MCP proxy responds to JSON-RPC initialize)
-3. `regression-5-of-5` (5 canonical queries all return ≥1 hit)
-4. `ingestion-coverage-ping-learn` (≥95%)
-5. `ingestion-coverage-5-projects` (all 5 ≥95%)
-6. `self-heal-ollama-reachable` (endpoint + qwen3:8b model present)
-7. `disk-below-90` (df <90%)
-8. `session-cap-below-80` (active sessions <40)
-9. `supervisor-no-rollback` (0 "Rolled back" in last 24h)
-10. `doctor-launchd-ran` (doctor-runs/*.jsonl within last 20min)
+All gate IDs below are **P5 gate registry IDs**. P7's `scripts/soak-monitor.sh` matches on `.id` (not `.name`) and maps P5's emitted `status: pass|fail|skip` to `green|red` (pass→green; fail/skip→red). This is the single source of truth — if P5 adds/renames a gate, update this list in the same PR.
 
-**SOFT gates** (5 must be green ≥24/30 days — tolerate 6 red days):
-1. `orbstack-warm-latency` (orbctl status <3s)
+**HARD gates** (all 14 must be green 30/30 consecutive days — any red day resets clock):
+1. `rest-health-200` (ping-mem REST returns `{"status":"ok"}`)
+2. `mcp-proxy-stdio` (MCP proxy responds to JSON-RPC initialize within 3s)
+3. `query-ping-learn-pricing` (canonical query 1 returns ≥1 hit)
+4. `query-firebase-fcm` (canonical query 2)
+5. `query-classroom-redesign` (canonical query 3)
+6. `query-pr-236-jwt` (canonical query 4)
+7. `query-dpdp-consent-18` (canonical query 5)
+8. `coverage-commits-ge-95pct` (≥95% across 5 active projects)
+9. `coverage-files-ge-95pct` (≥95% across 5 active projects)
+10. `ollama-reachable` (`/api/tags` returns ≥1 model)
+11. `disk-below-85` (df ≤85%)
+12. `session-cap-below-80pct` (<40 active sessions)
+13. `supervisor-no-rollback-24h` (0 "Rolled back" in last 24h)
+14. `doctor-launchd-ran` (newest `~/.ping-mem/doctor-runs/*.jsonl` mtime <20 min old)
+
+**SOFT gates** (5 must be green ≥24/30 days — tolerate up to 6 red days):
+1. `orbstack-warm-latency` (health round-trip ≤2s post-wake)
 2. `log-rotation-last-7d` (rotation event in last 7d)
 3. `pattern-confidence-nonzero` (≥5 patterns with confidence ≥0.3)
 4. `auto-os-cross-project-hit` (cross-project search smoke test passes)
 5. `ping-mem-doctor-exec-time-below-10s` (doctor runs complete in <10s)
 
 **Clock reset rule**: any HARD gate red on any day resets the 30-day counter to 0. SOFT gates tolerate spikes; only hard gates enforce the soak.
+
+**Note on gate count**: this expands from 10 collapsed hard gates to 14 explicit gates because regression queries and coverage axes are separated — P5's registry has these as separate gates, and collapsing them at the soak layer would hide which specific canonical query or coverage axis regressed.
 
 ---
 
@@ -252,7 +260,7 @@ Each phase file expands its own rows with file:line precision. This table is the
 - [ ] AC-F6: O6 met — Mac sleep→wake restores MCP within 30s
 - [ ] AC-F7: O8 met — 0 session-cap collisions in 7d
 - [ ] AC-F8: O9 met — 0 supervisor rollbacks in 7d
-- [ ] AC-F9: `bun run doctor` exits correctly (0 on green, 2 on any fail)
+- [ ] AC-F9: `bun run doctor` exits with canonical taxonomy — `0`=all green, `1`=soft-red (warning), `2`=hard-red (critical fail), `3`=ping-mem REST unreachable. This taxonomy is the single source of truth; P5.3 and P8 §13 mirror it verbatim.
 - [ ] AC-F10: `/ui/health` renders all gates
 
 ### Non-Functional

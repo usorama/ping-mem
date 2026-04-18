@@ -58,8 +58,8 @@ ping-mem v2.1.0 ships a complete Claude Code memory sync chain. Three cooperatin
 
 Two shell hooks registered in `~/.claude/settings.json` under `hooks`:
 
-- **SessionStart** (`~/.claude/hooks/ping-mem-native-sync.sh`) — full re-sync on every Claude Code session start. Walks `~/.claude/memory/`, `~/.claude/memory/topics/`, `~/.claude/learnings/`, AND every `~/.claude/projects/*/memory/*.md` (all projects, not only ping-mem). Uploads complete file content (30 KB cap per value, matched to `ContextSaveSchema.value.max`). SHA-256 marker files under `~/.ping-mem/sync-markers/` skip unchanged files.
-- **PostToolUse** (`~/.claude/hooks/ping-mem-posttool-sync.sh`) — runs detached (`nohup`) after any `Write`/`Edit`/`MultiEdit` tool call that touches `~/.claude/**/*.md`. Bounded sync latency <60s without a long-running file watcher.
+- **SessionStart** (`~/.claude/hooks/ping-mem-native-sync.sh`) — full re-sync on every Claude Code session start. Walks `~/.claude/memory/`, `~/.claude/memory/topics/`, `~/.claude/learnings/`, AND every `~/.claude/projects/*/memory/*.md` (all projects, not only ping-mem). Uploads complete file content up to the server's `ContextSaveSchema.value.max(1_000_000)` ceiling — the hook `head -c 1000000` cap matches the schema so nothing truncates silently. SHA-256 marker files under `~/.ping-mem/sync-markers/` skip unchanged files.
+- **PostToolUse** (`~/.claude/hooks/ping-mem-memory-sync-posttooluse.sh`) — runs detached (`setsid … & disown`) after any `Write`/`Edit`/`MultiEdit` tool call that touches `~/.claude/**/*.md`. Bounded sync latency <60s without a long-running file watcher. Sources `~/.claude/hooks/lib/ping-mem-sync-lib.sh` (function-only; no top-level exec).
 
 ### 11.2 Shared Library
 
@@ -67,7 +67,7 @@ Two shell hooks registered in `~/.claude/settings.json` under `hooks`:
 
 ### 11.3 Session Reaper Allowlist
 
-`src/session/SessionManager.ts` caps active sessions at 50 (up from 10) and runs `cleanup()` every 5 min via `setInterval`. The reaper allowlist preserves long-lived service sessions (e.g. `ping-mem-native-sync`, `paro-jobs-runner`) — these never count toward the cap. See `SessionManager._reaperInterval` and `SessionManager.RESERVED_SESSION_NAMES`.
+`src/session/SessionManager.ts` caps active sessions at 50 (up from 10) and runs `cleanup()` every 2 min via `setInterval` (stored in the `_reaperInterval` field for strict-mode TS). The reaper's allowlist — an inline literal `["native-sync", "auto-recall", "canary", "auto-os-paro", "auto-os-worker"]` inside `reapSystemSessions()` — preserves long-lived service sessions so they never count toward the 50-cap. Named service sessions have a 15-min idle threshold; empty-name sessions use a 10-min threshold.
 
 **Verification**:
 ```bash
@@ -93,7 +93,12 @@ Resource protection: `ollama_memory_hog` threshold is 14 GB (was 4 GB) and evict
 
 ## 13. `ping-mem doctor` CLI
 
-Gated health check covering 29 invariants. Exit codes: `0`=all green, `1`=usage error, `2`=any hard gate red, `3`=any soft gate red.
+Gated health check covering 31 invariants across 7 groups (infrastructure/service/data-coverage/self-heal/log-hygiene/regression/alerts). Exit codes (single canonical taxonomy, mirrored in P5.3 and overview AC-F9):
+
+- `0` — all gates green
+- `1` — at least one gate warning (soft red, not critical)
+- `2` — at least one critical gate red (hard fail)
+- `3` — doctor could not reach ping-mem REST (unreachable)
 
 ```bash
 bun run doctor                    # run all gates, human-readable
@@ -214,7 +219,7 @@ rm /Users/umasankr/Projects/ping-mem/README.md.bak
 
 ### Changed
 - `~/.claude.json` permission hardened to `600` (was `644`). MCP Basic Auth credentials (`PING_MEM_ADMIN_USER`, `PING_MEM_ADMIN_PASS`) added to the ping-mem MCP env block.
-- `src/session/SessionManager.ts` — `maxActiveSessions` raised 10 → 50; `cleanup()` now runs every 5 min via `setInterval` (`_reaperInterval` field); reserved-name allowlist for service sessions.
+- `src/session/SessionManager.ts` — `maxActiveSessions` raised 10 → 50; `cleanup()` now runs every 2 min via `setInterval` (`_reaperInterval` field); inline service-session allowlist (`["native-sync","auto-recall","canary","auto-os-paro","auto-os-worker"]`) inside `reapSystemSessions()` with differentiated idle thresholds (15 min named / 10 min empty-name).
 - `src/ingest/IngestionService.ts` and `src/ingest/GitHistoryReader.ts` defaults — removed the 200-commit / 30-day ceiling; full-history ingestion now the default. Idempotent re-ingest (skip-if-unchanged) finishes in <30s.
 - ping-guard supervisor (`~/Projects/ping-guard/scripts/supervisor.sh`) — rewritten to keep-forward + 3-retry + EMERGENCY_STOP, no more silent rollbacks.
 - `~/Projects/ping-guard/wake_detector.py` — `_start_orbstack()` wired on wake event; broken `_reconcile_scheduled()` call removed.
