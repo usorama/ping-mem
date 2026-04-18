@@ -306,7 +306,8 @@ export class RESTPingMemServer {
       c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
       c.header("Cross-Origin-Opener-Policy", "same-origin");
       c.header("Cross-Origin-Resource-Policy", "same-origin");
-      if (process.env["PING_MEM_BEHIND_PROXY"] === "true") {
+      // SEC-8: Send HSTS in production (behind proxy) and when NODE_ENV=production
+      if (process.env["PING_MEM_BEHIND_PROXY"] === "true" || process.env["NODE_ENV"] === "production") {
         c.header("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
       }
     });
@@ -355,16 +356,60 @@ export class RESTPingMemServer {
       }
     } else {
       log.warn("No API key configured. All routes are unauthenticated.");
+      // Guard resource-intensive endpoints even without API key auth.
+      // If admin credentials are set, require them for mining and dreaming.
+      const adminUser = process.env.PING_MEM_ADMIN_USER;
+      const adminPass = process.env.PING_MEM_ADMIN_PASS;
+      if (adminUser && adminPass) {
+        const adminGuard = async (c: Parameters<Parameters<typeof this.app.use>[1]>[0], next: () => Promise<void>) => {
+          const authHeader = c.req.header("Authorization") ?? "";
+          if (authHeader.startsWith("Basic ")) {
+            const decoded = atob(authHeader.slice(6));
+            const [user, ...passParts] = decoded.split(":");
+            const pass = passParts.join(":");
+            if (timingSafeStringEqual(user ?? "", adminUser) && timingSafeStringEqual(pass ?? "", adminPass)) {
+              return next();
+            }
+          }
+          c.header("WWW-Authenticate", 'Basic realm="ping-mem admin"');
+          return c.json({ error: "Unauthorized" }, 401);
+        };
+        this.app.use("/api/v1/mining/*", adminGuard);
+        this.app.use("/api/v1/dreaming/*", adminGuard);
+      }
     }
 
     // CSRF protection for browser-based UI routes
     this.app.use("/ui/*", csrfProtection());
+
+    // Local admin-authenticated callers (hooks, doctor, dev scripts) bypass
+    // the IP-based limiter — they're trusted and generate legitimate bursts
+    // (e.g., full memory re-sync of hundreds of files on session start).
+    const adminUser = process.env.PING_MEM_ADMIN_USER;
+    const adminPass = process.env.PING_MEM_ADMIN_PASS;
+    const isAdminAuthed = (c: Context): boolean => {
+      if (!adminUser || !adminPass) return false;
+      const authHeader = c.req.header("Authorization") ?? "";
+      if (!authHeader.startsWith("Basic ")) return false;
+      try {
+        const decoded = atob(authHeader.slice(6));
+        const [user, ...passParts] = decoded.split(":");
+        const pass = passParts.join(":");
+        return (
+          timingSafeStringEqual(user ?? "", adminUser) &&
+          timingSafeStringEqual(pass ?? "", adminPass)
+        );
+      } catch {
+        return false;
+      }
+    };
 
     // Higher rate limit for auto-capture hooks (300 req/min)
     this.app.use("/api/v1/observations/*", rateLimiter({
       name: "observations",
       maxRequests: 300,
       windowMs: 60_000,
+      skip: isAdminAuthed,
     }));
 
     // Rate limit state-changing API endpoints (60 req/min per IP)
@@ -372,6 +417,7 @@ export class RESTPingMemServer {
       name: "api-v1",
       maxRequests: 60,
       windowMs: 60_000,
+      skip: isAdminAuthed,
     }));
   }
 
@@ -1083,9 +1129,26 @@ export class RESTPingMemServer {
         const forceReingest = parseResult.data.forceReingest;
 
         // Route through IngestionQueue to prevent concurrent Neo4j writes (deadlock)
+        const INGEST_TIMEOUT_MS = 300_000; // 5 min
         const result = this.ingestionQueue
-          ? await this.ingestionQueue.enqueueAndWait({ projectDir, forceReingest })
-          : await this.config.ingestionService.ingestProject({ projectDir, forceReingest });
+          ? await Promise.race([
+              this.ingestionQueue.enqueueAndWait({ projectDir, forceReingest }),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(new Error("Ingestion timed out after 5 minutes")),
+                  INGEST_TIMEOUT_MS
+                )
+              ),
+            ])
+          : await Promise.race([
+              this.config.ingestionService.ingestProject({ projectDir, forceReingest }),
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(new Error("Ingestion timed out after 5 minutes")),
+                  INGEST_TIMEOUT_MS
+                )
+              ),
+            ]);
 
         if (result) {
           if (this.config.adminStore) {
@@ -3126,7 +3189,7 @@ export class RESTPingMemServer {
           }
           this.dreamingEngine = createDreamingEngine(
             memoryManager,
-            null, // ContradictionDetector — requires OPENAI_API_KEY, optional
+            this.config.contradictionDetector ?? null, // ContradictionDetector — Ollama or OpenAI
             this.userProfileStore,
             this.eventStore
           );
@@ -3681,7 +3744,7 @@ export class RESTPingMemServer {
           knowledgeStore: this.knowledgeStore,
           qdrantClient: this.qdrantClient,
           ccMemoryBridge: null,
-          contradictionDetector: null,
+          contradictionDetector: this.config.contradictionDetector ?? null,
           writeLockManager: this.writeLockManager,
         };
 
@@ -3702,11 +3765,20 @@ export class RESTPingMemServer {
           new MiningToolModule(state),
         ];
 
+        const TOOL_INVOKE_TIMEOUT_MS = 120_000; // 2 min — matches proxy-cli client-side timeout
         const args = parseResult.data.args;
         for (const mod of modules) {
           const result = mod.handle(name, args);
           if (result !== undefined) {
-            const data = await result;
+            const data = await Promise.race([
+              result,
+              new Promise<never>((_, reject) =>
+                setTimeout(
+                  () => reject(new Error(`Tool '${name}' timed out after 2 minutes`)),
+                  TOOL_INVOKE_TIMEOUT_MS
+                )
+              ),
+            ]);
 
             // Sync session state back from tool module to REST server.
             // When context_session_start runs via /invoke, it updates

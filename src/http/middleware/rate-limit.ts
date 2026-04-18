@@ -16,12 +16,16 @@ export function rateLimiter(options: {
   maxRequests: number;
   windowMs: number;
   maxMapSize?: number;
+  /** Optional predicate — when it returns true the request bypasses the limiter. */
+  skip?: (c: Context) => boolean;
 }) {
-  const { name, maxRequests, windowMs, maxMapSize = 10_000 } = options;
+  const { name, maxRequests, windowMs, maxMapSize = 10_000, skip } = options;
   if (!stores.has(name)) stores.set(name, new Map());
   const limits = stores.get(name)!;
 
   return createMiddleware(async (c: Context, next: Next) => {
+    if (skip?.(c)) return next();
+
     const ip = getClientIp(c);
     const now = Date.now();
 
