@@ -11,6 +11,49 @@ import { createLogger } from "../util/logger.js";
 
 const log = createLogger("GitHistoryReader");
 
+/**
+ * Phase 2 default: 10000 commits covers full history for the vast majority
+ * of projects (ping-learn ~657 commits, ping-mem ~180, auto-os ~152, etc.).
+ * Can be overridden per-call via options or globally via env var
+ * PING_MEM_MAX_COMMITS. Raised from 200 in Phase 2 of remediation plan so that
+ * re-ingest achieves ≥95% commit coverage without callers having to specify.
+ */
+const DEFAULT_MAX_COMMITS = 10000;
+
+/**
+ * Phase 2 default: 365 days (was 30). Cut-off based only on author date; does
+ * not limit the commit COUNT (that's maxCommits). Override per-call or via env
+ * PING_MEM_MAX_COMMIT_AGE_DAYS.
+ */
+const DEFAULT_MAX_COMMIT_AGE_DAYS = 365;
+
+/**
+ * Parse a non-negative integer env var; fall back to default on missing / NaN /
+ * negative. Exported for testing.
+ */
+export function parseNonNegativeIntEnv(
+  raw: string | undefined,
+  fallback: number,
+): number {
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+export function resolveDefaultMaxCommits(): number {
+  return parseNonNegativeIntEnv(process.env.PING_MEM_MAX_COMMITS, DEFAULT_MAX_COMMITS);
+}
+
+export function resolveDefaultMaxCommitAgeDays(): number {
+  return parseNonNegativeIntEnv(
+    process.env.PING_MEM_MAX_COMMIT_AGE_DAYS,
+    DEFAULT_MAX_COMMIT_AGE_DAYS,
+  );
+}
+
 export interface GitCommit {
   hash: string; // Full SHA-1
   shortHash: string; // Abbreviated SHA-1
@@ -58,10 +101,12 @@ export class GitHistoryReader {
       return { commits: [], fileChanges: [], hunks: [] };
     }
 
-    const maxCommits = options?.maxCommits ?? 200;
-    const since = options?.maxCommitAgeDays
-      ? `${options.maxCommitAgeDays} days ago`
-      : undefined;
+    const maxCommits = options?.maxCommits ?? resolveDefaultMaxCommits();
+    // Phase 2: if no explicit age limit, fall back to env-overridable default (365d) —
+    // value of 0 is treated as "no age filter" to allow full-history re-ingest.
+    const effectiveAgeDays =
+      options?.maxCommitAgeDays ?? resolveDefaultMaxCommitAgeDays();
+    const since = effectiveAgeDays > 0 ? `${effectiveAgeDays} days ago` : undefined;
     const commits = await this.readCommits(gitRoot, maxCommits, since);
     log.info(`Found ${commits.length} commits, processing diffs...`);
     const fileChanges: GitFileChange[] = [];

@@ -331,12 +331,19 @@ describe("ProjectScanner", () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    test("ignores .overstory, .worktrees, .ai, coverage, .turbo, .parcel-cache, .swc dirs", async () => {
-      const dirsToIgnore = [".overstory", ".ai", "coverage", ".turbo", ".parcel-cache", ".swc"];
+    test("ignores .overstory, .worktrees, coverage, .turbo, .parcel-cache, .swc dirs", async () => {
+      // Phase 2 remediation (2026-04-18): `.ai` removed from DEFAULT_IGNORE_DIRS
+      // so planning/research artifacts (plans, decisions, research notes) ARE
+      // ingested. See ProjectScanner.ts DEFAULT_IGNORE_DIRS comment.
+      const dirsToIgnore = [".overstory", "coverage", ".turbo", ".parcel-cache", ".swc"];
       for (const dir of dirsToIgnore) {
         fs.mkdirSync(path.join(tempDir, dir), { recursive: true });
         fs.writeFileSync(path.join(tempDir, dir, "file.ts"), "export const x = 1;");
       }
+      // Also create an .ai dir to prove it IS now ingested
+      fs.mkdirSync(path.join(tempDir, ".ai"), { recursive: true });
+      fs.writeFileSync(path.join(tempDir, ".ai", "plan.ts"), "export const plan = 1;");
+
       fs.writeFileSync(path.join(tempDir, "index.ts"), "export const x = 1;");
 
       const scanner = new ProjectScanner({ useGitLsFiles: false });
@@ -347,6 +354,8 @@ describe("ProjectScanner", () => {
       for (const dir of dirsToIgnore) {
         expect(paths.every(p => !p.startsWith(`${dir}/`))).toBe(true);
       }
+      // Regression: .ai IS now scanned (Phase 2 — restored from ignore list)
+      expect(paths.some(p => p.startsWith(".ai/"))).toBe(true);
     });
   });
 
