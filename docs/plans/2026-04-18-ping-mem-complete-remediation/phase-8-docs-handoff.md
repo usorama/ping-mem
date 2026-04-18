@@ -93,7 +93,7 @@ Resource protection: `ollama_memory_hog` threshold is 14 GB (was 4 GB) and evict
 
 ## 13. `ping-mem doctor` CLI
 
-Gated health check covering 31 invariants across 7 groups (infrastructure/service/data-coverage/self-heal/log-hygiene/regression/alerts). Exit codes (single canonical taxonomy, mirrored in P5.3 and overview AC-F9):
+Gated health check covering 35 invariants across 7 groups (infrastructure/service/data-coverage/self-heal/log-hygiene/regression/alerts). Exit codes (single canonical taxonomy, mirrored in P5.3 and overview AC-F9):
 
 - `0` — all gates green
 - `1` — at least one gate warning (soft red, not critical)
@@ -120,7 +120,7 @@ open http://localhost:3003/ui/health
 
 ## 15. 30-Day Soak Definition
 
-See `docs/plans/2026-04-18-ping-mem-complete-remediation/overview.md#30-day-soak-acceptance`. 10 hard gates must be green 30/30 consecutive days; 5 soft gates tolerate ≤6 red days. Clock reset: any hard gate red on any day resets the counter to 0. State file: `~/.ping-mem/soak-state.json` (`status: green|running|failed`).
+See `docs/plans/2026-04-18-ping-mem-complete-remediation/overview.md#30-day-soak-acceptance`. 14 hard gates must be green 30/30 consecutive days; 5 soft gates tolerate ≤6 red days. Clock reset: any hard gate red on any day resets the counter to 0. State file: `~/.ping-mem/soak-state.json` (`status: green|red` — mirrors P7's `soak-monitor.sh` canonical mapping `pass→green, fail/skip→red`).
 
 ## 16. Full Architecture Reference
 
@@ -213,7 +213,7 @@ rm /Users/umasankr/Projects/ping-mem/README.md.bak
 - Ollama 3-tier local self-heal chain (`llama3.2` → `qwen3:8b` → `gpt-oss:20b`) with rules fallback — replaces the broken Claude/Codex/Gemini cloud chain. See ADR-2.
 - `ping-mem doctor` CLI (`bun run doctor`) — 29-gate health check, exits 0/2/3. 15-min launchd schedule (`com.ping-mem.doctor.plist`). JSONL ring buffer at `~/.ping-mem/doctor-runs/`.
 - `GET /ui/health` dashboard + `POST /ui/health/run` HTMX trigger. Basic Auth via `PING_MEM_ADMIN_USER` / `PING_MEM_ADMIN_PASS`.
-- 30-day soak monitor (`scripts/soak-monitor.sh` + `~/.ping-mem/soak-state.json`) with 10 hard gates + 5 soft gates.
+- 30-day soak monitor (`scripts/soak-monitor.sh` + `~/.ping-mem/soak-state.json`) with 14 hard gates + 5 soft gates.
 - Watchdog plist `com.ping-guard.watchdog.plist` — re-bootstraps ping-guard after Mac reboot so supervisor EMERGENCY_STOP is recoverable.
 - Regression test suite at `tests/regression/memory-sync-coverage.test.ts` (CI-gated).
 
@@ -226,7 +226,7 @@ rm /Users/umasankr/Projects/ping-mem/README.md.bak
 
 ### Fixed
 - MCP tool invocation from Claude Code returning 403 Forbidden (missing Basic Auth credentials in `~/.claude.json`).
-- Memory sync hook truncating content to 2000 chars (`head -c 2000`) — raised to 30000 to match `ContextSaveSchema.value.max`.
+- Memory sync hook truncating content to 2000 chars (`head -c 2000`) — raised to 1000000 to match `ContextSaveSchema.value.max(1_000_000)` (overview O3 "full content, no truncation"; see P1.2).
 - Session-cap 429 collisions (daily occurrence) caused by missing periodic `cleanup()` caller.
 - ping-learn codebase ingestion coverage (was 20% commits / 59% files) — now ≥95% / ≥95%.
 - Supervisor silent rollbacks (2 in 4 days pre-remediation) that reverted ping-guard to mid-March state.
@@ -316,7 +316,7 @@ DATE_ISO=$(date +%Y-%m-%dT%H:%M:%S%z | sed 's/\(..\)$/:\1/')
 
 cat >> /Users/umasankr/Projects/ping-mem/.ai/decisions.jsonl <<EOF
 {"date":"$DATE_ISO","type":"decision","what":"P0 — Baseline tag remediation-baseline-2026-04-18 + ~/.claude.json chmod 600 + kill stale judge processes + 3 GH issues for tracked deferrals","status":"completed"}
-{"date":"$DATE_ISO","type":"decision","what":"P1 — Fix (not rebuild) ~/.claude/hooks/ping-mem-native-sync.sh: raise truncation 2000->30000, widen scope to all ~/.claude/projects/*/memory, extract lib to ping-mem-sync-lib.sh, add PostToolUse hook, inject MCP Basic Auth creds in ~/.claude.json, raise SessionManager cap 10->50 + wire reaper setInterval. Owns O1+O2+O3+O8. Per ADR-1.","status":"completed"}
+{"date":"$DATE_ISO","type":"decision","what":"P1 — Fix (not rebuild) ~/.claude/hooks/ping-mem-native-sync.sh: raise truncation 2000->1000000 (match ContextSaveSchema.value.max), widen scope to all ~/.claude/projects/*/memory, extract lib to ping-mem-sync-lib.sh, add PostToolUse hook, inject MCP Basic Auth creds in ~/.claude.json, raise SessionManager cap 10->50 + wire reaper setInterval (2-min). Owns O1+O2+O3+O8. Per ADR-1.","status":"completed"}
 {"date":"$DATE_ISO","type":"decision","what":"P2 — Remove 200-commit / 30-day ingestion defaults in IngestionService.ts + GitHistoryReader.ts; enqueue + poll runId to completion; re-ingest 5 projects to >=95% coverage (both commits and files). Owns O4.","status":"completed"}
 {"date":"$DATE_ISO","type":"decision","what":"P3 — Replace broken 4-tier cloud LLM self-heal chain (Claude/Codex/Gemini) with 3-tier local Ollama (llama3.2/qwen3:8b/gpt-oss:20b) + rules fallback. Write ollama-tier.sh wrapper, seed pattern confidences >=0.3, bump ollama_memory_hog 4GB->14GB, switch evict target qwen3->gpt-oss-20b, remove _reconcile_scheduled() from wake_detector.py. Owns O5. Per ADR-2.","status":"completed"}
 {"date":"$DATE_ISO","type":"decision","what":"P4 — Guarded scripts/cleanup-disk.sh (pgrep before destructive rm), newsyslog + launchd log rotation, supervisor rewrite (keep-forward + 3-retry + EMERGENCY_STOP notification), com.ping-guard.watchdog.plist for post-reboot re-bootstrap, wake_detector.py _start_orbstack() wired. Owns O6+O7+O9. Per ADR-4 + ADR-5.","status":"completed"}

@@ -63,7 +63,7 @@ ping-mem is "technically up" (health endpoint green, Neo4j/Qdrant/SQLite all hea
 | **O7** | Disk stays ≤85% | 96% | ≤85% | ≤85% | `df -P /System/Volumes/Data` |
 | **O8** | 0 session-cap 429 collisions in 30 days | daily hits | 0 in 7d | 0 in 30d | `/api/v1/session/list` + error log grep |
 | **O9** | 0 silent supervisor rollbacks in 30 days | 2 in 4d | 0 in 7d | 0 in 30d | `supervisor.log` grep "Rolled back" |
-| **O10** | 30-day soak green | undefined | — | 10 hard gates 30/30 + 5 soft gates ≥24/30 | `~/.ping-mem/soak-state.json` status=green |
+| **O10** | 30-day soak green | undefined | — | 14 hard gates 30/30 + 5 soft gates ≥24/30 | `~/.ping-mem/soak-state.json` status=green |
 
 **Acceptance rule**: A capability is delivered ONLY if its outcome test passes. "Code is written" is not delivery. "Component works in isolation" is not delivery. Outcome is measured from the user's entry point.
 
@@ -184,7 +184,7 @@ Each phase file expands its own rows with file:line precision. This table is the
 | # | Phase | Scope | Effort | Gate | File | Status |
 |---|-------|-------|--------|------|------|--------|
 | P0 | Prep | Worktree + disk cleanup stub + test baseline + `~/.claude.json` chmod 600 + kill stale processes | 1h | disk <85%, typecheck clean, test count baseline snapshot | `phase-0-prep.md` | pending |
-| P1 | Memory sync + MCP auth + session cap | A + B + E.4. Fix native-sync.sh (truncation, scope, per-project prefix, marker hash-path, flock guard). Extract `ping-mem-sync-lib.sh`. Add PostToolUse hook detached. Migrate old keys (P1.4a). Update `~/.claude.json` env. SessionManager cap→50 + reaper + setInterval + _reaperInterval field. Verify REST `ContextSaveSchema.max` supports 30000-byte values. | 5h | F1–F6 pass; O1+O2+O3+O8 green | `phase-1-memory-sync-mcp-auth.md` | pending |
+| P1 | Memory sync + MCP auth + session cap | A + B + E.4. Fix native-sync.sh (truncation 2000→1000000, scope, per-project prefix, marker hash-path, flock guard). Extract `ping-mem-sync-lib.sh`. Add PostToolUse hook detached. Migrate old keys (P1.4a). Update `~/.claude.json` env. SessionManager cap→50 + reaper + setInterval + _reaperInterval field. Hook cap matches REST `ContextSaveSchema.value.max(1_000_000)` — no silent truncation below 1 MB. | 5h | F1–F6 pass; O1+O2+O3+O8 green | `phase-1-memory-sync-mcp-auth.md` | pending |
 | P2 | Ingestion coverage | C. Patch `IngestionService.ts:46` comment + `IngestionService.ts:129` age default + `GitHistoryReader.ts:61` runtime commit default. Add per-request scanner overrides (`ignoreDirs`, `excludeExtensions`) to `IngestProjectOptions` + `IngestionEnqueueSchema` + `ProjectScanner.scanProject` (P2.6.a-c). Update reingest script to re-include `docs/` + text extensions for 5 active projects (P2.6.d). Enqueue + poll `runId` until `completed`. Re-ingest 5 projects. Verify schema shape of `/api/v1/codebase/projects`. | 5h | F7–F9 pass; O4 green (files AND commits ≥95% on all 5 projects) | `phase-2-ingestion-coverage.md` | pending |
 | P3 | Ollama self-heal | D. Write `ollama-tier.sh` (`--arg kl "15m"` not `--argjson`). Update manifest 3-tier chain. Seed pattern confidences (`path.join(homedir(),...)`, `WHERE confidence<0.5`). Remove `_reconcile_scheduled()` function (lines 40-51 + call at line 95). Bump `ollama_memory_hog` threshold 4→14 GB; evict `gpt-oss:20b` first. | 4h | F10–F12 pass; O5 green | `phase-3-ollama-selfheal.md` | pending |
 | P4 | Lifecycle + supervisor + OrbStack + logs | E.1–E.3, E.5. `cleanup-disk.sh` with pgrep guards. newsyslog conf + user-space launchd fallback. Supervisor rewrite (keep-forward + 3-retry + STOP). `com.ping-guard.watchdog.plist` defined + loaded. `wake_detector.py` `_start_orbstack()` added at ~line 52 + call at ~line 91. launchd plist hardening (ProcessType=Interactive for daemon, Background+LowPriorityIO for doctor). | 4h | F15–F19 pass; O6+O7+O9 green | `phase-4-lifecycle-supervisor.md` | pending |
@@ -279,7 +279,7 @@ All gate IDs below are **P5 gate registry IDs**. P7's `scripts/soak-monitor.sh` 
 - [ ] AC-Q5: `~/.claude.json` perm ≤600 (doctor gate asserts)
 
 ### 30-day Soak (O10)
-- [ ] AC-S1: 10 hard gates green 30/30 consecutive days
+- [ ] AC-S1: 14 hard gates green 30/30 consecutive days
 - [ ] AC-S2: 5 soft gates green ≥24/30 days
 - [ ] AC-S3: no manual intervention required during 30 days
 - [ ] AC-S4: `soak-state.json` status=green at day 30

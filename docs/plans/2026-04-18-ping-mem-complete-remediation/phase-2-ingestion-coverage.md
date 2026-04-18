@@ -438,7 +438,7 @@ done
 
 #### P2.6.e — Measurement: denominator = `git ls-files` including overrides
 
-`scripts/verify-coverage.sh` computes the denominator from the SAME inclusion set the overrides apply, so the 95% target is internally consistent:
+`scripts/verify-ingestion-coverage.sh` computes the denominator from the SAME inclusion set the overrides apply, so the 95% target is internally consistent:
 
 ```bash
 # Per project:
@@ -456,7 +456,7 @@ Global exclusions that do NOT change in P2: lock files, compiled binaries, media
 | # | Check | Command | Expected |
 |---|-------|---------|----------|
 | V2.10 | Overrides accepted by schema | `echo '{"projectDir":"/tmp/x","ignoreDirs":["docs"],"excludeExtensions":[".md"]}' \| curl -sf -u admin:ping-mem-dev-local -X POST http://localhost:3003/api/v1/ingestion/enqueue -H 'content-type: application/json' --data-binary @-` | HTTP 202 with `runId` |
-| V2.11 | Files-coverage ≥95% per project after reingest | `bash scripts/verify-coverage.sh \| jq '.[].pctFiles \| . >= 0.95'` | `true` for all 5 projects |
+| V2.11 | Files-coverage ≥95% per project after reingest | `bash scripts/verify-ingestion-coverage.sh \| jq '.[].pctFiles \| . >= 0.95'` | `true` for all 5 projects |
 | V2.12 | Commits-coverage ≥95% per project after reingest | same script, `.pctCommits >= 0.95` | `true` for all 5 |
 
 #### P2.6.g — Diagnosis fallback (only if V2.11 still fails)
@@ -487,14 +487,16 @@ export interface IngestProjectOptions {
 }
 ```
 
-**New**:
+**New** (canonical — single source of truth for §P2.6.a):
 
 ```ts
 export interface IngestProjectOptions {
   projectDir: string;
   forceReingest?: boolean;
-  maxCommits?: number; // Max git commits to ingest (default: env PING_MEM_MAX_COMMITS || 10000 — effectively "all commits" for active projects)
-  maxCommitAgeDays?: number; // Only include commits from last N days (default: env PING_MEM_MAX_COMMIT_AGE_DAYS || unset → full history)
+  maxCommits?: number;              // Max git commits to ingest (default: env PING_MEM_MAX_COMMITS || 10000)
+  maxCommitAgeDays?: number;        // Only include commits from last N days (default: env PING_MEM_MAX_COMMIT_AGE_DAYS || unset → full history)
+  ignoreDirs?: string[] | undefined;        // P2.6.a — override: subtracts from DEFAULT_IGNORE_DIRS (e.g. ["docs"] re-includes docs/)
+  excludeExtensions?: string[] | undefined; // P2.6.a — override: subtracts from DEFAULT_EXCLUDE_EXTENSIONS (e.g. [".md", ".sh"])
 }
 ```
 
@@ -552,7 +554,7 @@ P2.4 asserts this shape. P5 (W23) depends on `commitsCount` + `filesCount`.
 | `src/ingest/IngestionService.ts:43-48` (`IngestProjectOptions`) | 4-field interface (no overrides) | **P2.6.a** (adds `ignoreDirs?`, `excludeExtensions?`) | `grep -n 'ignoreDirs?: string\[\]' src/ingest/IngestionService.ts` → expect match |
 | `src/validation/api-schemas.ts` (`IngestionEnqueueSchema`) | pre-P2.6: no scanner overrides | **P2.6.c** (adds `ignoreDirs`, `excludeExtensions` optional arrays) | `grep -n 'ignoreDirs\|excludeExtensions' src/validation/api-schemas.ts` → ≥2 hits |
 | `scripts/reingest-active-projects.sh` | pre-P2.6: no override JSON | **P2.6.d** (passes per-project override JSON for 5 active projects) | `grep -c 'IGNORE_DIRS_OVERRIDE\|EXCLUDE_EXT_OVERRIDE' scripts/reingest-active-projects.sh` → ≥2 |
-| `scripts/verify-coverage.sh` | pre-P2.6: no canonical denominator | **P2.6.e** (computes `git ls-files` denominator consistent with overrides) | `test -x scripts/verify-coverage.sh` → exit 0 |
+| `scripts/verify-ingestion-coverage.sh` | pre-P2.6: no canonical denominator | **P2.6.e** (computes `git ls-files` denominator consistent with overrides) | `test -x scripts/verify-ingestion-coverage.sh` → exit 0 |
 
 ---
 
@@ -654,7 +656,7 @@ Any single red → Phase 2 is NOT done; orchestrator must not advance to phases 
 **Downstream (blocked until P2 gate is green)**:
 
 - **P5 observability** — W23 (coverage canary gate in doctor) reads the same `GET /api/v1/codebase/projects` shape asserted by P2.4. If P2 is red, the doctor gate will report false 0 % coverage. Do not advance P5 without P2 gate green.
-- **P7 soak regression** — W28 includes hard-gate `ingestion-coverage-ping-learn` and `ingestion-coverage-5-projects` (overview.md §30-Day Soak). These consume `scripts/verify-ingestion-coverage.sh` produced here.
+- **P7 soak regression** — W28 includes hard-gates `coverage-commits-ge-95pct` and `coverage-files-ge-95pct` (overview.md §30-Day Soak, post-F3 reconciliation). These consume `scripts/verify-ingestion-coverage.sh` produced here.
 
 No other phase has hard dependency on P2 outputs.
 

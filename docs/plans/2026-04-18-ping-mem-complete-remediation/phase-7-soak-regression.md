@@ -16,7 +16,7 @@ blocks: [phase-8-docs-handoff]
 
 Deliver **O10** (30-day soak green) by (a) building the deterministic streak-day math that reads doctor-runs JSONL and computes `~/.ping-mem/soak-state.json`, (b) wiring the 5-of-5 canonical regression queries into a Bun test that runs in CI on every push/PR, and (c) installing a launchd job that runs the soak computation daily. P5 owns the doctor gates + alert wiring; P7 owns the math that reads their output, plus the CI guard that keeps the regression queries green as code evolves.
 
-**O10 binary test**: `jq -r '.status' ~/.ping-mem/soak-state.json` returns `green` at day 30, meaning all 10 HARD gates have `streak_days_green >= 30` AND all 5 SOFT gates have `red_days_in_window <= 6`.
+**O10 binary test**: `jq -r '.status' ~/.ping-mem/soak-state.json` returns `green` at day 30, meaning all 14 HARD gates have `streak_days_green >= 30` AND all 5 SOFT gates have `red_days_in_window <= 6`. (Previous draft said "10 hard gates"; the 10→14 expansion came from splitting the 5 canonical regression queries and 2 coverage axes into separate P5 gate IDs — a diagnostic improvement, not a scope change.)
 
 ## Pre-conditions
 
@@ -27,7 +27,7 @@ From prior phases:
 - **P2**: ingestion coverage ≥95% across 5 projects; `codebase_list_projects` is stable.
 - **P3**: Ollama self-heal chain wired; `ollama_triage`/`recovery`/`deep` endpoints answer.
 - **P4**: cleanup-disk.sh + log rotation + supervisor rewrite + watchdog plist loaded; disk gate can stay green.
-- **P5**: `bun run doctor` emits one JSONL line per run at `~/.ping-mem/doctor-runs/<utc-timestamp>.jsonl`. Each line contains `{ timestamp, duration_ms, gates: [{ name, tier, status, detail }] }` with `tier ∈ {hard,soft}` and `status ∈ {green,red,skip}`. The launchd plist `com.ping-mem.doctor.plist` runs every 15 min. P5 also owns the `hard/soft` classification and the 10+5 gate-name list.
+- **P5**: `bun run doctor` emits one JSONL line per run at `~/.ping-mem/doctor-runs/<ISO-8601>.jsonl` (colons replaced with hyphens per `new Date().toISOString().replace(/:/g, "-")`). Each line contains the `DoctorResult` shape from phase-5 §P5.1: `{ gates: [{ id, name, category, severity, status: "pass"|"fail"|"skip", ... }], summary, exitCode, timestamp }`. P7's `soak-monitor.sh` matches on `.id` and maps `pass→green, fail/skip→red`. Launchd plist `com.ping-mem.doctor.plist` runs every 15 min. P5 registry has 35 gates total; the 14-hard + 5-soft subset used for O10 soak acceptance is defined in overview.md §30-Day Soak Acceptance.
 - **P6**: auto-os write path + cross-project smoke test operational (so the `auto-os-cross-project-hit` soft gate has real data).
 - Ping-mem REST listens on `http://localhost:3003` with Basic Auth enabled.
 
@@ -583,13 +583,15 @@ curl -sf -u "$ADMIN_USER:$ADMIN_PASS" -X POST "$PING_MEM_URL/api/v1/session/star
   -d "{\"name\":\"$SESSION\",\"metadata\":{\"purpose\":\"regression\"}}" \
   >/dev/null 2>&1 || true
 
-# 5 canonical fixtures — keys and substrings MUST match CANONICAL_QUERIES in the test
+# 5 canonical fixtures. Each VALUE MUST contain the exact query substring
+# from CANONICAL_QUERIES in tests/regression/memory-sync-coverage.test.ts —
+# otherwise the regression suite's search will return 0 hits.
 declare -a FIXTURES=(
-  'native/pinglearn/MEMORY.md|CANARY_FIXTURE_PINGLEARN: PingLearn is a voice tutor product for Class IX-X students running on Next.js 15.5.9 with LiveKit.'
-  'native/ping-mem/MEMORY.md|CANARY_FIXTURE_PING_MEM: ping-mem is a universal memory layer providing REST + MCP + Neo4j + Qdrant for AI agent context persistence.'
-  'claude-md/root|CANARY_FIXTURE_CLAUDE_MD: superpowers skill establishes how to find and use skills, invoking via Skill tool before any response.'
-  'learnings/testing|CANARY_FIXTURE_LEARNINGS_TESTING: always use bun test — vitest is 17x slower. bun mock.module() is process-global and must export every named export of the target module.'
-  'learnings/auto-memory|CANARY_FIXTURE_AUTO_MEMORY: feedback memory is a memory that contains feedback the user gave, directly informing how to collaborate in future conversations.'
+  'native/pinglearn/fixture-1|CANARY_1: Pricing decision — ping-learn pricing research backed by research-zero; US $14.99/mo Scholar, India INR 499/mo.'
+  'native/pinglearn/fixture-2|CANARY_2: Mobile push — Firebase FCM pinglearn-c63a2 project number 712545717453, Android + iOS apps registered.'
+  'native/pinglearn/fixture-3|CANARY_3: Authenticated redesign — classroom redesign worktree at /private/tmp/pl-classroom-redesign on feat/classroom-redesign.'
+  'native/pinglearn/fixture-4|CANARY_4: Security — PR 236 JWT secret isolation merged; CONSENT_JWT_SECRET env var, alg:none attack prevention, rate limit fail-closed.'
+  'native/pinglearn/fixture-5|CANARY_5: Compliance — DPDP consent age 18 raised from 17; PR #273 with follow-up issues #274 #275 #276.'
 )
 
 for fx in "${FIXTURES[@]}"; do
@@ -671,13 +673,13 @@ const isSystemNamed = ["native-sync", "auto-recall", "canary", "regression-p7"].
   "computed_at_utc": "<ISO-8601>",
   "hard_gates": [
     {
-      "name": "rest-health",
+      "name": "rest-health-200",
       "tier": "hard",
       "streak_days_green": 0..30,
       "required": 30,
       "status": "green" | "red"  // green iff streak_days_green >= required
     }
-    // ...10 hard gates
+    // ...14 hard gates total — matching HARD_GATES array in scripts/soak-monitor.sh
   ],
   "soft_gates": [
     {
@@ -701,8 +703,9 @@ const isSystemNamed = ["native-sync", "auto-recall", "canary", "regression-p7"].
   "timezone": "IST",
   "computed_at_utc": "2026-04-19T00:30:00Z",
   "hard_gates": [
-    {"name": "rest-health", "tier": "hard", "streak_days_green": 1, "required": 30, "status": "red"},
+    {"name": "rest-health-200", "tier": "hard", "streak_days_green": 1, "required": 30, "status": "red"},
     {"name": "mcp-proxy-stdio", "tier": "hard", "streak_days_green": 1, "required": 30, "status": "red"}
+    // ...12 more hard gates (query-*, coverage-*, ollama-reachable, disk-below-85, session-cap-below-80pct, supervisor-no-rollback-24h, doctor-launchd-ran)
   ],
   "soft_gates": [
     {"name": "orbstack-warm-latency", "tier": "soft", "red_days_in_window": 0, "tolerance": 6, "status": "green"}
@@ -719,7 +722,8 @@ const isSystemNamed = ["native-sync", "auto-recall", "canary", "regression-p7"].
   "timezone": "IST",
   "computed_at_utc": "2026-05-03T00:30:00Z",
   "hard_gates": [
-    {"name": "rest-health", "tier": "hard", "streak_days_green": 15, "required": 30, "status": "red"}
+    {"name": "rest-health-200", "tier": "hard", "streak_days_green": 15, "required": 30, "status": "red"}
+    // ...13 more hard gates (same slugs as day-1 example)
   ],
   "soft_gates": [
     {"name": "orbstack-warm-latency", "tier": "soft", "red_days_in_window": 2, "tolerance": 6, "status": "green"}
@@ -736,15 +740,19 @@ const isSystemNamed = ["native-sync", "auto-recall", "canary", "regression-p7"].
   "timezone": "IST",
   "computed_at_utc": "2026-05-18T00:30:00Z",
   "hard_gates": [
-    {"name": "rest-health", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "rest-health-200", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
     {"name": "mcp-proxy-stdio", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
-    {"name": "regression-5-of-5", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
-    {"name": "ingestion-coverage-ping-learn", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
-    {"name": "ingestion-coverage-5-projects", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
-    {"name": "self-heal-ollama-reachable", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
-    {"name": "disk-below-90", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
-    {"name": "session-cap-below-80", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
-    {"name": "supervisor-no-rollback", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "query-ping-learn-pricing", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "query-firebase-fcm", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "query-classroom-redesign", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "query-pr-236-jwt", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "query-dpdp-consent-18", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "coverage-commits-ge-95pct", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "coverage-files-ge-95pct", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "ollama-reachable", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "disk-below-85", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "session-cap-below-80pct", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
+    {"name": "supervisor-no-rollback-24h", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"},
     {"name": "doctor-launchd-ran", "tier": "hard", "streak_days_green": 30, "required": 30, "status": "green"}
   ],
   "soft_gates": [
@@ -810,7 +818,7 @@ gate_day_status "<gate-name>" "<YYYY-MM-DD>"   # echoes "green" | "red"
 | V7.11 | SessionManager allowlist includes `regression-p7` | `grep -c '"regression-p7"' src/session/SessionManager.ts` | `1` |
 | V7.12 | Typecheck clean | `bun run typecheck` | 0 errors |
 | V7.13 | soak-state.json schema (when present) | `jq -e '.status, .window_days, .hard_gates, .soft_gates' ~/.ping-mem/soak-state.json` | non-null fields |
-| V7.14 | All 10 hard gate names present in script | `for g in rest-health mcp-proxy-stdio regression-5-of-5 ingestion-coverage-ping-learn ingestion-coverage-5-projects self-heal-ollama-reachable disk-below-90 session-cap-below-80 supervisor-no-rollback doctor-launchd-ran; do grep -q "$g" scripts/soak-monitor.sh \|\| echo MISSING:$g; done` | no MISSING lines |
+| V7.14 | All 14 hard gate IDs (P5 registry slugs) present in script | `for g in rest-health-200 mcp-proxy-stdio query-ping-learn-pricing query-firebase-fcm query-classroom-redesign query-pr-236-jwt query-dpdp-consent-18 coverage-commits-ge-95pct coverage-files-ge-95pct ollama-reachable disk-below-85 session-cap-below-80pct supervisor-no-rollback-24h doctor-launchd-ran; do grep -q "$g" scripts/soak-monitor.sh \|\| echo MISSING:$g; done` | no MISSING lines |
 | V7.15 | All 5 soft gate names present in script | `for g in orbstack-warm-latency log-rotation-last-7d pattern-confidence-nonzero auto-os-cross-project-hit ping-mem-doctor-exec-time-below-10s; do grep -q "$g" scripts/soak-monitor.sh \|\| echo MISSING:$g; done` | no MISSING lines |
 
 ## Functional Tests
@@ -820,9 +828,9 @@ gate_day_status "<gate-name>" "<YYYY-MM-DD>"   # echoes "green" | "red"
 | F7.1 | Regression suite passes locally | ping-mem up on :3003 with seeded fixtures | `PING_MEM_ADMIN_USER=admin PING_MEM_ADMIN_PASS=ping-mem-dev-local bun test tests/regression/*.test.ts` | 5 canonical tests pass, 0 fail |
 | F7.2 | Regression suite passes in CI | push to PR | GitHub Actions `regression` job | green check |
 | F7.3 | Session lifecycle is clean | run test, then query sessions | `curl -u admin:pass http://localhost:3003/api/v1/session/list \| jq '.data[] \| select(.name=="regression-p7")'` (after `afterAll`) | empty (session ended) |
-| F7.4 | soak-state.json written after first run | create fake `~/.ping-mem/doctor-runs/2026-04-19T06:00:00Z.jsonl` with all-green gates | `bash scripts/soak-monitor.sh; jq -r .status ~/.ping-mem/soak-state.json` | `red` (only day 1) with `streak_days_green: 1` for every hard gate |
+| F7.4 | soak-state.json written after first run | create fake `~/.ping-mem/doctor-runs/2026-04-19T06-00-00.000Z.jsonl` (colons replaced with hyphens — matches P5's `new Date().toISOString().replace(/:/g, "-")` naming) with all-green gates | `bash scripts/soak-monitor.sh; jq -r .status ~/.ping-mem/soak-state.json` | `red` (only day 1) with `streak_days_green: 1` for every hard gate |
 | F7.5 | Day-N streak math verifiable on synthetic doctor-runs | populate `~/.ping-mem/doctor-runs/` with 30 consecutive all-green days; dates spanning `date -v-29d` through today | `bash scripts/soak-monitor.sh; jq '[.hard_gates[].streak_days_green] \| min' ~/.ping-mem/soak-state.json` | `30` |
-| F7.6 | Hard gate clock reset on red day | in synthetic fixture set day -5 to red for `rest-health`, rest green | `bash scripts/soak-monitor.sh; jq '.hard_gates[] \| select(.name=="rest-health") \| .streak_days_green' ~/.ping-mem/soak-state.json` | `5` (streak only covers last 5 days after the red day) |
+| F7.6 | Hard gate clock reset on red day | in synthetic fixture set day -5 to red for `rest-health-200`, rest green | `bash scripts/soak-monitor.sh; jq '.hard_gates[] \| select(.name=="rest-health-200") \| .streak_days_green' ~/.ping-mem/soak-state.json` | `5` (streak only covers last 5 days after the red day) |
 | F7.7 | Soft gate tolerates 6 red days | in synthetic fixture set `orbstack-warm-latency` red on 6 scattered days, rest green | `jq '.soft_gates[] \| select(.name=="orbstack-warm-latency") \| .status' ~/.ping-mem/soak-state.json` | `green` |
 | F7.8 | Soft gate fails at 7 red days | 7 red scattered days | `jq '.soft_gates[] \| select(.name=="orbstack-warm-latency") \| .status' ~/.ping-mem/soak-state.json` | `red` AND overall status `red` |
 | F7.9 | Exit code reflects status | same 30-green scenario as F7.5 | `bash scripts/soak-monitor.sh; echo $?` | `0` |
@@ -854,7 +862,7 @@ Per-day soak state (F7.4–F7.8) is proven with synthetic fixtures so the math i
 
 ## Dependencies
 
-- **Hard**: P0 (baseline + disk + creds), P1 (MCP auth + allowlist), P2 (ingestion coverage so queries hit), P3 (self-heal so hard gate `self-heal-ollama-reachable` has green days), P4 (disk + supervisor + watchdog + orbstack — 3 hard/soft gates), P5 (doctor JSONL writer — the ONLY input source for soak-monitor.sh), P6 (auto-os cross-project — 1 soft gate).
+- **Hard**: P0 (baseline + disk + creds), P1 (MCP auth + allowlist), P2 (ingestion coverage so queries hit), P3 (self-heal so hard gate `ollama-reachable` has green days), P4 (disk + supervisor + watchdog + orbstack — 3 hard/soft gates), P5 (doctor JSONL writer — the ONLY input source for soak-monitor.sh), P6 (auto-os cross-project — 1 soft gate).
 - **External**: GitHub repo secrets set (`PING_MEM_ADMIN_USER`, `PING_MEM_ADMIN_PASS`); Docker images buildable from compose.
 - **Internal**: `scripts/seed-regression-fixtures.sh` is authored by P7.4b (same phase — no cross-phase forward dependency).
 
