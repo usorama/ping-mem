@@ -215,7 +215,7 @@ rm /Users/umasankr/Projects/ping-mem/README.md.bak
 ### Changed
 - `~/.claude.json` permission hardened to `600` (was `644`). MCP Basic Auth credentials (`PING_MEM_ADMIN_USER`, `PING_MEM_ADMIN_PASS`) added to the ping-mem MCP env block.
 - `src/session/SessionManager.ts` — `maxActiveSessions` raised 10 → 50; `cleanup()` now runs every 5 min via `setInterval` (`_reaperInterval` field); reserved-name allowlist for service sessions.
-- `src/ingestion/IngestionService.ts` and `src/ingestion/GitHistoryReader.ts` defaults — removed the 200-commit / 30-day ceiling; full-history ingestion now the default. Idempotent re-ingest (skip-if-unchanged) finishes in <30s.
+- `src/ingest/IngestionService.ts` and `src/ingest/GitHistoryReader.ts` defaults — removed the 200-commit / 30-day ceiling; full-history ingestion now the default. Idempotent re-ingest (skip-if-unchanged) finishes in <30s.
 - ping-guard supervisor (`~/Projects/ping-guard/scripts/supervisor.sh`) — rewritten to keep-forward + 3-retry + EMERGENCY_STOP, no more silent rollbacks.
 - `~/Projects/ping-guard/wake_detector.py` — `_start_orbstack()` wired on wake event; broken `_reconcile_scheduled()` call removed.
 
