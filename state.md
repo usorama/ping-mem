@@ -1,50 +1,66 @@
 # ping-mem — Project State
 
-**Last updated**: 2026-04-18 (end of Phase 4 session)
-**Phase**: Remediation plan execution — 4 of 8 phases closed
-**Health**: All subsystems green. 5/5 memory regression queries PASS. 5/5 project ingestion coverage ≥95%. 3/3 canary self-heal trials PASS ≤120s.
+**Last updated**: 2026-04-19 (end of Phase 8 session — remediation complete)
+**Phase**: Remediation plan execution — **8 of 8 phases closed**
+**Health**: All gates green. Doctor 34/34 pass. 10/10 E2E regression queries pass (8.09s). Full bun suite 1973/0/0. Baseline soak day 0.
 
 ## Active work
 
-**Plan**: `docs/plans/2026-04-18-ping-mem-complete-remediation-plan.md` (1051 lines, 8 phases)
-**PR**: #125 on `fix/ping-mem-complete-remediation-plan`
+**Plan**: `docs/plans/2026-04-18-ping-mem-complete-remediation-plan.md` (1051 lines, 8 phases — CLOSED)
+**PR**: #125 on `fix/ping-mem-complete-remediation-plan` — ready to merge
+**Tag**: `v2.0.0-ping-mem-complete-remediation` pushed to origin
 **Session memory** (for orientation): `~/.claude/projects/-Users-umasankr-Projects-ping-learn/memory/project_ping_mem_remediation.md`
 
-### Closed phases (commits pushed to origin)
+### All phases closed — evidence table
 
 | Phase | Focus | Commits | Gate evidence |
 |-------|-------|---------|---------------|
-| 1 | Memory sync + MCP auth + session cap | ping-mem@6872209 | 5/5 canonical queries return ≥1 hit (was 0/5). MCP healthy. |
-| 2 | Ingestion coverage ≥95% for 5 projects | ping-mem@66d3f1f | 5/5 projects pass. |
-| 3 | Ollama self-heal 3-tier | ping-guard@63cd321+06bdaee, ping-mem@472b918 | 3/3 canary ≤120s. tier_errs 16→0. |
-| 4 | Lifecycle + supervisor + plist | ping-mem@38a51cd+0095bc8, ping-guard@ef21186 | Disk 83% ≤85%. Daemon ProcessType=Interactive. Supervisor keep-forward. |
+| 1 | Memory sync + MCP auth + session cap | ping-mem@6872209 | 5/5 canonical queries return ≥1 hit (was 0/5). MCP healthy with admin auth. |
+| 2 | Ingestion coverage ≥95% for 5 projects | ping-mem@66d3f1f | 5/5 projects (ping-mem, ping-learn, ping-guard, auto-os, understory) pass verify. |
+| 3 | Ollama self-heal 3-tier | ping-guard@63cd321+06bdaee, ping-mem@472b918 | 3/3 canary trials ≤120s end-to-end. tier_errs 16→0. |
+| 4 | Lifecycle + supervisor + plist | ping-mem@38a51cd+0095bc8, ping-guard@ef21186 | Disk 83%≤85%. Daemon ProcessType=Interactive. Supervisor keep-forward verified. |
+| 5 | Observability — doctor CLI + /ui/health + launchd | ping-mem@191cb0e | 34 gates (up from 29 planned). Exit 0 all-pass, exit 2 on deliberate break. launchd 15-min cadence. |
+| 6 | auto-os integration (service session) | auto-os@921ac91 | pingmem_client + deep_search + schema persist. 50-cycle soak 0 errors. |
+| 7 | E2E regression CI + 30-day soak | ping-mem@72a3989+07e7e28 | 10/10 canonical queries pass (8.09s). Full suite 1973/0/0. soak-monitor installed, day 0. |
+| 8 | Docs + decisions + orphan sweep + tag + handoff | ping-mem@<phase8-sha> | Integration guide §14 added. README op-CLI section. 11 orphan native/* rows swept. Tag v2.0.0 pushed. |
 
-### Pending phases (resume here)
+### Baseline soak
 
-- **Phase 5** — ping-mem-doctor CLI (29 gates, 7 groups) + /ui/health HTMX dashboard + com.ping-mem.doctor.plist. Plan §532-611.
-- **Phase 6** — auto-os integration (service session, cross-project memory). Plan §614-626.
-- **Phase 7** — Soak + regression CI (10 canonical queries as bun test). Plan §630-671. **This is the E2E test** — user flagged ping-mem isn't e2e-tested yet.
-- **Phase 8** — Docs + handoff + tag v2.0.0.
+- **soak_start**: 2026-04-19
+- **target_day_30**: 2026-05-19
+- **Hard gates** (10, must be green 30/30): rest-health, mcp-proxy-stdio, regression-queries-10-of-10, ingestion-coverage-ping-learn, ingestion-coverage-5-projects, self-heal-ollama-reachable, disk-below-90, session-cap-below-80%, supervisor-no-rollback, doctor-launchd-ran
+- **Soft gates** (5, tolerate 6 red days): orbstack-warm-latency, log-rotation-last-7d, pattern-confidence-nonzero, auto-os-cross-project-hit, ping-mem-doctor-exec-time-below-10s
+- Live state: `~/.ping-mem/soak-state.json` (updated daily by `com.ping-mem.soak-monitor`)
 
-## Bugs found & fixed in-phase (not in the plan — surfaced during execution)
+## Open GH issues (follow-ups, not blockers)
 
-1. **MemoryManager SQL alias bug** (Phase 1, commit 6872209): `findRelatedAcrossSessions` had unaliased outer `events` table; SQLite resolved `payload` inside NOT EXISTS to inner `e2` → self-referential → filtered every memory out → all recall queries returned 0 hits. Fixed both fallback and main branches.
-2. **Verify script denominator wrong** (Phase 2, commit 66d3f1f): raw `git ls-files | wc -l` compared ingested to untrackable PDFs/images/binaries. Rewrote to replicate scanner filter (exclude-exts + ignore-dirs + .gitignore/.pingmemignore prefixes + ≤1MB + `git log --all`).
-3. **HealthMonitor fast-tick 60s lag** (Phase 3, commit 472b918): /health component snapshot was 60s behind actual service state, so canary trials missed the 120s gate by 1-3s. Fast-tick 60s→10s.
-4. **ping-guard Ollama chain** (Phase 3, ping-guard@63cd321): prompt didn't instruct models to emit JSON schema → confidence=0 → all tiers exited 3 → fallthrough to rules. Added JSON-schema preamble to ollama-tier.sh. Also fixed manifest detect values (`ok`→`healthy`), removed broken warm-up curl, tightened cadence.
+| Issue | Repo | Summary |
+|-------|------|---------|
+| [ping-mem#126](https://github.com/usorama/ping-mem/issues/126) | ping-mem | Wire regression suite into a GitHub Actions workflow on the self-hosted runner (currently local-only). |
+| [ping-mem#127](https://github.com/usorama/ping-mem/issues/127) | ping-mem | Triage the uncommitted `/system-execute-2026-04-13` diff carried in the working tree — decide to commit, cherry-pick, or discard. Outside this plan's scope. |
+| [auto-os#168](https://github.com/usorama/auto-os/issues/168) | auto-os | Wire paro-jobs runner to consume ping-mem `deep_search` output via cron-adjacent scheduler. |
 
-## Known follow-ups (to be handled in remaining phases, NOT technical debt)
+## Next actions
 
-- 8 orphan `native/<filename>` rows in ping-mem events table from pre-Phase-1 test writes → sweep in Phase 8 cleanup
-- WatchEngine canary-cycle re-entrant skipping (ping-guard side) observed during Phase 3 trials → watch for recurrence in Phase 7 soak
-- periodic-ingest.sh duplicating queue entries during concurrent manual re-ingest → add flock guard in Phase 2 follow-up
+1. **Wait for 30-day soak to go green** (target: 2026-05-19). Monitor reports to `~/.ping-mem/soak-events.log`.
+2. **Merge PR #125** once /pr-zero is clean.
+3. **Triage dirty-tree (ping-mem#127)** — separate decision, does not block merge.
+4. **Resolve ping-mem#126** — wire regression to CI runner (current run is manual / local).
+5. **Resolve auto-os#168** — runner wire-up for paro integration.
 
-## What changed this session (2026-04-18)
+## Artifacts index
 
-Started session on top of an existing PR #125 with 5 commits of plan docs; session added 5 code commits across ping-mem and 3 across ping-guard. Orchestrator dispatched 2 per-phase sub-agents (Phase 2 + 3 + 4) and fixed 2 bugs directly (SQL alias, HealthMonitor tick). Hook changes outside the repo also landed: `~/.claude/hooks/ping-mem-native-sync.sh`, `ping-mem-capture-stop.sh`, `ping-mem-memory-sync-posttooluse.sh` (NEW), and `phase-gate-reminder.sh` (Stop hook reminder).
-
-## Next Actions
-
-1. Begin Phase 5 sub-agent with the prepared prompt (last session had it queued but user interrupted — it's in session transcript or re-derive from plan §532-611).
-2. After Phase 5: continue Phase 6, 7, 8 per the same workflow.
-3. Don't declare remediation complete until Phase 7's 10 canonical bun-test queries pass (the real E2E gate).
+| File | Purpose |
+|------|---------|
+| `docs/plans/2026-04-18-ping-mem-complete-remediation-plan.md` | Source plan (1051 lines, 8 phases) |
+| `docs/AGENT_INTEGRATION_GUIDE.md` §14 | Operational subsystems reference (memory-sync, Ollama 3-tier, doctor, soak, service session) |
+| `README.md` — Operational CLI section | `bun run doctor`, `bun run health`, regression test command |
+| `tests/regression/memory-sync-coverage.test.ts` | 10-query bun test regression suite |
+| `tests/regression/soak-acceptance.md` | 30-day soak hard/soft gate contract |
+| `src/cli/commands/doctor.ts` | Doctor CLI entry point (34 gates) |
+| `src/doctor/` | Gate modules (service, data, selfheal, infra, loghyg, regression, etc.) |
+| `src/http/ui/health.ts` | `/ui/health` HTMX dashboard |
+| `scripts/soak-monitor.sh` | Daily soak state computation |
+| `~/.ping-mem/doctor-runs/YYYYMMDD.jsonl` | Doctor run history (ring buffer 96 slots / 24h at 15-min cadence) |
+| `~/.ping-mem/soak-state.json` | Current soak state (days_green, hard gate streaks) |
+| `.ai/decisions.jsonl` | Per-phase JSONL decisions log (8 entries appended in Phase 8) |
