@@ -16,6 +16,10 @@ const COMMIT_COVERAGE_MIN = 0.95;
 const FILE_COVERAGE_MIN = 0.95;
 const LAST_INGEST_MAX_AGE_H = 48;
 const SYNC_LAG_MAX_MIN = 60;
+// Marker fallback: markers only update on content change, so a stable repo
+// with a healthy hook will show stale markers. 24h catches "hook actually
+// broken" without false-alarming on "nothing changed today".
+const SYNC_MARKER_FALLBACK_MAX_MIN = 24 * 60;
 
 interface ProjectStats {
   projectId: string;
@@ -264,17 +268,25 @@ export const dataGates: DoctorGate[] = [
   {
     id: "data.sync-lag",
     group: "data",
-    description: `Native-sync hook ran within ${SYNC_LAG_MAX_MIN} min (heartbeat or content change)`,
+    description: `Native-sync hook ran within ${SYNC_LAG_MAX_MIN} min (heartbeat) or changed content within ${SYNC_MARKER_FALLBACK_MAX_MIN / 60} h`,
     async run(ctx) {
       // Measure "when did the native-sync hook last RUN" (not "when was new content ingested").
-      // The hook writes sync-markers only on content change, so markers alone are a poor signal
-      // for a mostly-stable repo. sync-session-id is re-written every hook run, giving a reliable
-      // "did sync run" heartbeat. Fall back to the newest marker file if session-id is missing
-      // (freshly installed / never run before).
+      // Prefer a dedicated sync-heartbeat touched every hook run; fall back to sync-session-id
+      // (only rewritten on session rotation) and finally to newest sync-marker (only updated
+      // on content change — generous 24h threshold so stable repos don't false-alarm).
+      const heartbeatFile = path.join(ctx.pingMemDir, "sync-heartbeat");
       const sessionIdFile = path.join(ctx.pingMemDir, "sync-session-id");
       let newestMs = 0;
       let source = "none";
-      if (fs.existsSync(sessionIdFile)) {
+      if (fs.existsSync(heartbeatFile)) {
+        try {
+          newestMs = fs.statSync(heartbeatFile).mtimeMs;
+          source = "sync-heartbeat";
+        } catch {
+          /* fall through */
+        }
+      }
+      if (newestMs === 0 && fs.existsSync(sessionIdFile)) {
         try {
           newestMs = fs.statSync(sessionIdFile).mtimeMs;
           source = "sync-session-id";
@@ -322,13 +334,16 @@ export const dataGates: DoctorGate[] = [
         source = "marker-fallback";
       }
       const ageMin = (Date.now() - newestMs) / 60_000;
-      const pass = ageMin <= SYNC_LAG_MAX_MIN;
+      // Heartbeat/session-id want <60min (hook should run frequently).
+      // Marker fallback wants <24h (stable repo, no recent content change is fine).
+      const threshold = source === "marker-fallback" ? SYNC_MARKER_FALLBACK_MAX_MIN : SYNC_LAG_MAX_MIN;
+      const pass = ageMin <= threshold;
       return {
         status: pass ? "pass" : "fail",
-        detail: `${source} ${ageMin.toFixed(1)} min old, ${fileCount} markers`,
+        detail: `${source} ${ageMin.toFixed(1)} min old, ${fileCount} markers (threshold ${threshold}min)`,
         metrics: {
           ageMin: Number(ageMin.toFixed(2)),
-          maxMin: SYNC_LAG_MAX_MIN,
+          maxMin: threshold,
           fileCount,
           source,
         },

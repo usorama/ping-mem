@@ -14,8 +14,13 @@ import * as path from "node:path";
 import { loadAllGates, type DoctorGate, type GateContext, type GateResult } from "../../doctor/gates.js";
 import { dispatchAlerts, openAlertsDb } from "../../doctor/alerts.js";
 
-const TOTAL_BUDGET_MS = 20_000;
-const PER_GATE_TIMEOUT_MS = 10_000;
+// Doctor budgets are sized for the worst-case gate: the serialized regression
+// group (10 queries × ~1-5s each under cold Ollama embedding queue). Each
+// regression gate's own timeout timer starts at Promise.all dispatch, so q10
+// must survive the whole 9×waits + its own embed call before the per-gate
+// race kills it. See src/doctor/gates/regression.ts runSerialized.
+const TOTAL_BUDGET_MS = 60_000;
+const PER_GATE_TIMEOUT_MS = 20_000;
 const RUN_RING_BUFFER_SIZE = 96; // 24h at 15-min cadence
 
 interface DoctorRunRecord {
