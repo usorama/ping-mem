@@ -155,4 +155,46 @@ describe("rateLimiter", () => {
     const res2 = await app.request("/test", { method: "POST", headers });
     expect(res2.status).toBe(429);
   });
+
+  test("admin bucket is separate from non-admin — admin bursts don't starve non-admin", async () => {
+    const app = new Hono();
+    const name = `test-admin-${Date.now()}-${Math.random()}`;
+    app.use(
+      "/*",
+      rateLimiter({
+        name,
+        maxRequests: 2,
+        adminMaxRequests: 10,
+        windowMs: 60000,
+        isAdmin: (c) => c.req.header("x-admin") === "true",
+      }),
+    );
+    app.get("/test", (c) => c.json({ ok: true }));
+
+    const ip = "10.0.0.20";
+    const adminHeaders = { "x-forwarded-for": ip, "x-admin": "true" };
+    const userHeaders = { "x-forwarded-for": ip };
+
+    // Admin burns 5 requests (over non-admin cap of 2, under admin cap of 10).
+    for (let i = 0; i < 5; i++) {
+      const res = await app.request("/test", { headers: adminHeaders });
+      expect(res.status).toBe(200);
+    }
+
+    // Non-admin from SAME IP should still have its own full 2-request bucket.
+    const r1 = await app.request("/test", { headers: userHeaders });
+    expect(r1.status).toBe(200);
+    const r2 = await app.request("/test", { headers: userHeaders });
+    expect(r2.status).toBe(200);
+    const r3 = await app.request("/test", { headers: userHeaders });
+    expect(r3.status).toBe(429); // non-admin bucket exhausted independently
+
+    // Admin can keep going up to its higher ceiling.
+    for (let i = 0; i < 5; i++) {
+      const res = await app.request("/test", { headers: adminHeaders });
+      expect(res.status).toBe(200);
+    }
+    const adminOver = await app.request("/test", { headers: adminHeaders });
+    expect(adminOver.status).toBe(429); // admin bucket now over 10
+  });
 });

@@ -58,8 +58,8 @@ export interface IngestionResult {
 export interface IngestionOptions {
   scanOptions?: ProjectScanOptions;
   forceReingest?: boolean; // Ignore cached manifest
-  maxCommits?: number; // Max git commits to ingest (default 200)
-  maxCommitAgeDays?: number; // Only include commits from last N days
+  maxCommits?: number; // Max git commits to ingest (default 10000, env: PING_MEM_MAX_COMMITS)
+  maxCommitAgeDays?: number; // Only include commits from last N days (default 365, env: PING_MEM_MAX_COMMIT_AGE_DAYS; 0 disables filter)
   skipManifestSave?: boolean; // Defer manifest save to caller (Phase 2 manifest fix)
 }
 

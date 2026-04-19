@@ -140,17 +140,36 @@ export class HealthMonitor {
     // point count against a stale pre-stop baseline, causing spurious drift alerts.
     this.baselineQdrantCount = null;
 
+    // Phase 3 remediation: fast-tick at 10s so /health components snapshot
+    // reflects a container going unhealthy within a canary fault-injection
+    // window (≤120s). Previously 60s meant a fault could take ≥60s just to
+    // appear in /health, and ping-guard's canary trial was timing out at
+    // 121–123s because the health gauge lagged the actual self-heal.
+    // Env-overridable via PING_MEM_HEALTH_FAST_TICK_MS.
+    const fastTickMs = Number.parseInt(
+      process.env["PING_MEM_HEALTH_FAST_TICK_MS"] ?? "10000",
+      10,
+    );
+    const qualityTickMs = Number.parseInt(
+      process.env["PING_MEM_HEALTH_QUALITY_TICK_MS"] ?? "300000",
+      10,
+    );
+    const safeFastTick =
+      Number.isFinite(fastTickMs) && fastTickMs >= 1000 ? fastTickMs : 10_000;
+    const safeQualityTick =
+      Number.isFinite(qualityTickMs) && qualityTickMs >= 10_000 ? qualityTickMs : 300_000;
+
     this.fastTimer = setInterval(() => {
       this.tick().catch((err) => {
         log.error("Fast tick threw unexpectedly", { error: err instanceof Error ? err.message : String(err) });
       });
-    }, 60_000);
+    }, safeFastTick);
 
     this.qualityTimer = setInterval(() => {
       this.qualityTick().catch((err) => {
         log.error("Quality tick threw unexpectedly", { error: err instanceof Error ? err.message : String(err) });
       });
-    }, 300_000);
+    }, safeQualityTick);
 
     this.tick().catch((err) => {
       log.error("Initial fast tick failed", { error: err instanceof Error ? err.message : String(err) });

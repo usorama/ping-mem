@@ -286,6 +286,34 @@ bun run typecheck    # Type check (0 errors required)
 bun run start        # Start server
 ```
 
+## Operational CLI (v2.0.0 remediation)
+
+The 2026-04 complete remediation (PR #125, 8 phases) added a 34-gate operational health board and a 30-day soak acceptance framework.
+
+```bash
+# 34-gate health board — exit 0 (all pass) or 2 (any fail)
+bun run doctor
+bun run doctor --json          # machine-readable output
+bun run doctor --gate service.rest-health   # single-gate mode
+bun run doctor --quiet         # suppress pass lines
+bun run doctor --continuous    # loop every 15 min
+
+# Shallow health for Docker/CI liveness probes
+bun run health
+
+# 10-query E2E regression (canonical queries that must always return hits)
+bun test tests/regression/
+
+# See tests/regression/soak-acceptance.md for the 30-day soak contract.
+# Live soak state: ~/.ping-mem/soak-state.json
+```
+
+The launchd job `com.ping-mem.doctor.plist` runs `bun run doctor` every 15 minutes and writes JSONL rollups to `~/.ping-mem/doctor-runs/YYYYMMDD.jsonl`. The companion `com.ping-mem.soak-monitor` job reads that JSONL daily to compute the 30-day green streak.
+
+### Memory layer auto-discovery
+
+Every Claude Code native memory file (`~/.claude/memory/**`, `~/.claude/projects/-Users-umasankr-Projects-*/memory/**`, and `~/.claude/learnings/**`) is synced into ping-mem automatically by the native-sync hooks. Keys are prefixed by category (`native/global/`, `native/topic/<slug>`, `native/proj/<project>/<slug>`, `native/learn/<domain>`) so you can find any layer via `context_search` or the UI. See `docs/AGENT_INTEGRATION_GUIDE.md` §14 for the full contract.
+
 ## License
 
 MIT

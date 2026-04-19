@@ -122,6 +122,47 @@ export type AppEnv = {
   };
 };
 
+/**
+ * Distinct error class so handleError can preserve the operational message
+ * instead of sanitizing it to "An internal error occurred (ref: XXX)". The
+ * message carries retry guidance the caller needs ("still running in
+ * background — do not retry state-changing ops").
+ */
+export class TimeoutError extends Error {
+  readonly retrySafe: boolean;
+  constructor(message: string, retrySafe: boolean) {
+    super(message);
+    this.name = "TimeoutError";
+    this.retrySafe = retrySafe;
+  }
+}
+
+/**
+ * Race a promise against a timeout. On timeout, rejects with TimeoutError
+ * AND clears the timer so it doesn't leak per request. The underlying work
+ * still runs to completion (we can't cancel without a cooperative signal),
+ * so the returned error signals retry-safety to the caller so naive clients
+ * don't double-invoke state-changing ops.
+ */
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+  retrySafe = false,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new TimeoutError(message, retrySafe)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export class RESTPingMemServer {
   private app: Hono<AppEnv>;
   private config: HTTPServerConfig & PingMemServerConfig;
@@ -306,7 +347,8 @@ export class RESTPingMemServer {
       c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
       c.header("Cross-Origin-Opener-Policy", "same-origin");
       c.header("Cross-Origin-Resource-Policy", "same-origin");
-      if (process.env["PING_MEM_BEHIND_PROXY"] === "true") {
+      // SEC-8: Send HSTS in production (behind proxy) and when NODE_ENV=production
+      if (process.env["PING_MEM_BEHIND_PROXY"] === "true" || process.env["NODE_ENV"] === "production") {
         c.header("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
       }
     });
@@ -342,11 +384,18 @@ export class RESTPingMemServer {
         this.app.use("/ui/*", async (c, next) => {
           const authHeader = c.req.header("Authorization") ?? "";
           if (authHeader.startsWith("Basic ")) {
-            const decoded = atob(authHeader.slice(6));
-            const [user, ...passParts] = decoded.split(":");
-            const pass = passParts.join(":");
-            if (timingSafeStringEqual(user ?? "", adminUser) && timingSafeStringEqual(pass ?? "", adminPass)) {
-              return next();
+            let decoded = "";
+            try {
+              decoded = atob(authHeader.slice(6));
+            } catch {
+              // Malformed base64 → fall through to 401, same as missing header.
+            }
+            if (decoded) {
+              const [user, ...passParts] = decoded.split(":");
+              const pass = passParts.join(":");
+              if (timingSafeStringEqual(user ?? "", adminUser) && timingSafeStringEqual(pass ?? "", adminPass)) {
+                return next();
+              }
             }
           }
           c.header("WWW-Authenticate", 'Basic realm="ping-mem UI"');
@@ -355,23 +404,83 @@ export class RESTPingMemServer {
       }
     } else {
       log.warn("No API key configured. All routes are unauthenticated.");
+      // Guard resource-intensive endpoints even without API key auth.
+      // If admin credentials are set, require them for mining and dreaming.
+      const adminUser = process.env.PING_MEM_ADMIN_USER;
+      const adminPass = process.env.PING_MEM_ADMIN_PASS;
+      if (adminUser && adminPass) {
+        const adminGuard = async (c: Parameters<Parameters<typeof this.app.use>[1]>[0], next: () => Promise<void>) => {
+          const authHeader = c.req.header("Authorization") ?? "";
+          if (authHeader.startsWith("Basic ")) {
+            // Narrow try/catch — only atob can throw on malformed base64.
+            // Let surprises from timingSafeStringEqual/etc. bubble to handleError.
+            let decoded = "";
+            try {
+              decoded = atob(authHeader.slice(6));
+            } catch {
+              // Fall through to 401 below.
+            }
+            if (decoded) {
+              const [user, ...passParts] = decoded.split(":");
+              const pass = passParts.join(":");
+              if (timingSafeStringEqual(user ?? "", adminUser) && timingSafeStringEqual(pass ?? "", adminPass)) {
+                return next();
+              }
+            }
+          }
+          c.header("WWW-Authenticate", 'Basic realm="ping-mem admin"');
+          return c.json({ error: "Unauthorized" }, 401);
+        };
+        this.app.use("/api/v1/mining/*", adminGuard);
+        this.app.use("/api/v1/dreaming/*", adminGuard);
+      }
     }
 
     // CSRF protection for browser-based UI routes
     this.app.use("/ui/*", csrfProtection());
 
-    // Higher rate limit for auto-capture hooks (300 req/min)
+    // Local admin-authenticated callers (hooks, doctor, dev scripts) bypass
+    // the IP-based limiter — they're trusted and generate legitimate bursts
+    // (e.g., full memory re-sync of hundreds of files on session start).
+    const adminUser = process.env.PING_MEM_ADMIN_USER;
+    const adminPass = process.env.PING_MEM_ADMIN_PASS;
+    const isAdminAuthed = (c: Context): boolean => {
+      if (!adminUser || !adminPass) return false;
+      const authHeader = c.req.header("Authorization") ?? "";
+      if (!authHeader.startsWith("Basic ")) return false;
+      try {
+        const decoded = atob(authHeader.slice(6));
+        const [user, ...passParts] = decoded.split(":");
+        const pass = passParts.join(":");
+        return (
+          timingSafeStringEqual(user ?? "", adminUser) &&
+          timingSafeStringEqual(pass ?? "", adminPass)
+        );
+      } catch {
+        return false;
+      }
+    };
+
+    // Higher rate limit for auto-capture hooks (300 req/min non-admin, 1500/min admin).
+    // Admin callers (hooks, doctor, dev scripts) get a bounded higher ceiling instead of
+    // a full bypass — keeps the route protected if admin creds leak.
     this.app.use("/api/v1/observations/*", rateLimiter({
       name: "observations",
       maxRequests: 300,
       windowMs: 60_000,
+      adminMaxRequests: 1500,
+      isAdmin: isAdminAuthed,
     }));
 
-    // Rate limit state-changing API endpoints (60 req/min per IP)
+    // Rate limit state-changing API endpoints (60 req/min per IP non-admin, 600/min admin).
+    // Policy: every /api/v1/* caller faces SOME limit. Admin gets 10× headroom for
+    // legitimate bursts (full memory re-sync, ingestion sweeps) but never unbounded.
     this.app.use("/api/v1/*", rateLimiter({
       name: "api-v1",
       maxRequests: 60,
       windowMs: 60_000,
+      adminMaxRequests: 600,
+      isAdmin: isAdminAuthed,
     }));
   }
 
@@ -1082,10 +1191,21 @@ export class RESTPingMemServer {
 
         const forceReingest = parseResult.data.forceReingest;
 
-        // Route through IngestionQueue to prevent concurrent Neo4j writes (deadlock)
-        const result = this.ingestionQueue
-          ? await this.ingestionQueue.enqueueAndWait({ projectDir, forceReingest })
-          : await this.config.ingestionService.ingestProject({ projectDir, forceReingest });
+        // Route through IngestionQueue to prevent concurrent Neo4j writes (deadlock).
+        // Ingestion keeps running in the background after timeout — callers should
+        // treat timeout as "still running" and NOT retry, or they'll double-write.
+        const INGEST_TIMEOUT_MS = 300_000; // 5 min
+        const ingestPromise = this.ingestionQueue
+          ? this.ingestionQueue.enqueueAndWait({ projectDir, forceReingest })
+          : this.config.ingestionService.ingestProject({ projectDir, forceReingest });
+        // retrySafe=false — ingestion is state-changing; a retry would cause
+        // double-writes to Neo4j + Qdrant. Client should poll run status instead.
+        const result = await withTimeout(
+          ingestPromise,
+          INGEST_TIMEOUT_MS,
+          "Ingestion timed out after 5 minutes — still running in background; poll /api/v1/ingestion/run/:id for status, do NOT retry",
+          false,
+        );
 
         if (result) {
           if (this.config.adminStore) {
@@ -3126,7 +3246,7 @@ export class RESTPingMemServer {
           }
           this.dreamingEngine = createDreamingEngine(
             memoryManager,
-            null, // ContradictionDetector — requires OPENAI_API_KEY, optional
+            this.config.contradictionDetector ?? null, // ContradictionDetector — Ollama or OpenAI
             this.userProfileStore,
             this.eventStore
           );
@@ -3681,7 +3801,7 @@ export class RESTPingMemServer {
           knowledgeStore: this.knowledgeStore,
           qdrantClient: this.qdrantClient,
           ccMemoryBridge: null,
-          contradictionDetector: null,
+          contradictionDetector: this.config.contradictionDetector ?? null,
           writeLockManager: this.writeLockManager,
         };
 
@@ -3702,11 +3822,20 @@ export class RESTPingMemServer {
           new MiningToolModule(state),
         ];
 
+        const TOOL_INVOKE_TIMEOUT_MS = 120_000; // 2 min — matches proxy-cli client-side timeout
         const args = parseResult.data.args;
         for (const mod of modules) {
           const result = mod.handle(name, args);
           if (result !== undefined) {
-            const data = await result;
+            // retrySafe=false — most MCP tools in the module set are state-changing
+            // (context_save, memory_consolidate, knowledge_ingest, trigger_causal_discovery).
+            // Conservative default prevents accidental double-writes on retry.
+            const data = await withTimeout(
+              result,
+              TOOL_INVOKE_TIMEOUT_MS,
+              `Tool '${name}' timed out after 2 minutes — operation may still be running; do NOT retry state-changing tools`,
+              false,
+            );
 
             // Sync session state back from tool module to REST server.
             // When context_session_start runs via /invoke, it updates
@@ -3974,13 +4103,29 @@ export class RESTPingMemServer {
     const statusCode = this.getStatusCode(error);
     const message = error instanceof Error ? error.message : "Unknown error";
     const isClientError = statusCode >= 400 && statusCode < 500;
+    // TimeoutError messages carry retry guidance ("still running") that the
+    // client NEEDS to avoid double-writes. Don't sanitize to "internal error".
+    const isTimeout = error instanceof Error && error.name === "TimeoutError";
 
-    if (!isClientError) {
+    if (!isClientError && !isTimeout) {
       const requestId = crypto.randomUUID().slice(0, 8);
       console.error(`[REST Server] Error [${requestId}] ${c.req.method} ${c.req.path}:`, error);
       return c.json(
         { error: this.getErrorName(statusCode), message: `An internal error occurred (ref: ${requestId})` },
         statusCode as ContentfulStatusCode
+      );
+    }
+
+    if (isTimeout) {
+      const retrySafe = (error as TimeoutError).retrySafe;
+      console.warn(`[REST Server] Timeout: ${c.req.method} ${c.req.path} — ${message}`);
+      return c.json(
+        {
+          error: "Gateway Timeout",
+          message,
+          retrySafe,
+        },
+        statusCode as ContentfulStatusCode,
       );
     }
 
@@ -3998,6 +4143,7 @@ export class RESTPingMemServer {
     if (error instanceof Error) {
       // Use error class name or code property for reliable mapping
       const name = error.name;
+      if (name === "TimeoutError") return 504;
       if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError") return 404;
       if (name === "QuotaExhaustedError" || name === "WriteLockConflictError") return 409;
       if (name === "EvidenceGateRejectionError" || name === "ScopeViolationError") return 403;

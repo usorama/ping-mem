@@ -39,6 +39,7 @@ import { registerInsightsPartialRoutes } from "./partials/insights.js";
 import { registerMiningRoutes } from "./mining.js";
 import { registerMiningPartialRoutes } from "./partials/mining.js";
 import { registerProfileRoutes } from "./profile.js";
+import { registerHealthPage, registerHealthLatestPartial, registerHealthRunNow } from "./health.js";
 
 export interface UIDependencies {
   eventStore: EventStore;
@@ -168,4 +169,9 @@ export function registerUIRoutes(app: Hono<AppEnv>, deps: UIDependencies): void 
 
   // Profile
   app.get("/ui/profile", registerProfileRoutes(deps));
+
+  // Doctor Health dashboard (reads ~/.ping-mem/doctor-runs/*.jsonl)
+  app.get("/ui/health", registerHealthPage());
+  app.get("/ui/partials/health/latest", registerHealthLatestPartial());
+  app.post("/ui/partials/health/run", registerHealthRunNow());
 }

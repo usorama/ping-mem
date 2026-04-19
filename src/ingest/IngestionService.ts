@@ -13,6 +13,7 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { IngestionOrchestrator, type IngestionResult } from "./IngestionOrchestrator.js";
+import { resolveDefaultMaxCommits, resolveDefaultMaxCommitAgeDays } from "./GitHistoryReader.js";
 import { TemporalCodeGraph } from "../graph/TemporalCodeGraph.js";
 import { StructuralAnalyzer } from "../graph/StructuralAnalyzer.js";
 import { CodeIndexer } from "../search/CodeIndexer.js";
@@ -43,8 +44,18 @@ export interface IngestionServiceOptions {
 export interface IngestProjectOptions {
   projectDir: string;
   forceReingest?: boolean;
-  maxCommits?: number; // Max git commits to ingest (default 200)
-  maxCommitAgeDays?: number; // Only include commits from last N days (default: 30)
+  /**
+   * Max git commits to ingest.
+   * Default: 10000 (env override: PING_MEM_MAX_COMMITS).
+   * Phase 2: raised from 200 to achieve ≥95% commit coverage.
+   */
+  maxCommits?: number;
+  /**
+   * Only include commits from last N days. Default: 365 (env override:
+   * PING_MEM_MAX_COMMIT_AGE_DAYS). Use 0 to disable the age filter entirely.
+   * Phase 2: raised from 30 days so multi-year repos (ping-learn) re-ingest fully.
+   */
+  maxCommitAgeDays?: number;
 }
 
 export interface IngestProjectResult {
@@ -123,12 +134,19 @@ export class IngestionService {
     if (options.forceReingest !== undefined) {
       ingestOptions.forceReingest = options.forceReingest;
     }
-    if (options.maxCommits !== undefined) {
-      ingestOptions.maxCommits = options.maxCommits;
-    }
-    ingestOptions.maxCommitAgeDays = options.maxCommitAgeDays ?? 30;
+    // Phase 2: Resolve defaults from env vars if caller didn't specify.
+    // Always pass explicit values through to the orchestrator so GitHistoryReader
+    // sees the *effective* value (behaviorally-unified default).
+    const effectiveMaxCommits = options.maxCommits ?? resolveDefaultMaxCommits();
+    const effectiveMaxCommitAgeDays =
+      options.maxCommitAgeDays ?? resolveDefaultMaxCommitAgeDays();
+    ingestOptions.maxCommits = effectiveMaxCommits;
+    ingestOptions.maxCommitAgeDays = effectiveMaxCommitAgeDays;
     if (options.maxCommitAgeDays === undefined) {
-      log.info("maxCommitAgeDays not specified — defaulting to 30 days (older commits will not be ingested)");
+      log.info(
+        `maxCommitAgeDays not specified — defaulting to ${effectiveMaxCommitAgeDays} days ` +
+          `(env: PING_MEM_MAX_COMMIT_AGE_DAYS; 0 disables the filter)`,
+      );
     }
 
     // Phase 2: skipManifestSave — defer manifest until after Neo4j + Qdrant succeed

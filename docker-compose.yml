@@ -84,6 +84,11 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       # Multi-agent memory settings (v2)
       - PING_MEM_MAX_AGENTS=${PING_MEM_MAX_AGENTS:-100}
+      # Phase 5: observability — tell the UI where the doctor JSONL runs live
+      # inside the container. The runs are written on the host by launchd
+      # (`com.ping-mem.doctor`), and are naturally visible here because the
+      # host bind-mount below exposes the whole ~/.ping-mem tree at /data.
+      - PING_MEM_DOCTOR_RUNS_DIR=/data/doctor-runs
     volumes:
       - /Users/umasankr/.ping-mem:/data
       - /Users/umasankr/Projects:/projects:rw

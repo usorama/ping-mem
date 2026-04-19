@@ -762,10 +762,103 @@ await context_session_end({ reason: "OAuth implementation complete" });
 
 ---
 
-## 14. Version History
+## 14. Operational Subsystems (added in v2.0.0 remediation)
+
+The 2026-04 complete remediation (plan `docs/plans/2026-04-18-ping-mem-complete-remediation-plan.md`, PR #125, 8 phases) added five operational subsystems that every integrating agent should know about. They are runtime-verified — not aspirational.
+
+### 14.1 Native → ping-mem memory sync scope
+
+Every file under `~/.claude/projects/-Users-umasankr-Projects-*/memory/` and `~/.claude/learnings/` is auto-synced into ping-mem by the `ping-mem-native-sync.sh` Stop hook and the `ping-mem-memory-sync-posttooluse.sh` PostToolUse hook. Entries are stored with deterministic key prefixes so they can be searched per-category:
+
+| Source directory | Key prefix | Example key |
+|------------------|------------|-------------|
+| `~/.claude/memory/core.md` + `~/.claude/memory/topics/*.md` | `native/global/` or `native/topic/<slug>` | `native/topic/planning-rules` |
+| `~/.claude/projects/-Users-umasankr-Projects-<project>/memory/*.md` | `native/proj/<project-slug>/<slug>` | `native/proj/ping-mem/project_ping_mem_remediation` |
+| `~/.claude/learnings/domains/*.json` | `native/learn/<domain>` | `native/learn/typescript` |
+
+Orphan rows (just `native/<filename>` with no category) are legacy pre-Phase-1 test writes and were swept in Phase 8. Any new entry must use the category prefix.
+
+Verify coverage from any agent:
+
+```bash
+curl -sS -u "$PING_MEM_ADMIN_USER:$PING_MEM_ADMIN_PASS" \
+  'http://localhost:3003/api/v1/search?query=native%2Fproj%2Fping-mem&limit=5'
+```
+
+### 14.2 Ollama self-heal — 3-tier chain
+
+ping-mem no longer ships with a single-pass Ollama probe. The reachability check executed inside `com.ping-mem.doctor.plist` exercises three tiers (see `ping-guard/manifest/ollama-tier.sh` and `src/doctor/gates/service.ts`):
+
+| Tier | Gate ID | What it proves | Remediation on fail |
+|------|---------|----------------|----------------------|
+| Tier 1 | `service.ollama-reachable` | `http://localhost:11434/api/tags` returns 200 within 500 ms | `brew services restart ollama` |
+| Tier 2 | `service.ollama-model-qwen3` | `qwen3:8b` is listed in `/api/tags` | `ollama pull qwen3:8b` |
+| Tier 3 | `selfheal.ollama-chain-reachable` | End-to-end: POST `/api/generate` returns a JSON-schema-valid response in ≤120 s | ping-guard Tier 2c fallback (`openrouter-tier.sh`) or Tier 2d (Kimi K2.5) |
+
+A Tier-3 red for two consecutive days resets the 30-day soak clock.
+
+### 14.3 `ping-mem doctor` CLI — 34-gate health board
+
+Doctor is the canonical operational readout — all five subsystems report a binary pass/fail through it. Source: `src/cli/commands/doctor.ts`.
+
+```bash
+bun run doctor                   # 34 gates, table output, exit 0/2
+bun run doctor --json            # JSON output for CI or log aggregation
+bun run doctor --gate service.rest-health  # single-gate mode
+bun run doctor --quiet           # suppress pass lines, exit code unchanged
+bun run doctor --continuous      # loop every 15 min, same cadence as launchd
+```
+
+Exit codes: `0` = every gate pass, `2` = at least one fail. `1` is reserved for internal doctor errors (bad config, missing deps).
+
+Runs are persisted as JSONL under `~/.ping-mem/doctor-runs/YYYYMMDD.jsonl`. The launchd job `com.ping-mem.doctor.plist` runs every 15 minutes (`StartInterval=900`) and is a dependency of the 30-day soak.
+
+### 14.4 30-day soak definition
+
+The "don't touch for 30 days" bar is defined in `tests/regression/soak-acceptance.md`:
+
+- 10 HARD gates — all must be green for 30 consecutive days. Any hard gate red for ≥2 days resets `soak_start` to today.
+- 5 SOFT gates — tolerate up to 6 red days out of 30.
+- Current state lives in `~/.ping-mem/soak-state.json` (written by `scripts/soak-monitor.sh`, which runs daily via `com.ping-mem.soak-monitor`).
+
+Agents that need to check readiness:
+
+```bash
+jq '{days_green, days_to_30, soak_start, hard_gates_red:[.hard_gates|to_entries[]|select(.value.last_red!=null)|.key]}' \
+  ~/.ping-mem/soak-state.json
+```
+
+The soak is considered green when `days_green >= 30`, all HARD gates currently pass, and SOFT red-days ≤ 6.
+
+### 14.5 External agent integration — long-lived service session
+
+External agents (auto-os, paro, CI runners) should use the `auto_os/tools/pingmem_client.py` pattern rather than rebuilding the admin-auth handshake per call. The pattern:
+
+- Long-lived HTTP session (`requests.Session`) with admin Basic Auth reused across calls
+- Env-variable fallback chain: `PING_MEM_ADMIN_USER`/`PING_MEM_ADMIN_PASS` → `~/Projects/.creds/ping-mem-admin-creds` → hard fail (no silent fallback to unauthenticated)
+- `deep_search` and `context_save` helpers that always pass the session ID and persist a `native/…` key prefix
+
+For non-Python agents, the equivalent shape is:
+
+```typescript
+import { createRESTClient } from "ping-mem/client";
+const client = createRESTClient({
+  baseUrl: process.env.PING_MEM_REST_URL ?? "http://localhost:3003",
+  adminUser: process.env.PING_MEM_ADMIN_USER,
+  adminPass: process.env.PING_MEM_ADMIN_PASS
+});
+// Reuse `client` for the lifetime of the agent; do NOT create a new client per call.
+```
+
+Every external agent must call `context_session_start` once, reuse the returned session ID, and call `context_session_end` on shutdown. The 30-day soak HARD gate `session-cap-below-80%` enforces this — abandoned sessions raise the utilization signal.
+
+---
+
+## 15. Version History
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.0.0-remediation | 2026-04-19 | Complete remediation (plan 2026-04-18, PR #125, 8 phases). Added: native memory-sync scope + key prefixes, Ollama 3-tier self-heal, `ping-mem doctor` 34-gate CLI, 30-day soak acceptance, external agent service-session pattern. All 8 phases closed with binary evidence. |
 | 2.0.0 | 2026-02-13 | Consolidated guide from 3 docs. Added: path-independent projectId, symlink resolution, Qdrant batch upserts, Neo4j UNWIND batching, configurable maxCommits (default 200), utility scripts, complete REST API reference, all 30 MCP tools, performance tuning, Docker integration details |
 | — | 2026-02-12 | Session fixes: path-independent projectId, macOS symlink handling, Qdrant 400 fix, Neo4j UNWIND batching, maxCommits option |
 | 1.0.0 | 2026-02-01 | Initial agent workflow documentation (split across 3 files) |

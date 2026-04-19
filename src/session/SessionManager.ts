@@ -51,10 +51,12 @@ export interface SessionManagerConfig {
  * Default configuration
  */
 const DEFAULT_CONFIG: Required<Omit<SessionManagerConfig, "eventStore">> = {
-  maxActiveSessions: 10,
+  maxActiveSessions: 50,
   autoCheckpointInterval: 300000, // 5 minutes
   sessionTtlMs: 3_600_000, // 1 hour
 };
+
+const REAPER_INTERVAL_MS = 120_000;
 
 // ============================================================================
 // Session Manager Implementation
@@ -71,6 +73,7 @@ export class SessionManager {
   private checkpointTimers: Map<SessionId, NodeJS.Timeout>;
   /** Promise-chain mutex to serialize startSession and prevent TOCTOU races on max-sessions check */
   private sessionMutex: Promise<void>;
+  private reaperTimer: NodeJS.Timeout | null;
 
   constructor(config?: SessionManagerConfig) {
     this.eventStore = config?.eventStore ?? createInMemoryEventStore();
@@ -79,6 +82,15 @@ export class SessionManager {
     this.activeSessionId = null;
     this.checkpointTimers = new Map();
     this.sessionMutex = Promise.resolve();
+    this.reaperTimer = this.config.sessionTtlMs > 0
+      ? setInterval(() => {
+          this.cleanup().catch((err) => {
+            log.warn("Session reaper cleanup failed", { error: String(err) });
+          });
+        }, REAPER_INTERVAL_MS)
+      : null;
+    // Allow Node to exit without waiting for the reaper
+    this.reaperTimer?.unref?.();
   }
 
   /**
@@ -628,6 +640,10 @@ export class SessionManager {
       clearInterval(timer);
     }
     this.checkpointTimers.clear();
+    if (this.reaperTimer) {
+      clearInterval(this.reaperTimer);
+      this.reaperTimer = null;
+    }
     // Does NOT close EventStore — caller that created it owns its lifecycle.
   }
 

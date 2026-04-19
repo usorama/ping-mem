@@ -1392,17 +1392,21 @@ export class MemoryManager {
     if (keywords.length === 0) {
       const fallbackText = text.toLowerCase();
       const db = this.eventStore.getDatabase();
+      // Outer table MUST be aliased. Without an alias, SQLite resolves the
+      // unqualified `payload` reference inside NOT EXISTS to the inner
+      // `events e2` rather than the outer row — making the subquery
+      // self-referential and always true, which drops every candidate.
       const stmt = db.prepare(`
-        SELECT payload FROM events
-        WHERE event_type = 'MEMORY_SAVED'
-        AND session_id != $excludeSession
-        AND JSON_EXTRACT(payload, '$.key') NOT LIKE '%::superseded::%'
+        SELECT e1.payload FROM events AS e1
+        WHERE e1.event_type = 'MEMORY_SAVED'
+        AND e1.session_id != $excludeSession
+        AND JSON_EXTRACT(e1.payload, '$.key') NOT LIKE '%::superseded::%'
         AND NOT EXISTS (
           SELECT 1 FROM events e2
           WHERE e2.event_type IN ('MEMORY_DELETED', 'MEMORY_SUPERSEDED')
-          AND JSON_EXTRACT(e2.payload, '$.memoryId') = JSON_EXTRACT(payload, '$.memoryId')
+          AND JSON_EXTRACT(e2.payload, '$.memoryId') = JSON_EXTRACT(e1.payload, '$.memoryId')
         )
-        ORDER BY timestamp DESC
+        ORDER BY e1.timestamp DESC
         LIMIT 500
       `);
       const excludeSession = options.excludeSessionId ?? this.sessionId;
@@ -1438,7 +1442,8 @@ export class MemoryManager {
             if (!this.isVisibleToCurrentAgent(reconstructed)) continue;
             fallbackScored.push({ memory: reconstructed, score: 0.5 });
           }
-        } catch {
+        } catch (err) {
+          log.warn("Failed to reconstruct cross-session memory", { error: err instanceof Error ? err.message : String(err) });
           continue;
         }
       }
@@ -1450,17 +1455,20 @@ export class MemoryManager {
     // Exclude keys that have been subsequently deleted or superseded, and
     // skip keys containing '::superseded::' (archived copies of superseded memories).
     const db = this.eventStore.getDatabase();
+    // Outer table MUST be aliased — see the identical comment in the
+    // keyword-fallback branch above for why the subquery behaves wrong
+    // without an alias on `events`.
     const stmt = db.prepare(`
-      SELECT payload FROM events
-      WHERE event_type = 'MEMORY_SAVED'
-      AND session_id != $excludeSession
-      AND JSON_EXTRACT(payload, '$.key') NOT LIKE '%::superseded::%'
+      SELECT e1.payload FROM events AS e1
+      WHERE e1.event_type = 'MEMORY_SAVED'
+      AND e1.session_id != $excludeSession
+      AND JSON_EXTRACT(e1.payload, '$.key') NOT LIKE '%::superseded::%'
       AND NOT EXISTS (
         SELECT 1 FROM events e2
         WHERE e2.event_type IN ('MEMORY_DELETED', 'MEMORY_SUPERSEDED')
-        AND JSON_EXTRACT(e2.payload, '$.memoryId') = JSON_EXTRACT(payload, '$.memoryId')
+        AND JSON_EXTRACT(e2.payload, '$.memoryId') = JSON_EXTRACT(e1.payload, '$.memoryId')
       )
-      ORDER BY timestamp DESC
+      ORDER BY e1.timestamp DESC
       LIMIT 500
     `);
     const excludeSession = options.excludeSessionId ?? this.sessionId;

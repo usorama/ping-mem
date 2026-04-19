@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ping-mem.daemon</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/umasankr/.bun/bin/bun</string>
+        <string>run</string>
+        <string>/Users/umasankr/Projects/ping-mem/dist/cli/index.js</string>
+        <string>daemon</string>
+        <string>start</string>
+        <string>--foreground</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PING_MEM_REST_URL</key>
+        <string>http://localhost:3003</string>
+    </dict>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/umasankr/Library/Logs/ping-mem-daemon.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/umasankr/Library/Logs/ping-mem-daemon.log</string>
+
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <!-- A-DOM-3: daemon opts out of App Nap (stays responsive when the user
+         is idle). Also raises fd limits and extends exit timeout so SIGTERM
+         gets a fair shot at draining SSE clients + SQLite writes. -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
+
+    <key>ExitTimeOut</key>
+    <integer>30</integer>
+
+    <key>SoftResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>4096</integer>
+    </dict>
+
+    <key>HardResourceLimits</key>
+    <dict>
+        <key>NumberOfFiles</key>
+        <integer>8192</integer>
+    </dict>
+</dict>
+</plist>

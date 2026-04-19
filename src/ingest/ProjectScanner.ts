@@ -26,7 +26,6 @@ const DEFAULT_IGNORE_DIRS = new Set([
   ".idea",
   // Phase 1.2: Extended ignore dirs
   ".overstory",
-  ".ai",
   "coverage",
   "tmp",
   "temp",
@@ -45,7 +44,9 @@ const DEFAULT_IGNORE_DIRS = new Set([
   ".playwright-mcp",
   ".deployments",
   "snapshots",
-  "docs",
+  // Phase 2 remediation (2026-04-18): RESTORED `.ai` and `docs` — they contain
+  // planning/research/decision artifacts that define project context. Excluding
+  // them capped ping-learn coverage at ~44% (docs=183 files, .ai=203 files).
 ]);
 
 const DEFAULT_EXCLUDE_EXTENSIONS = new Set([
@@ -67,12 +68,13 @@ const DEFAULT_EXCLUDE_EXTENSIONS = new Set([
   ".lock",
   // Phase 1.3: Extended exclude extensions
   ".d.ts", ".map", ".min.js", ".min.css", ".snap",
-  ".csv", ".log", ".wasm",
-  // Phase 2: Audit-driven additions (GH#114)
-  ".pbxproj", ".xcworkspacedata", ".xcscheme", ".tsbuildinfo", ".plist",
-  ".sh", ".bat",
-  ".md",
-  ".jsonl",
+  ".log", ".wasm",
+  // Phase 2: Audit-driven additions (GH#114) — binary-only Xcode/build artifacts
+  ".pbxproj", ".xcworkspacedata", ".xcscheme", ".tsbuildinfo",
+  // Phase 2 remediation (2026-04-18): RESTORED .md, .sh, .jsonl, .csv, .bat, .plist —
+  // these are text files that contribute meaningfully to project context
+  // (ping-learn has 343 .md files = 20% of repo; excluding them capped
+  // coverage at ~56%, below the 95% gate).
 ]);
 
 const MANIFEST_SCHEMA_VERSION = 1;

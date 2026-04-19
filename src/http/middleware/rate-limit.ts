@@ -16,14 +16,31 @@ export function rateLimiter(options: {
   maxRequests: number;
   windowMs: number;
   maxMapSize?: number;
+  /** Optional predicate — when it returns true the request bypasses the limiter entirely. */
+  skip?: (c: Context) => boolean;
+  /** Elevated quota for admin-authed callers. Used when isAdmin(c) is true. */
+  adminMaxRequests?: number;
+  isAdmin?: (c: Context) => boolean;
 }) {
-  const { name, maxRequests, windowMs, maxMapSize = 10_000 } = options;
+  const { name, maxRequests, windowMs, maxMapSize = 10_000, skip, adminMaxRequests, isAdmin } = options;
+  // Admin and non-admin counts live in separate IP-keyed buckets so an admin
+  // burst can't push a non-admin request from the same IP (dev laptop, shared
+  // NAT) over the non-admin ceiling. Each class has its own sliding window.
   if (!stores.has(name)) stores.set(name, new Map());
-  const limits = stores.get(name)!;
+  if (adminMaxRequests !== undefined && !stores.has(name + ":admin")) {
+    stores.set(name + ":admin", new Map());
+  }
+  const nonAdminLimits = stores.get(name)!;
+  const adminLimits = adminMaxRequests !== undefined ? stores.get(name + ":admin")! : nonAdminLimits;
 
   return createMiddleware(async (c: Context, next: Next) => {
+    if (skip?.(c)) return next();
+
     const ip = getClientIp(c);
     const now = Date.now();
+    const admin = isAdmin?.(c) === true && adminMaxRequests !== undefined;
+    const limits = admin ? adminLimits : nonAdminLimits;
+    const effectiveMax = admin ? adminMaxRequests! : maxRequests;
 
     // Evict expired entries if map too large
     if (limits.size > maxMapSize) {
@@ -39,7 +56,7 @@ export function rateLimiter(options: {
     }
 
     entry.count++;
-    if (entry.count > maxRequests) {
+    if (entry.count > effectiveMax) {
       const retryAfterSeconds = Math.ceil((entry.resetAt - now) / 1000);
       c.header("Retry-After", String(retryAfterSeconds));
       return c.json({ error: "Too Many Requests", message: "Rate limit exceeded" }, 429);
