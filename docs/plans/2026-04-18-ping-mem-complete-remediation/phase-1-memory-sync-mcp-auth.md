@@ -140,7 +140,15 @@ case "$FILE" in
     KEY_PREFIX="native/learn"
     ;;
   "$HOME/.claude/projects/"*)
-    local SLUG=$(echo "$FILE" | sed -E 's|.*/-Users-umasankr-Projects-([^/]+)/.*|\1|')
+    # Portable slug derivation: take the first path segment under ~/.claude/projects/
+    # (e.g., "-Users-umasankr-Projects-ping-mem") and extract the trailing repo name.
+    # Avoids hardcoding "-Users-<username>-Projects-" which would break on other machines.
+    local PROJ_DIR_NAME
+    PROJ_DIR_NAME="${FILE#"$HOME/.claude/projects/"}"
+    PROJ_DIR_NAME="${PROJ_DIR_NAME%%/*}"
+    # Strip any leading "-Users-*-Projects-" prefix (any username), leaving just the repo segment.
+    local SLUG
+    SLUG="$(echo "$PROJ_DIR_NAME" | sed -E 's|^-Users-[^-]+-Projects-||')"
     KEY_PREFIX="native/proj/$SLUG"
     ;;
   *)
@@ -256,7 +264,13 @@ ping_mem_import_native_file() {
     "$HOME/.claude/memory/"*)        KEY_PREFIX="native/global" ;;
     "$HOME/.claude/learnings/"*)     KEY_PREFIX="native/learn" ;;
     "$HOME/.claude/projects/"*)
-      local SLUG=$(echo "$FILE" | sed -E 's|.*/-Users-umasankr-Projects-([^/]+)/.*|\1|')
+      # Portable slug derivation (see above): strip ~/.claude/projects/ then drop the
+      # "-Users-<any-username>-Projects-" prefix. No hardcoded usernames.
+      local PROJ_DIR_NAME
+      PROJ_DIR_NAME="${FILE#"$HOME/.claude/projects/"}"
+      PROJ_DIR_NAME="${PROJ_DIR_NAME%%/*}"
+      local SLUG
+      SLUG="$(echo "$PROJ_DIR_NAME" | sed -E 's|^-Users-[^-]+-Projects-||')"
       KEY_PREFIX="native/proj/$SLUG"
       ;;
     *) KEY_PREFIX="native/other" ;;
@@ -326,9 +340,11 @@ PAYLOAD=$(cat)
 TOOL=$(echo "$PAYLOAD" | jq -r '.tool_name // empty')
 FILE_PATH=$(echo "$PAYLOAD" | jq -r '.tool_input.file_path // empty')
 
-# Filter 1: only Write/Edit touch memory files
+# Filter 1: only Write/Edit/MultiEdit touch memory files.
+# MultiEdit must be included — it is a legitimate memory-updating tool and excluding it
+# would miss updates and break the <60s propagation goal.
 case "$TOOL" in
-  Write|Edit) ;;
+  Write|Edit|MultiEdit) ;;
   *) exit 0 ;;
 esac
 

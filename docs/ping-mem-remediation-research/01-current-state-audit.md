@@ -224,8 +224,8 @@
 1. **src/mcp/proxy-cli.ts:87–103** — `waitForServer()` must be called before first tool invocation (startup probe)
 2. **src/http/rest-server.ts:363–401** — `/health` reads stale driver state; must call `HealthMonitor.probe()` before returning
 3. **src/http/rest-server.ts:3628–3650** — `POST /api/v1/tools/:name/invoke` auth check; add `checkAdminRateLimit()` call
-4. **src/http/rest-server.ts** — Add new `POST /api/v1/internal/warm-up` endpoint
-5. **src/http/rest-server.ts** — Add new `GET /api/v1/internal/readiness` deep probe (Neo4j + Qdrant connectivity)
+4. **src/http/rest-server.ts** — Add new `POST /api/v1/internal/warm-up` endpoint (MUST require admin auth via existing admin middleware, or bind loopback-only with token check — never expose unauthenticated)
+5. **src/http/rest-server.ts** — Add new `GET /api/v1/internal/readiness` deep probe (Neo4j + Qdrant connectivity) (same auth requirement as warm-up; reject requests without valid admin credentials before calling `HealthMonitor.lastSnapshot()`)
 6. **src/observability/HealthMonitor.ts** — Expose `lastSnapshot()` method to REST layer for `/health`
 7. **src/config/runtime.ts:213–226** — `llmEntityExtractor` instantiation (DONE but verify threading)
 8. **src/ingest/IngestionService.ts:119–150** — Add instrumentation for per-file change detection if file-watching is added

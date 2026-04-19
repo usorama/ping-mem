@@ -25,7 +25,7 @@ Format: `ID NAME | CHECK | PASS | SEV`. SEV: `C`=critical (exit 2), `W`=warning 
 ### Infrastructure (6)
 | ID | Name | Check | Pass | Sev |
 |----|------|-------|------|-----|
-| INF-01 | disk-free | `df -k / \| awk 'NR==2{print int($5)}'` | `< 90` | C |
+| INF-01 | disk-free | `df -k / \| awk 'NR==2{print int($5)}'` | `≤ 85` | C |
 | INF-02 | log-dir-size | `du -sk ~/Library/Logs/ping-mem \| cut -f1` | `< 102400` (100 MB) | C |
 | INF-03 | container-ping-mem | `docker inspect -f '{{.State.Running}}' ping-mem-rest` | `== true` | U |
 | INF-04 | container-neo4j | `docker inspect -f '{{.State.Running}}' ping-mem-neo4j` | `== true` | C |
@@ -57,7 +57,7 @@ Active project = row in `projects` with `last_event_ts > now - 7d`.
 |----|------|-------|------|-----|
 | HEA-01 | pattern-library-baseline | `sqlite3 events.db "SELECT COUNT(*) FROM patterns WHERE confidence >= 0.3"` | `≥ 5` | W |
 | HEA-02 | ollama-escalation | same as SVC-04 but required when `SELF_HEAL_TIER=ollama` | exit 0 | W |
-| HEA-03 | reconcile-scheduled-consistency | either `launchctl list \| grep aos-reconcile-scheduled` exits 0 OR `grep -L 'aos-reconcile-scheduled' wake_detector.py` exits 0 | one of the two | C |
+| HEA-03 | reconcile-scheduled-removed | `grep -c 'aos-reconcile-scheduled' wake_detector.py` (call removed per Phase 3 P3.4) | `== 0` | C |
 
 ### Log Hygiene (3)
 | ID | Name | Check | Pass | Sev |

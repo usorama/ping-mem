@@ -272,8 +272,12 @@ async cleanup(): Promise<number> {
 In `~/.claude/hooks/ping-mem-native-sync.sh`, after import completes:
 
 ```bash
+# /api/v1/session/end accepts sessionId via X-Session-ID header (primary) OR request body
+# (fallback). Pass both so the hook works even when intermediaries strip custom headers.
 curl -s --max-time 3 -X POST "$PING_MEM_URL/api/v1/session/end" \
-  -H 'Content-Type: application/json' -H "X-Session-ID: $SESSION_ID" >/dev/null 2>&1
+  -H 'Content-Type: application/json' \
+  -H "X-Session-ID: $SESSION_ID" \
+  -d "{\"sessionId\":\"$SESSION_ID\"}" >/dev/null 2>&1
 rm -f "$SESSION_CACHE"
 ```
 

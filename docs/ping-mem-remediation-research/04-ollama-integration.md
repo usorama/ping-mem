@@ -135,7 +135,7 @@ Measured latency on this host: **21 ms** for `GET /api/tags` (`time curl -sf htt
           temperature: 0
           seed: 42
           num_ctx: 8192
-        format: "schema"              # see §6
+        format: "json"                 # Ollama API accepts "json" or a JSON schema object; see §6 for the schema object variant
         confidence_threshold: 0.6     # below -> escalate_human
       - tier: "ollama_deep"
         type: "api"
@@ -271,11 +271,13 @@ jq -e '
 ' /tmp/tags.json > /dev/null || exit 12
 
 # Gate 3: generate latency <= 2s on a warm model (keep-alive exercised)
-START=$(gdate +%s%N)
+# Portable ms timing: gdate (GNU coreutils) is not present on stock macOS; use python3 fallback.
+_now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
+START=$(_now_ms)
 curl -sf --max-time 5 -X POST http://localhost:11434/api/generate \
   -d '{"model":"qwen3:8b","prompt":"ping","stream":false,"keep_alive":"30m","options":{"num_predict":1}}' > /dev/null
-END=$(gdate +%s%N)
-LAT=$(( (END - START) / 1000000 ))
+END=$(_now_ms)
+LAT=$(( END - START ))
 [ "$LAT" -le 2000 ] || { echo "latency=${LAT}ms exceeds 2000ms"; exit 13; }
 ```
 

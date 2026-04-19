@@ -54,7 +54,7 @@ Raise ingestion coverage from the 2026-04-18 baseline (ping-learn: 133/653 commi
 | pre.4 | ping-mem typecheck clean | `cd ~/Projects/ping-mem && bun run typecheck 2>&1 \| tail -1` | `Found 0 errors` |
 | pre.5 | ping-mem REST reachable | `curl -sf http://localhost:3003/health \| jq -r '.status'` | `ok` |
 | pre.6 | Neo4j + Qdrant up | `curl -sf http://localhost:7474 >/dev/null && curl -sf http://localhost:6333/collections >/dev/null` | exit 0 |
-| pre.7 | Ingestion queue configured | `curl -sf -u admin:ping-mem-dev-local http://localhost:3003/api/v1/ingestion/queue \| jq '.maxConcurrent'` | non-null integer |
+| pre.7 | Ingestion queue configured | `curl -sf -u "$PING_MEM_ADMIN_USER:$PING_MEM_ADMIN_PASS" http://localhost:3003/api/v1/ingestion/queue \| jq '.maxConcurrent'` (require `PING_MEM_ADMIN_USER` and `PING_MEM_ADMIN_PASS` to be set — never hardcode credentials) | non-null integer |
 
 If any pre-condition fails → do **not** start Phase 2; escalate to orchestrator.
 
@@ -177,7 +177,10 @@ Write to `scripts/reingest-active-projects.sh` (new file, `chmod +x`):
 set -euo pipefail
 
 REST_URL="${PING_MEM_REST_URL:-http://localhost:3003}"
-AUTH="${PING_MEM_ADMIN_USER:-admin}:${PING_MEM_ADMIN_PASS:-ping-mem-dev-local}"
+# Fail-fast: require admin credentials from the environment — never embed defaults in scripts/docs.
+: "${PING_MEM_ADMIN_USER:?set PING_MEM_ADMIN_USER before running}"
+: "${PING_MEM_ADMIN_PASS:?set PING_MEM_ADMIN_PASS before running}"
+AUTH="${PING_MEM_ADMIN_USER}:${PING_MEM_ADMIN_PASS}"
 FORCE="${FORCE:-true}"  # this script's default is force=true — full re-ingest
 TIMEOUT_S="${TIMEOUT_S:-1500}"
 POLL_S=5
@@ -225,29 +228,39 @@ poll() {
   done
 }
 
+# Strict JSONL: every line written to $RUN_LOG is a single JSON object so `jq -s` / `jq -c` work.
+# Do not mix plain strings with JSON lines — downstream F2.5/F2.7 checks rely on this contract.
 overall_rc=0
 for dir in "${PROJECTS[@]}"; do
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if [[ ! -d "$dir/.git" ]]; then
-    echo "SKIP $dir (not a git repo)" | tee -a "$RUN_LOG"
+    printf '{"ts":"%s","event":"skip","projectDir":"%s","reason":"not-a-git-repo"}\n' "$ts" "$dir" | tee -a "$RUN_LOG"
     continue
   fi
-  echo "ENQUEUE $dir" | tee -a "$RUN_LOG"
+  printf '{"ts":"%s","event":"enqueue","projectDir":"%s"}\n' "$ts" "$dir" | tee -a "$RUN_LOG"
   enq="$(enqueue "$dir")"
   run_id="$(echo "$enq" | jq -r '.runId // empty')"
   if [[ -z "$run_id" ]]; then
-    echo "{\"projectDir\":\"$dir\",\"enqueue\":$enq,\"result\":\"enqueue-failed\"}" | tee -a "$RUN_LOG"
+    # enq is already JSON; embed it as a nested object.
+    jq -cn --arg ts "$ts" --arg dir "$dir" --argjson enq "$enq" \
+      '{ts:$ts,event:"enqueue_failed",projectDir:$dir,enqueue:$enq,result:{status:"enqueue-failed"}}' \
+      | tee -a "$RUN_LOG"
     overall_rc=1
     continue
   fi
-  echo "POLL $run_id ($dir)" | tee -a "$RUN_LOG"
+  printf '{"ts":"%s","event":"poll","projectDir":"%s","runId":"%s"}\n' "$ts" "$dir" "$run_id" | tee -a "$RUN_LOG"
   t0="$(date +%s)"
   if result="$(poll "$run_id")"; then
     t1="$(date +%s)"
     dur=$((t1 - t0))
-    echo "{\"projectDir\":\"$dir\",\"runId\":\"$run_id\",\"durationS\":$dur,\"result\":$result}" | tee -a "$RUN_LOG"
+    jq -cn --arg ts "$ts" --arg dir "$dir" --arg rid "$run_id" --argjson dur "$dur" --argjson result "$result" \
+      '{ts:$ts,event:"complete",projectDir:$dir,runId:$rid,durationS:$dur,result:$result}' \
+      | tee -a "$RUN_LOG"
   else
     rc=$?
-    echo "{\"projectDir\":\"$dir\",\"runId\":\"$run_id\",\"poll_rc\":$rc,\"result\":\"failed-or-timeout\"}" | tee -a "$RUN_LOG"
+    jq -cn --arg ts "$ts" --arg dir "$dir" --arg rid "$run_id" --argjson rc "$rc" \
+      '{ts:$ts,event:"complete",projectDir:$dir,runId:$rid,poll_rc:$rc,result:{status:"failed-or-timeout"}}' \
+      | tee -a "$RUN_LOG"
     overall_rc=1
   fi
 done
@@ -276,7 +289,10 @@ Write to `scripts/verify-ingestion-coverage.sh` (new file, `chmod +x`):
 set -euo pipefail
 
 REST_URL="${PING_MEM_REST_URL:-http://localhost:3003}"
-AUTH="${PING_MEM_ADMIN_USER:-admin}:${PING_MEM_ADMIN_PASS:-ping-mem-dev-local}"
+# Fail-fast: require admin credentials from the environment — never embed defaults in scripts/docs.
+: "${PING_MEM_ADMIN_USER:?set PING_MEM_ADMIN_USER before running}"
+: "${PING_MEM_ADMIN_PASS:?set PING_MEM_ADMIN_PASS before running}"
+AUTH="${PING_MEM_ADMIN_USER}:${PING_MEM_ADMIN_PASS}"
 BASELINE="${BASELINE:-/tmp/ping-mem-remediation-baseline.json}"
 THRESHOLD="${THRESHOLD:-95}"
 OUT_JSON="${OUT_JSON:-/tmp/ping-mem-coverage-$(date +%Y%m%d-%H%M%S).json}"
@@ -334,7 +350,9 @@ exit "$fail"
 **Assertion command** (run after ping-mem is up; part of P2.4 acceptance):
 
 ```bash
-curl -sfS -u "${PING_MEM_ADMIN_USER:-admin}:${PING_MEM_ADMIN_PASS:-ping-mem-dev-local}" \
+: "${PING_MEM_ADMIN_USER:?set PING_MEM_ADMIN_USER}"
+: "${PING_MEM_ADMIN_PASS:?set PING_MEM_ADMIN_PASS}"
+curl -sfS -u "${PING_MEM_ADMIN_USER}:${PING_MEM_ADMIN_PASS}" \
   http://localhost:3003/api/v1/codebase/projects \
   | jq -e '.data.projects[0] | has("commitsCount") and has("filesCount") and has("projectId") and has("rootPath")'
 ```
@@ -455,9 +473,9 @@ Global exclusions that do NOT change in P2: lock files, compiled binaries, media
 
 | # | Check | Command | Expected |
 |---|-------|---------|----------|
-| V2.10 | Overrides accepted by schema | `echo '{"projectDir":"/tmp/x","ignoreDirs":["docs"],"excludeExtensions":[".md"]}' \| curl -sf -u admin:ping-mem-dev-local -X POST http://localhost:3003/api/v1/ingestion/enqueue -H 'content-type: application/json' --data-binary @-` | HTTP 202 with `runId` |
-| V2.11 | Files-coverage ≥95% per project after reingest | `bash scripts/verify-ingestion-coverage.sh \| jq '.[].pctFiles \| . >= 0.95'` | `true` for all 5 projects |
-| V2.12 | Commits-coverage ≥95% per project after reingest | same script, `.pctCommits >= 0.95` | `true` for all 5 |
+| V2.10 | Overrides accepted by schema | `echo '{"projectDir":"/tmp/x","ignoreDirs":["docs"],"excludeExtensions":[".md"]}' \| curl -sf -u "$PING_MEM_ADMIN_USER:$PING_MEM_ADMIN_PASS" -X POST http://localhost:3003/api/v1/ingestion/enqueue -H 'content-type: application/json' --data-binary @-` (require `PING_MEM_ADMIN_USER`/`PING_MEM_ADMIN_PASS` to be set — no hardcoded defaults) | HTTP 202 with `runId` |
+| V2.11 | Files-coverage ≥95% per project after reingest | `bash scripts/verify-ingestion-coverage.sh \| jq '.[].pctFiles \| . >= 95'` (script emits 0–100 scale, e.g. `95.00`) | `true` for all 5 projects |
+| V2.12 | Commits-coverage ≥95% per project after reingest | same script, `.pctCommits >= 95` (0–100 scale) | `true` for all 5 |
 
 #### P2.6.g — Diagnosis fallback (only if V2.11 still fails)
 
@@ -596,9 +614,9 @@ Any V2.x failure → the phase gate is RED.
 | **F8** | All 5 projects ≥95 % | `bash scripts/verify-ingestion-coverage.sh; echo $?` | exit 0 |
 | **F9** | Idempotent re-ingest — second run <30 s per project | `FORCE=false TIMEOUT_S=60 bash scripts/reingest-active-projects.sh && jq '[.[].durationS] \| max' $OUT_DIR/*.json` | max durationS ≤ 30 (per project) |
 | F2.4 | Async enqueue+poll contract works | `bash scripts/reingest-active-projects.sh 2>&1 \| grep -E 'ENQUEUE\|POLL' \| wc -l` | ≥10 lines (5 enqueue + 5 poll) |
-| F2.5 | 202 status honored (no premature success) | `jq '[.[].result.status] \| group_by(.) \| map({(.[0]):length})' $OUT_DIR/run-log.jsonl` | all "completed"; 0 "timeout"; 0 "failed" |
+| F2.5 | 202 status honored (no premature success) | `jq -s '[.[] \| select(.event=="complete") \| .result.status?] \| group_by(.) \| map({(.[0]):length})' "$OUT_DIR/run-log.jsonl"` (slurp JSONL; ignore non-result events) | all "completed"; 0 "timeout"; 0 "failed" |
 | F2.6 | Schema shape matches doctor (P5) contract | P2.4 assertion | `true` |
-| F2.7 | Time-budget dry-run (AC-NF3 ≤20 min for ping-learn) | `jq 'select(.projectDir \| endswith("/ping-learn")) \| .durationS' $OUT_DIR/run-log.jsonl` | ≤ 1200 (20 × 60) |
+| F2.7 | Time-budget dry-run (AC-NF3 ≤20 min for ping-learn) | `jq -r 'select(.event=="complete" and (.projectDir \| endswith("/ping-learn"))) \| .durationS' "$OUT_DIR/run-log.jsonl"` (read JSONL line-by-line; only complete events carry durationS) | ≤ 1200 (20 × 60) |
 | F2.8 | Ingestion writes reach Neo4j | `curl -sfS http://localhost:7474/db/neo4j/tx/commit -u neo4j:<pw> -H 'Content-Type: application/json' -d '{"statements":[{"statement":"MATCH (p:Project) RETURN count(p) AS n"}]}' \| jq '.results[0].data[0].row[0]'` | ≥5 |
 | F2.9 | Ingestion writes reach Qdrant | `curl -sf http://localhost:6333/collections \| jq '.result.collections \| map(.name) \| length'` | ≥1 |
 

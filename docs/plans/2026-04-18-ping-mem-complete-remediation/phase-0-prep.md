@@ -329,7 +329,7 @@ Each V check is binary pass/fail and run by the executor after the corresponding
 ## Functional Tests (runtime)
 
 - **F0.1 — Disk under gate.** `df -P / | awk 'NR==2 {sub(/%/,"",$5); print ($5<=85)}'` prints `1`. Contributes to O7 / W15 (partial). Full W15 coverage is P4.
-- **F0.2 — claude.json effective perm.** `stat -f '%Lp' ~/.claude.json` exits with `600`; `find ~/.claude.json -perm +004` (world-readable bit set) returns no rows.
+- **F0.2 — claude.json effective perm.** `stat -f '%Lp' ~/.claude.json` exits with `600`; `find ~/.claude.json -perm /004` (world-readable bit set) returns no rows. (Modern `-perm /mode` syntax; the legacy `+mode` form is deprecated on macOS 10.13+ and GNU findutils 4.5.12+.)
 - **F0.3 — Baseline snapshot readable.** `jq -e '.quality.typecheck_errors >= 0 and (.quality.test_pass // 0) >= 0' /tmp/ping-mem-remediation-baseline.json` exits 0.
 - **F0.4 — Stale-proc kill stuck.** Re-run `pgrep -f 'codex exec|gemini -p|pi-run'` 30s after P0.5; still zero PIDs (guard against respawn under launchd).
 - **F0.5 — Deferral issues printed.** `jq -r '.[] | "\(.number) \(.title) \(.url)"' /tmp/ping-mem-remediation-deferral-issues.json` prints exactly 3 issue URLs, each tagged `ping-mem`.

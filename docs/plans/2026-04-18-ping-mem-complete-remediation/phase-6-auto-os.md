@@ -306,9 +306,20 @@ There is no dedicated `aos-task inject` CLI today (evidence above — `bin/` con
        assigned_agent: projects
        context:
          cwd: /Users/umasankr/Projects/auto-os
-         actions:
-           - "curl -s -u \"$USER_P:$PASS_P\" -H 'Content-Type: application/json' -d '{\"name\":\"auto-os-worker\"}' http://localhost:3003/api/v1/session/start"
-           - "curl -s -u \"$USER_P:$PASS_P\" -H \"X-Session-ID: $SID\" -H 'Content-Type: application/json' -d '{\"key\":\"auto-os/p6-smoke\",\"value\":\"P6-SMOKE-SENTINEL\"}' http://localhost:3003/api/v1/context"
+       # NOTE: `actions` is a sibling of `context`, NOT nested under it. The first action captures
+       # the sessionId from /session/start and exports it so the second action's X-Session-ID works.
+       actions:
+         - |
+           SID=$(curl -s -u "$USER_P:$PASS_P" \
+             -H 'Content-Type: application/json' \
+             -d '{"name":"auto-os-worker"}' \
+             http://localhost:3003/api/v1/session/start | jq -r '.data.sessionId // .sessionId')
+           test -n "$SID" && test "$SID" != "null" || { echo "failed to capture sessionId"; exit 1; }
+           curl -sf -u "$USER_P:$PASS_P" \
+             -H "X-Session-ID: $SID" \
+             -H 'Content-Type: application/json' \
+             -d '{"key":"auto-os/p6-smoke","value":"P6-SMOKE-SENTINEL"}' \
+             http://localhost:3003/api/v1/context
    YAML
    ```
 3. Execute the job actions inline (simulating what paro would do on tick) — one bash block:

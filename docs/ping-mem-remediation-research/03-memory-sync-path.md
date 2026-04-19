@@ -130,7 +130,7 @@ export function parseMemoryFile(abs: string): Promise<ParsedMemoryFile>;
 
 ### 6.3 Reused existing code
 
-- `MemoryManager.saveMemory` / `updateMemory` / `deleteMemory` (`src/memory/MemoryManager.ts`) — direct calls, no HTTP.
+- `MemoryManager.saveOrUpdate` / `delete` (`src/memory/MemoryManager.ts`) — direct calls, no HTTP. `saveOrUpdate(key, value, options)` covers both create and update; `delete(key)` removes an entry.
 - `VectorIndex` via `MemoryManager` constructor injection — embeddings automatic.
 - `JunkFilter` already gates `/api/v1/context`; reuse it here for parity.
 - `EventStore` — every sync becomes an event; audit trail for free.
@@ -147,7 +147,7 @@ The sync service must not depend on a live Claude Code session.
 
 ### 6.5 Deletion handling
 
-- `chokidar` emits `unlink`. Handler derives `key = claude-mem:<sha of abs path>` and calls `MemoryManager.deleteMemory(key)`. This mirrors `DELETE /api/v1/context/:key` (`rest-server.ts:1690`).
+- `chokidar` emits `unlink`. Handler derives `key = claude-mem:<sha of abs path>` and calls `MemoryManager.delete(key)`. This mirrors `DELETE /api/v1/context/:key` (`rest-server.ts:1690`).
 - On startup, `Reconciler.fullReconcile()` lists all memories with `channel = "claude-memory"`, compares to the on-disk set under the registered roots, deletes memories whose source file no longer exists, and upserts any file whose `contentSha256` differs.
 
 ### 6.6 Bi-directional propagation (optional, gated)

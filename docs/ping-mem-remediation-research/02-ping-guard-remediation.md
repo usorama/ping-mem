@@ -33,7 +33,7 @@ Research Agent R2 | Evidence-Based Audit | 2026-04-18
 
 **Recommended fix**: Option 1 (OrbStack detection + auto-resume).
 - **Why**: OrbStack is the user's actual runtime; explicit support prevents 90s hangs. Calling `orbctl restart default` is idempotent and fast.
-- **Integration point**: `wake_detector.py` lines 40-52 (new `_resumme_orbstack()` function). Before `_wait_for_docker()`, check: `subprocess.run(["orbctl", "info"], capture_output=True)` exit code 0 → machine exists. If yes, call `orbctl restart default --timeout 30` and log result.
+- **Integration point**: `wake_detector.py` lines 40-52 (new `_resume_orbstack()` function). Before `_wait_for_docker()`, check: `subprocess.run(["orbctl", "info"], capture_output=True)` exit code 0 → machine exists. If yes, call `orbctl restart default --timeout 30` and log result.
 
 ---
 
@@ -49,7 +49,7 @@ Research Agent R2 | Evidence-Based Audit | 2026-04-18
 
 **Fix options**:
 1. **Fix-in-place**: Update manifest with correct flags (`codex exec --prompt`), correct credential path (`~/Projects/.creds/gemini_api_key.json`), and seed pattern library with baseline confidence (0.7 for manifest-defined patterns).
-2. **Ollama-first tier**: Add Ollama as tier 0 (local inference, no network dependency, <1s latency). Keep claude/codex/gemini as fallback. Ollama signature: `command: "ollama", args: ["run", "llama2:7b"], timeout_ms: 60000`.
+2. **Ollama-first tier**: Add Ollama as tier 0 (local inference, no network dependency, <1s latency). Keep claude/codex/gemini as fallback. Ollama signature: `command: "ollama", args: ["run", "llama3.2:latest"], timeout_ms: 5000`. Phase 3 defines a 3-tier Ollama chain: tier 0 `llama3.2:latest`, tier 1 `qwen3:8b`, tier 2 `gpt-oss:20b`.
 3. **Disable LLM escalation**: Remove `llm_chain` entirely; rely only on pattern-match rules tier. Reduces complexity and external dependency risk.
 
 **Recommended fix**: Option 1 + partial Ollama (Option 2).
@@ -57,7 +57,7 @@ Research Agent R2 | Evidence-Based Audit | 2026-04-18
 - **Integration point**: 
   - Line 256: change `args: ["--prompt"]` to `args: ["exec"]` and add body/stdin handling.
   - Line 262: change credentials path to `~/Projects/.creds/gemini_api_key.json`.
-  - Insert new tier 0 after line 250: `- tier: "ollama"`, `command: "ollama"`, `args: ["run", "llama2:7b"]`, `timeout_ms: 60000`.
+  - Insert new tier 0 after line 250: `- tier: "ollama"`, `command: "ollama"`, `args: ["run", "llama3.2:latest"]`, `timeout_ms: 5000` (Phase 3 chain adds tiers 1 `qwen3:8b` and 2 `gpt-oss:20b`).
 
 ---
 
@@ -108,9 +108,10 @@ Research Agent R2 | Evidence-Based Audit | 2026-04-18
 
 **Recommended fix**: Option 1 (newsyslog entry).
 - **Why**: Standard macOS approach, no code changes, 7-day retention balances storage and debugging window.
-- **Integration point**: Create `/etc/newsyslog.conf.d/ping-guard.conf`:
+- **Integration point**: Create `/etc/newsyslog.conf.d/ping-guard.conf` with entries for both `.log` and `.err` files so daemon stderr logs (e.g., `daemon.err`, `auto-os.err`, `wake-detector.err`) are also rotated:
   ```
   /Users/umasankr/Library/Logs/ping-guard/*.log  640  7  *  *  *  J
+  /Users/umasankr/Library/Logs/ping-guard/*.err  640  7  *  *  *  J
   ```
   Test: `sudo newsyslog -d -v /etc/newsyslog.conf.d/ping-guard.conf`.
 

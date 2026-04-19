@@ -201,7 +201,7 @@ describe("W29 stretch (signal only — does not gate AC-S1)", () => {
 
 Math specification (from overview.md H — Realistic bar):
 
-- HARD gates (10): any red day on any hard gate resets that gate's `streak_days_green` counter to 0. Overall `status = green` requires every hard gate's streak ≥ 30.
+- HARD gates (14): any red day on any hard gate resets that gate's `streak_days_green` counter to 0. Overall `status = green` requires every hard gate's streak ≥ 30. (Count matches this phase's gate list and overview §30-Day Soak Acceptance.)
 - SOFT gates (5): use a trailing 30-day window. Count total red days in the window. `status = green` tolerates up to 6 red days (so `red_days_in_window <= 6` per soft gate).
 - Day boundary = calendar day in local TZ (Asia/Kolkata). A "day" is red if the day has ≥1 red doctor-run for that gate. A day with no doctor-runs at all is treated as red (absence = failure, per safety default).
 - Script is O(day) (max 30 days in window) × O(gates) (29 total) × O(runs-per-day) — bounded, idempotent, safe to re-run.
@@ -635,7 +635,7 @@ shellcheck scripts/seed-regression-fixtures.sh
 | V7.6a | Script exists and executable | `test -x scripts/seed-regression-fixtures.sh` | exit 0 |
 | V7.6b | Shellcheck clean | `shellcheck scripts/seed-regression-fixtures.sh; echo $?` | `0` |
 | V7.6c | Dry-run seeds 5/5 | `PING_MEM_URL=http://localhost:3003 PING_MEM_ADMIN_USER=admin PING_MEM_ADMIN_PASS=ping-mem-dev-local bash scripts/seed-regression-fixtures.sh` | last line `seed OK: 5/5 fixtures written and verified` |
-| V7.6d | Fixtures present in ping-mem | `curl -sf -u admin:ping-mem-dev-local http://localhost:3003/api/v1/search?query=CANARY_FIXTURE_PINGLEARN \| jq '.data \| length'` | `>= 1` |
+| V7.6d | Fixtures present in ping-mem | `curl -sf -u "$PING_MEM_ADMIN_USER:$PING_MEM_ADMIN_PASS" "http://localhost:3003/api/v1/search?query=CANARY_" \| jq '.data \| length'` — matches the seeded `CANARY_1`…`CANARY_5` tokens; require `PING_MEM_ADMIN_USER`/`PING_MEM_ADMIN_PASS` to be set in the environment | `>= 5` |
 
 **P8's role (docs only)**: P8 documents the script in `docs/AGENT_INTEGRATION_GUIDE.md` §14 (operational runbook). P8 does NOT author the script — P7 owns authorship, matching the "writes zero product code" frontmatter rule in P8.
 

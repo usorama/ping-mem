@@ -547,17 +547,17 @@ export async function renderHealthDashboard(c: Context): Promise<Response> {
   </style>
 </head><body>
   <h1>ping-mem doctor</h1>
-  <p>Last run: ${r?.timestamp ?? "never"} — ${r?.summary.passed ?? 0}/${r?.summary.total ?? 0} green</p>
+  <p>Last run: ${escapeHtml(r?.timestamp ?? "never")} — ${r?.summary.passed ?? 0}/${r?.summary.total ?? 0} green</p>
   <form hx-post="/ui/health/run" hx-target="#gates" hx-swap="innerHTML">
     <button type="submit">Run now</button>
   </form>
   <div id="gates" hx-get="/ui/health/latest.json" hx-trigger="every 30s" hx-swap="innerHTML">
     ${r ? r.gates.map((g) => `
-      <div class="gate ${g.status}">
+      <div class="gate ${escapeHtml(g.status)}">
         <span>${g.status === "pass" ? "✅" : g.status === "fail" ? "❌" : "⏭️"}</span>
-        <span class="category">[${g.category}]</span>
-        <span>${g.id}</span>
-        <span>${g.message}</span>
+        <span class="category">[${escapeHtml(g.category)}]</span>
+        <span>${escapeHtml(g.id)}</span>
+        <span>${escapeHtml(g.message)}</span>
         <span>${g.durationMs}ms</span>
       </div>
     `).join("") : "<p>No doctor runs yet. Click Run now.</p>"}
@@ -566,16 +566,30 @@ export async function renderHealthDashboard(c: Context): Promise<Response> {
   return c.html(html);
 }
 
+// Small HTML escaper — gate fields (`g.id`, `g.message`, etc.) may contain markup-like content.
+// Always escape user/operator-controlled text before interpolating into HTML.
+function escapeHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export async function runHealthNow(c: Context): Promise<Response> {
-  // Invoke doctor synchronously for "Run now" button. Returns partial HTML for HTMX swap.
-  const { runDoctor } = await import("../../doctor/runDoctor.js");
-  const r = await runDoctor();
+  // "Run now" must go through the SAME persist + alert lifecycle as the scheduled runner,
+  // otherwise latest.json/ring-buffer/alert dedup drift from manual runs.
+  // runDoctorAndPersist() wraps runDoctor() + ring-buffer write + processAlertLifecycle().
+  const { runDoctorAndPersist } = await import("../../doctor/runDoctor.js");
+  const r = await runDoctorAndPersist();
+  // Render HTML from the persisted run so the UI view matches what latest.json will serve.
   return c.html(r.gates.map((g) => `
-    <div class="gate ${g.status}">
+    <div class="gate ${escapeHtml(g.status)}">
       <span>${g.status === "pass" ? "✅" : g.status === "fail" ? "❌" : "⏭️"}</span>
-      <span class="category">[${g.category}]</span>
-      <span>${g.id}</span>
-      <span>${g.message}</span>
+      <span class="category">[${escapeHtml(g.category)}]</span>
+      <span>${escapeHtml(g.id)}</span>
+      <span>${escapeHtml(g.message)}</span>
       <span>${g.durationMs}ms</span>
     </div>
   `).join(""));

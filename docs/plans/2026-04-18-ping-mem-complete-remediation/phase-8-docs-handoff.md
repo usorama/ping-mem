@@ -104,7 +104,9 @@ Gated health check covering 35 invariants across 7 groups (infrastructure/servic
 bun run doctor                    # run all gates, human-readable
 bun run doctor --json             # machine output for dashboards
 bun run doctor --gate <name>      # run a single gate
-bun run doctor --verbose          # print gate source paths
+bun run doctor --quiet            # suppress per-gate output; only exit code
+bun run doctor --continuous       # loop every 60s (for local tail)
+bun run doctor --fix              # auto-run safe remediations
 ```
 
 Gates live in `src/doctor/gates.ts` (registry) + `src/doctor/checks/*.ts` (7 grouped files: `infrastructure.ts`, `service.ts`, `data.ts`, `selfheal.ts`, `log-hygiene.ts`, `regression.ts`, `alerts.ts`). Each run writes a JSONL line to `~/.ping-mem/doctor-runs/<ISO8601>.jsonl`. launchd plist `~/Library/LaunchAgents/com.ping-mem.doctor.plist` triggers every 15 min.

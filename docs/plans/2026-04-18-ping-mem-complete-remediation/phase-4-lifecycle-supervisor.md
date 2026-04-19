@@ -323,7 +323,7 @@ else
 fi
 ```
 
-**Doctor gate coupling**: P5's `log-rotation-last-7d` gate works with EITHER mechanism — it greps for a rotated `.gz` archive modified within the last 7 days under `~/Library/Logs/ping-guard/` (both newsyslog and the user-space script produce `.gz` archives).
+**Doctor gate coupling**: P5's `log-rotation-last-7d` gate works with EITHER mechanism — it greps for a rotated `.bz2` archive (primary newsyslog path, `J` compressor) OR `.gz` archive (user-space fallback) modified within the last 7 days under `~/Library/Logs/ping-guard/`.
 
 ---
 
@@ -695,7 +695,7 @@ Expect to see `process type = Interactive`, `exit time = 30 seconds`, file limit
 | Gate ID | Group | Hard/Soft | Frequency | Exit Code on Fail | Assertion | Remediation Hint |
 |---------|-------|-----------|-----------|-------------------|-----------|------------------|
 | `disk-below-85` | infrastructure | hard | 15min (default P5 cadence) | 2 | `df -P /System/Volumes/Data` → `$5` (used %) without `%` ≤ 85 | run `bash ~/Projects/ping-mem/scripts/cleanup-disk.sh` |
-| `log-rotation-last-7d` | infrastructure | soft | 15min | 1 (warn) | `find ~/Library/Logs/ping-guard -name '*.gz' -mtime -7 \| head -1` returns at least one path OR `stat -f %m /etc/newsyslog.d/ping-guard.conf` returns a timestamp within 30 days (proves newsyslog is at least installed, even if no rotation has triggered yet in a quiet week) | verify newsyslog OR user-space launchd loaded; kick with `sudo newsyslog` or `launchctl kickstart -k gui/$UID/com.ping-guard.log-rotate` |
+| `log-rotation-last-7d` | infrastructure | soft | 15min | 1 (warn) | `find ~/Library/Logs/ping-guard \( -name '*.bz2' -o -name '*.gz' \) -mtime -7 \| head -1` returns at least one path (matches primary newsyslog `J` → `.bz2` AND user-space fallback `.gz`) OR `stat -f %m /etc/newsyslog.d/ping-guard.conf` returns a timestamp within 30 days (proves newsyslog is at least installed, even if no rotation has triggered yet in a quiet week) | verify newsyslog OR user-space launchd loaded; kick with `sudo newsyslog` or `launchctl kickstart -k gui/$UID/com.ping-guard.log-rotate` |
 | `supervisor-no-rollback` | selfheal | hard | 15min | 2 | `grep -c "Rolled back" ~/Library/Logs/ping-guard/supervisor.log` returns `0` when scoped to the lines written after the P4.3 supervisor-reload timestamp. (P5 records the reload timestamp in `~/.ping-mem/p4-supervisor-reloaded-at` and greps with `awk -v t="$(cat that-file)" …`.) | kill any lingering rollback-era supervisor; re-run P4.3 |
 | `supervisor-watchdog-loaded` | selfheal | hard | 15min | 2 | `launchctl list com.ping-guard.watchdog 2>/dev/null \| grep -qE '"PID" = [1-9]'` | `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.ping-guard.watchdog.plist; launchctl kickstart -k gui/$UID/com.ping-guard.watchdog` |
 | `orbstack-reachable` | infrastructure | soft | 15min | 1 | `orbctl status 2>/dev/null \| grep -q Running` OR `curl -sf --max-time 2 http://localhost:3003/health` returns 200 (i.e. either orbctl confirms OrbStack OR ping-mem is reachable regardless) | `orbctl start` |
@@ -749,7 +749,7 @@ Each row expands the global table in `overview.md#global-wiring-matrix` with the
 1. Doctor scheduler (P5 `com.ping-mem.doctor.plist`) invokes `bun run doctor` every 15min.
 2. `doctor` loads gate registry `src/doctor/gates.ts` → `disk-below-85` gate runs.
 3. Gate executes `df -P /System/Volumes/Data | awk 'NR==2 {sub(/%/,"",$5); print $5}'`.
-4. Gate compares against `~/.ping-ping-mem/thresholds.json#disk_usage_percent_fail` (default 85).
+4. Gate compares against `~/.ping-mem/thresholds.json#disk_usage_percent_fail` (default 85).
 5. On fail (>85): gate exits non-zero, doctor JSONL record flags it, alerts.db dedup, osascript notification.
 6. Remediation: operator (or P5 auto-trigger hook) runs `bash ~/Projects/ping-mem/scripts/cleanup-disk.sh` (P4.1). Script performs the 7 guarded cleanups + docker build/container/image prune (NEVER `--volumes`).
 7. Next doctor cycle re-measures and clears the alert.
