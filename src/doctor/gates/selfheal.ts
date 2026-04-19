@@ -31,8 +31,13 @@ export const selfhealGates: DoctorGate[] = [
       const query =
         "SELECT IFNULL(AVG(confidence),0), IFNULL(SUM(CASE WHEN confidence>=0.5 THEN 1 ELSE 0 END),0), COUNT(*) FROM patterns;";
       // argv form avoids /bin/sh -c so dbPath is never interpreted as shell.
-      const { stdout, code } = await runCmd("sqlite3", [dbPath, query]);
-      if (code !== 0) return { status: "fail", detail: `sqlite3 exit ${code}` };
+      const { stdout, stderr, code } = await runCmd("sqlite3", [dbPath, query]);
+      if (code !== 0) {
+        // Surface stderr so "database is locked" / "unable to open" reaches the operator
+        // instead of being hidden behind a bare exit code.
+        const trimmed = stderr ? stderr.trim().slice(0, 120) : "";
+        return { status: "fail", detail: `sqlite3 exit ${code}${trimmed ? `: ${trimmed}` : ""}` };
+      }
       const parts = stdout.trim().split("|");
       const avg = Number.parseFloat(parts[0] ?? "0");
       const highConf = Number.parseInt(parts[1] ?? "0", 10);

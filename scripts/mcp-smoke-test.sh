@@ -10,7 +10,9 @@ set -euo pipefail
 
 URL="${PING_MEM_URL:-http://localhost:3003}"
 ADMIN_USER="${PING_MEM_ADMIN_USER:-admin}"
-ADMIN_PASS="${PING_MEM_ADMIN_PASS:-admin}"
+# No default — refuse to run with a soft fallback (consistent with
+# verify-ingestion-coverage.sh + reingest-active-projects.sh).
+ADMIN_PASS="${PING_MEM_ADMIN_PASS:?PING_MEM_ADMIN_PASS must be set (see CLAUDE.md admin auth)}"
 ADMIN_AUTH="$(printf '%s:%s' "$ADMIN_USER" "$ADMIN_PASS" | base64)"
 PASS=0
 FAIL=0

@@ -81,10 +81,16 @@ export async function runDoctor(opts: {
     adminPass: process.env.PING_MEM_ADMIN_PASS ?? undefined,
     perGateTimeoutMs: PER_GATE_TIMEOUT_MS,
   };
-  // When caller runs the doctor via `bun run doctor` without an explicit
-  // env, fall back to the documented dev-local admin creds so data/regression
-  // gates don't skip.
-  if (!ctx.adminPass) ctx.adminPass = process.env.PING_MEM_ADMIN_PASS_FALLBACK ?? "ping-mem-dev-local";
+  // When admin creds are missing, regression + admin-authed data gates skip
+  // gracefully (the skip status is visible in the summary). No literal
+  // fallback is embedded in source — launchd plists and env-based local
+  // runs must supply PING_MEM_ADMIN_PASS explicitly.
+  if (!ctx.adminPass && process.env.PING_MEM_ADMIN_PASS_FALLBACK) {
+    ctx.adminPass = process.env.PING_MEM_ADMIN_PASS_FALLBACK;
+  }
+  if (!ctx.adminPass && !opts.quiet) {
+    console.warn("[doctor] PING_MEM_ADMIN_PASS not set — admin-gated gates (regression, session-cap, etc.) will skip");
+  }
 
   let gates: DoctorGate[] = await loadAllGates();
   if (opts.gate) {
