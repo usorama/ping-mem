@@ -91,6 +91,25 @@ async function runRegressionQuery(ctx: GateContext, query: string) {
   }
 }
 
+// Serialize regression queries: they share a session and all hit the same
+// embedding pipeline. Running them in parallel (default Promise.all in the
+// doctor runner) overloads Ollama and causes all-but-the-first to time out.
+// A mutex chain here keeps the framework's parallel-gate invariant intact
+// while the group itself runs sequentially.
+let regressionChain: Promise<unknown> = Promise.resolve();
+
+async function runSerialized<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = regressionChain;
+  let resolveNext!: () => void;
+  regressionChain = new Promise<void>((r) => (resolveNext = r));
+  try {
+    await prev;
+    return await fn();
+  } finally {
+    resolveNext();
+  }
+}
+
 export const regressionGates: DoctorGate[] = CANONICAL_QUERIES.map((query, idx): DoctorGate => {
   const slug = query.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
   return {
@@ -98,7 +117,7 @@ export const regressionGates: DoctorGate[] = CANONICAL_QUERIES.map((query, idx):
     group: "regression",
     description: `Canonical query "${query}" returns ≥1 hit`,
     async run(ctx) {
-      return runRegressionQuery(ctx, query);
+      return runSerialized(() => runRegressionQuery(ctx, query));
     },
   };
 });

@@ -106,14 +106,14 @@ async function runRegressionQuery(query: string): Promise<number> {
 describe("memory-sync regression coverage (10 canonical queries)", () => {
   beforeAll(async () => {
     sharedSessionId = await startSession();
-  });
+  }, 30_000);
 
   afterAll(async () => {
     if (sharedSessionId) {
       await endSession(sharedSessionId);
       sharedSessionId = null;
     }
-  });
+  }, 15_000);
 
   test.each(REGRESSION_QUERIES)(
     "canonical query returns ≥1 hit: %s",
