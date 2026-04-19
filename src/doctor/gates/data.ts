@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { DoctorGate } from "../gates.js";
-import { CANONICAL_PROJECTS, fetchWithTimeout, runShell } from "../util.js";
+import { CANONICAL_PROJECTS, fetchWithTimeout, runCmd } from "../util.js";
 
 const COMMIT_COVERAGE_MIN = 0.95;
 const FILE_COVERAGE_MIN = 0.95;
@@ -81,7 +81,9 @@ function matchProject(projects: ProjectStats[], rootPath: string): ProjectStats 
 
 async function actualCommitCount(rootPath: string): Promise<number> {
   if (!fs.existsSync(path.join(rootPath, ".git"))) return 0;
-  const { stdout, code } = await runShell(`git -C "${rootPath}" rev-list --count HEAD 2>/dev/null`);
+  // argv form avoids shell interpolation of rootPath (defence-in-depth; path
+  // comes from a static CANONICAL_PROJECTS list today, but don't let that drift).
+  const { stdout, code } = await runCmd("git", ["-C", rootPath, "rev-list", "--count", "HEAD"]);
   if (code !== 0) return 0;
   const n = Number.parseInt(stdout.trim(), 10);
   return Number.isNaN(n) ? 0 : n;
@@ -159,7 +161,7 @@ function isFileScanEligible(
 
 async function actualFileCount(rootPath: string): Promise<number> {
   if (!fs.existsSync(path.join(rootPath, ".git"))) return 0;
-  const { stdout, code } = await runShell(`git -C "${rootPath}" ls-files 2>/dev/null`);
+  const { stdout, code } = await runCmd("git", ["-C", rootPath, "ls-files"]);
   if (code !== 0) return 0;
   const lines = stdout.split("\n").filter((l) => l.length > 0);
 
@@ -278,12 +280,15 @@ export const dataGates: DoctorGate[] = [
       const sessionIdFile = path.join(ctx.pingMemDir, "sync-session-id");
       let newestMs = 0;
       let source = "none";
+      // Track stat failures so "hook never ran" vs "permission denied" are
+      // distinguishable in the fail message.
+      let statErrors = 0;
       if (fs.existsSync(heartbeatFile)) {
         try {
           newestMs = fs.statSync(heartbeatFile).mtimeMs;
           source = "sync-heartbeat";
         } catch {
-          /* fall through */
+          statErrors++;
         }
       }
       if (newestMs === 0 && fs.existsSync(sessionIdFile)) {
@@ -291,7 +296,7 @@ export const dataGates: DoctorGate[] = [
           newestMs = fs.statSync(sessionIdFile).mtimeMs;
           source = "sync-session-id";
         } catch {
-          /* fall through */
+          statErrors++;
         }
       }
 
@@ -318,7 +323,7 @@ export const dataGates: DoctorGate[] = [
                 if (s.mtimeMs > markerNewestMs) markerNewestMs = s.mtimeMs;
                 fileCount++;
               } catch {
-                /* ignore */
+                statErrors++;
               }
             }
           }
@@ -327,7 +332,10 @@ export const dataGates: DoctorGate[] = [
       }
 
       if (newestMs === 0 && markerNewestMs === 0) {
-        return { status: "fail", detail: "no sync heartbeat and no markers (hook never ran?)" };
+        const detail = statErrors > 0
+          ? `sync files may exist but statSync failed ${statErrors}× — check permissions on ${ctx.pingMemDir}`
+          : "no sync heartbeat and no markers (hook never ran?)";
+        return { status: "fail", detail };
       }
       if (newestMs === 0) {
         newestMs = markerNewestMs;

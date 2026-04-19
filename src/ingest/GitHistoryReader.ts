@@ -35,12 +35,18 @@ export function parseNonNegativeIntEnv(
   raw: string | undefined,
   fallback: number,
 ): number {
-  const trimmed = raw?.trim();
-  if (!trimmed) return fallback;
-  // Reject "100abc", "1.5", "-1", " 42", etc. Only pure non-negative integers pass.
-  if (!/^\d+$/.test(trimmed)) return fallback;
+  if (raw === undefined || raw === "") return fallback;
+  const trimmed = raw.trim();
+  // Reject "100abc", "1.5", "-1", etc. Only pure non-negative integers pass.
+  if (!/^\d+$/.test(trimmed)) {
+    log.warn("parseNonNegativeIntEnv: rejected non-integer value, using fallback", { raw, fallback });
+    return fallback;
+  }
   const parsed = Number.parseInt(trimmed, 10);
-  if (!Number.isSafeInteger(parsed)) return fallback;
+  if (!Number.isSafeInteger(parsed)) {
+    log.warn("parseNonNegativeIntEnv: value exceeds safe integer range", { raw, fallback });
+    return fallback;
+  }
   return parsed;
 }
 

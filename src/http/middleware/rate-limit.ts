@@ -23,16 +23,24 @@ export function rateLimiter(options: {
   isAdmin?: (c: Context) => boolean;
 }) {
   const { name, maxRequests, windowMs, maxMapSize = 10_000, skip, adminMaxRequests, isAdmin } = options;
+  // Admin and non-admin counts live in separate IP-keyed buckets so an admin
+  // burst can't push a non-admin request from the same IP (dev laptop, shared
+  // NAT) over the non-admin ceiling. Each class has its own sliding window.
   if (!stores.has(name)) stores.set(name, new Map());
-  const limits = stores.get(name)!;
+  if (adminMaxRequests !== undefined && !stores.has(name + ":admin")) {
+    stores.set(name + ":admin", new Map());
+  }
+  const nonAdminLimits = stores.get(name)!;
+  const adminLimits = adminMaxRequests !== undefined ? stores.get(name + ":admin")! : nonAdminLimits;
 
   return createMiddleware(async (c: Context, next: Next) => {
     if (skip?.(c)) return next();
 
     const ip = getClientIp(c);
     const now = Date.now();
-    const admin = isAdmin?.(c) === true;
-    const effectiveMax = admin && adminMaxRequests !== undefined ? adminMaxRequests : maxRequests;
+    const admin = isAdmin?.(c) === true && adminMaxRequests !== undefined;
+    const limits = admin ? adminLimits : nonAdminLimits;
+    const effectiveMax = admin ? adminMaxRequests! : maxRequests;
 
     // Evict expired entries if map too large
     if (limits.size > maxMapSize) {
@@ -41,9 +49,6 @@ export function rateLimiter(options: {
       }
     }
 
-    // Admin and non-admin share the same IP-keyed bucket, but admin enjoys
-    // a higher ceiling. This prevents admin bursts from starving non-admin
-    // traffic, and prevents a compromised admin cred from DoS-ing the process.
     const entry = limits.get(ip);
     if (!entry || now > entry.resetAt) {
       limits.set(ip, { count: 1, resetAt: now + windowMs });

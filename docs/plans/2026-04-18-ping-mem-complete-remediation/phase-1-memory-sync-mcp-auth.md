@@ -49,7 +49,7 @@ Verified before authoring this phase:
 
 **Outcome**: O1.
 
-Edit `~/.claude.json`, locate the `mcpServers.ping-mem` block, add `PING_MEM_ADMIN_USER` and `PING_MEM_ADMIN_PASS` to the `env` object. Creds are `admin` / `ping-mem-dev-local` (from `~/Projects/ping-mem/.env` where `PING_MEM_ADMIN_USER=admin` and `PING_MEM_ADMIN_PASS=ping-mem-dev-local`).
+Edit `~/.claude.json`, locate the `mcpServers.ping-mem` block, add `PING_MEM_ADMIN_USER` and `PING_MEM_ADMIN_PASS` to the `env` object. Values must match `~/Projects/ping-mem/.env` (`PING_MEM_ADMIN_USER` + `PING_MEM_ADMIN_PASS`). Do not paste real credentials into this doc.
 
 Patch (using `jq` for deterministic JSON edit so we don't corrupt sibling server entries):
 
@@ -494,7 +494,7 @@ bash ~/.claude/hooks/ping-mem-native-sync.sh
 
 # Then query
 SID=$(cat ~/.ping-mem/sync-session-id)
-CREDS="admin:ping-mem-dev-local"
+CREDS="$PING_MEM_ADMIN_USER:$PING_MEM_ADMIN_PASS"  # both must be exported — see .env
 
 for Q in \
   "ping-learn pricing research" \

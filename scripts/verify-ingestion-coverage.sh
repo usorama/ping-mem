@@ -28,7 +28,8 @@ set -euo pipefail
 
 PING_MEM_URL="${PING_MEM_URL:-http://localhost:3003}"
 ADMIN_USER="${PING_MEM_ADMIN_USER:-admin}"
-ADMIN_PASS="${PING_MEM_ADMIN_PASS:-ping-mem-dev-local}"
+# No default for PING_MEM_ADMIN_PASS — refuse to run with a known-in-repo credential.
+ADMIN_PASS="${PING_MEM_ADMIN_PASS:?PING_MEM_ADMIN_PASS must be set (see CLAUDE.md admin auth)}"
 HOST_PROJECTS_ROOT="${HOST_PROJECTS_ROOT:-$HOME/Projects}"
 CONTAINER_PROJECTS_ROOT="${CONTAINER_PROJECTS_ROOT:-/projects}"
 THRESHOLD_PCT="${THRESHOLD_PCT:-95}"
@@ -181,7 +182,12 @@ count_eligible_files() {
       continue
     fi
     # Binary filter — scanner rejects files with NUL bytes in the first 8KB.
-    if head -c 8192 "$path" 2>/dev/null | LC_ALL=C grep -q $'\x00'; then
+    # Bash strings can't contain NUL, so `grep $'\x00'` matches empty (everything).
+    # Compare sizes before/after stripping \0: they differ iff a NUL was present.
+    local head_bytes stripped_bytes
+    head_bytes=$(head -c 8192 "$path" 2>/dev/null | LC_ALL=C wc -c | tr -d ' ')
+    stripped_bytes=$(head -c 8192 "$path" 2>/dev/null | LC_ALL=C tr -d '\0' | LC_ALL=C wc -c | tr -d ' ')
+    if [ "${head_bytes:-0}" != "${stripped_bytes:-0}" ]; then
       continue
     fi
     COUNT=$((COUNT + 1))

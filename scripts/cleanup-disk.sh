@@ -53,8 +53,9 @@ fi
 # 3. Playwright caches — SKIP if playwright is actually running (A-SAFE-1)
 # Match the actual node process running the playwright CLI, not any shell/editor
 # that happens to have "playwright" in argv (log viewers, cleanup scripts, etc).
-if pgrep -f '(^|/)(node[^ ]* .*playwright(-core)?(/cli\.js| )|playwright(-core)? (test|install|codegen))' >/dev/null 2>&1; then
-  log "SKIP ms-playwright: active playwright process detected"
+PW_PIDS=$(pgrep -f '(^|/)(node[^ ]* .*playwright(-core)?(/cli\.js| )|playwright(-core)? (test|install|codegen))' 2>/dev/null || true)
+if [ -n "$PW_PIDS" ]; then
+  log "SKIP ms-playwright: active playwright process detected (pid: $(echo "$PW_PIDS" | head -1))"
 else
   if [ -d "$HOME/Library/Caches/ms-playwright" ]; then
     log "Clearing ~/Library/Caches/ms-playwright"
@@ -75,8 +76,9 @@ find "$HOME/Projects"/*/.worktrees -maxdepth 3 -name "node_modules" -type d -mti
 # 6. Old .next caches in worktrees (14d+) — SKIP if next dev is actually running (A-SAFE-1)
 # Tightened pattern: match the node invocation of next(-router-worker)? dev, not
 # any terminal or editor with "next dev" in argv.
-if pgrep -f '(^|/)(node[^ ]* .*next(-router-worker)?([^a-z-]| )dev|next([^a-z-]| )dev)' >/dev/null 2>&1; then
-  log "SKIP worktree .next caches: active 'next dev' process detected"
+NEXT_PIDS=$(pgrep -f '(^|/)(node[^ ]* .*next(-router-worker)?([^a-z-]| )dev|next([^a-z-]| )dev)' 2>/dev/null || true)
+if [ -n "$NEXT_PIDS" ]; then
+  log "SKIP worktree .next caches: active 'next dev' process detected (pid: $(echo "$NEXT_PIDS" | head -1))"
 else
   log "Pruning worktree .next caches older than 14d"
   find "$HOME/Projects"/*/.worktrees -maxdepth 3 -name ".next" -type d -mtime +14 -exec rm -rf {} + 2>/dev/null || true

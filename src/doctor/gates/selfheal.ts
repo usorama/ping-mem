@@ -12,7 +12,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 
 import type { DoctorGate } from "../gates.js";
-import { fetchWithTimeout, runShell } from "../util.js";
+import { fetchWithTimeout, runCmd } from "../util.js";
 
 const PATTERN_CONFIDENCE_MIN = 0.3;
 const PATTERN_HIGH_CONF_MIN = 5;
@@ -30,7 +30,8 @@ export const selfhealGates: DoctorGate[] = [
       }
       const query =
         "SELECT IFNULL(AVG(confidence),0), IFNULL(SUM(CASE WHEN confidence>=0.5 THEN 1 ELSE 0 END),0), COUNT(*) FROM patterns;";
-      const { stdout, code } = await runShell(`sqlite3 "${dbPath}" "${query}"`);
+      // argv form avoids /bin/sh -c so dbPath is never interpreted as shell.
+      const { stdout, code } = await runCmd("sqlite3", [dbPath, query]);
       if (code !== 0) return { status: "fail", detail: `sqlite3 exit ${code}` };
       const parts = stdout.trim().split("|");
       const avg = Number.parseFloat(parts[0] ?? "0");

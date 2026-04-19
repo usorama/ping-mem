@@ -634,7 +634,7 @@ shellcheck scripts/seed-regression-fixtures.sh
 |---|-------|---------|----------|
 | V7.6a | Script exists and executable | `test -x scripts/seed-regression-fixtures.sh` | exit 0 |
 | V7.6b | Shellcheck clean | `shellcheck scripts/seed-regression-fixtures.sh; echo $?` | `0` |
-| V7.6c | Dry-run seeds 5/5 | `PING_MEM_URL=http://localhost:3003 PING_MEM_ADMIN_USER=admin PING_MEM_ADMIN_PASS=ping-mem-dev-local bash scripts/seed-regression-fixtures.sh` | last line `seed OK: 5/5 fixtures written and verified` |
+| V7.6c | Dry-run seeds 5/5 | `PING_MEM_URL=http://localhost:3003 bash scripts/seed-regression-fixtures.sh` (requires `PING_MEM_ADMIN_USER`/`PING_MEM_ADMIN_PASS` exported) | last line `seed OK: 5/5 fixtures written and verified` |
 | V7.6d | Fixtures present in ping-mem | `curl -sf -u "$PING_MEM_ADMIN_USER:$PING_MEM_ADMIN_PASS" "http://localhost:3003/api/v1/search?query=CANARY_" \| jq '.data \| length'` — matches the seeded `CANARY_1`…`CANARY_5` tokens; require `PING_MEM_ADMIN_USER`/`PING_MEM_ADMIN_PASS` to be set in the environment | `>= 5` |
 
 **P8's role (docs only)**: P8 documents the script in `docs/AGENT_INTEGRATION_GUIDE.md` §14 (operational runbook). P8 does NOT author the script — P7 owns authorship, matching the "writes zero product code" frontmatter rule in P8.
@@ -825,7 +825,7 @@ gate_day_status "<gate-name>" "<YYYY-MM-DD>"   # echoes "green" | "red"
 
 | # | Test | Setup | Command | Expected |
 |---|------|-------|---------|----------|
-| F7.1 | Regression suite passes locally | ping-mem up on :3003 with seeded fixtures | `PING_MEM_ADMIN_USER=admin PING_MEM_ADMIN_PASS=ping-mem-dev-local bun test tests/regression/*.test.ts` | 5 canonical tests pass, 0 fail |
+| F7.1 | Regression suite passes locally | ping-mem up on :3003 with seeded fixtures; `PING_MEM_ADMIN_USER`/`PING_MEM_ADMIN_PASS` exported | `bun test tests/regression/*.test.ts` | 5 canonical tests pass, 0 fail |
 | F7.2 | Regression suite passes in CI | push to PR | GitHub Actions `regression` job | green check |
 | F7.3 | Session lifecycle is clean | run test, then query sessions | `curl -u admin:pass http://localhost:3003/api/v1/session/list \| jq '.data[] \| select(.name=="regression-p7")'` (after `afterAll`) | empty (session ended) |
 | F7.4 | soak-state.json written after first run | create fake `~/.ping-mem/doctor-runs/2026-04-19T06-00-00.000Z.jsonl` (colons replaced with hyphens — matches P5's `new Date().toISOString().replace(/:/g, "-")` naming) with all-green gates | `bash scripts/soak-monitor.sh; jq -r .status ~/.ping-mem/soak-state.json` | `red` (only day 1) with `streak_days_green: 1` for every hard gate |

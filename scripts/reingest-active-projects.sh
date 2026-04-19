@@ -13,7 +13,8 @@ set -euo pipefail
 
 PING_MEM_URL="${PING_MEM_URL:-http://localhost:3003}"
 ADMIN_USER="${PING_MEM_ADMIN_USER:-admin}"
-ADMIN_PASS="${PING_MEM_ADMIN_PASS:-ping-mem-dev-local}"
+# No default for PING_MEM_ADMIN_PASS — refuse to run with a known-in-repo credential.
+ADMIN_PASS="${PING_MEM_ADMIN_PASS:?PING_MEM_ADMIN_PASS must be set (see CLAUDE.md admin auth)}"
 HOST_PROJECTS_ROOT="${HOST_PROJECTS_ROOT:-$HOME/Projects}"
 CONTAINER_PROJECTS_ROOT="${CONTAINER_PROJECTS_ROOT:-/projects}"
 
@@ -91,6 +92,7 @@ for P in $PROJECTS; do
   RUN_ID=$(cat "$RUN_ID_FILE")
   [ -z "$RUN_ID" ] && continue
 
+  CONSECUTIVE_CURL_FAIL=0
   while :; do
     NOW=$(date +%s)
     if [ "$NOW" -gt "$DEADLINE" ]; then
@@ -99,8 +101,25 @@ for P in $PROJECTS; do
       break
     fi
 
+    # Explicit curl exit capture — don't let 401/5xx silently degrade to
+    # "unknown status" forever. After 5 back-to-back curl failures, bail.
+    set +e
     STATUS_JSON=$(curl -sf --max-time 10 -u "${ADMIN_USER}:${ADMIN_PASS}" \
-      "${PING_MEM_URL}/api/v1/ingestion/run/${RUN_ID}" 2>&1) || STATUS_JSON=""
+      "${PING_MEM_URL}/api/v1/ingestion/run/${RUN_ID}" 2>&1)
+    CURL_EXIT=$?
+    set -e
+    if [ "$CURL_EXIT" -ne 0 ]; then
+      CONSECUTIVE_CURL_FAIL=$((CONSECUTIVE_CURL_FAIL + 1))
+      echo "$P: curl failed (exit=${CURL_EXIT}, consecutive=${CONSECUTIVE_CURL_FAIL}): ${STATUS_JSON:-<empty>}" >&2
+      if [ "$CONSECUTIVE_CURL_FAIL" -ge 5 ]; then
+        echo "$P: GIVING UP after 5 consecutive curl failures (likely auth/network)" >&2
+        FAIL=$((FAIL + 1))
+        break
+      fi
+      sleep 3
+      continue
+    fi
+    CONSECUTIVE_CURL_FAIL=0
     STATUS=$(echo "$STATUS_JSON" | jq -r '.status // "unknown"' 2>/dev/null || echo "unknown")
 
     case "$STATUS" in
@@ -108,14 +127,14 @@ for P in $PROJECTS; do
         END_MS=$(( $(date +%s) * 1000 ))
         START_MS=$(cat "$STATE_DIR/$P.start_ms" 2>/dev/null || echo 0)
         DURATION_MS=$((END_MS - START_MS))
-        FILES=$(echo "$STATUS_JSON" | jq -r '.result.filesIndexed // 0')
-        COMMITS=$(echo "$STATUS_JSON" | jq -r '.result.commitsIndexed // 0')
+        FILES=$(echo "$STATUS_JSON" | jq -r '.result.filesIndexed // 0' 2>/dev/null || echo 0)
+        COMMITS=$(echo "$STATUS_JSON" | jq -r '.result.commitsIndexed // 0' 2>/dev/null || echo 0)
         echo "$P: COMPLETED in ${DURATION_MS}ms (files=$FILES commits=$COMMITS)"
         echo "$DURATION_MS" > "$STATE_DIR/$P.duration_ms"
         break
         ;;
       failed)
-        ERR=$(echo "$STATUS_JSON" | jq -r '.error // "(no error)"')
+        ERR=$(echo "$STATUS_JSON" | jq -r '.error // "(no error)"' 2>/dev/null || echo "(jq-parse-failed)")
         echo "$P: FAILED — $ERR" >&2
         FAIL=$((FAIL + 1))
         break
