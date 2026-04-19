@@ -19,6 +19,12 @@ CONTAINER_PROJECTS_ROOT="${CONTAINER_PROJECTS_ROOT:-/projects}"
 
 PROJECTS="ping-learn ping-mem auto-os ping-guard thrivetree"
 
+# Preflight required tools — jq path differs between macOS (brew) and Linux.
+# Rely on PATH lookup; fail fast with a clear message if missing.
+for bin in curl jq; do
+  command -v "$bin" >/dev/null 2>&1 || { echo "ERROR: $bin not found on PATH" >&2; exit 2; }
+done
+
 # Verify ping-mem is reachable
 if ! curl -sf --max-time 5 "${PING_MEM_URL}/health" >/dev/null; then
   echo "ERROR: ping-mem not reachable at ${PING_MEM_URL}" >&2
@@ -53,7 +59,7 @@ for P in $PROJECTS; do
     continue
   fi
 
-  RUN_ID=$(echo "$RESPONSE" | /usr/bin/jq -r '.runId // empty' 2>/dev/null || echo "")
+  RUN_ID=$(echo "$RESPONSE" | jq -r '.runId // empty' 2>/dev/null || echo "")
   if [ -z "$RUN_ID" ]; then
     echo "$P: FAIL — no runId in response: $RESPONSE" >&2
     FAIL=$((FAIL + 1))
@@ -72,7 +78,12 @@ BUDGET_SEC="${REINGEST_BUDGET_SEC:-2700}"
 DEADLINE=$(( $(date +%s) + BUDGET_SEC ))
 
 echo ""
-echo "Polling ingestion runs (budget: ${BUDGET_SEC}s, deadline: $(date -r $DEADLINE '+%H:%M:%S'))..."
+# `date -r <epoch>` is macOS/BSD; `date -d @<epoch>` is GNU/Linux. Try both, fall back
+# to a relative hint so the log line never takes the script down under set -e.
+DEADLINE_HMS=$(date -r "$DEADLINE" '+%H:%M:%S' 2>/dev/null \
+  || date -d "@$DEADLINE" '+%H:%M:%S' 2>/dev/null \
+  || echo "+${BUDGET_SEC}s")
+echo "Polling ingestion runs (budget: ${BUDGET_SEC}s, deadline: ${DEADLINE_HMS})..."
 
 for P in $PROJECTS; do
   RUN_ID_FILE="$STATE_DIR/$P.runid"
@@ -90,21 +101,21 @@ for P in $PROJECTS; do
 
     STATUS_JSON=$(curl -sf --max-time 10 -u "${ADMIN_USER}:${ADMIN_PASS}" \
       "${PING_MEM_URL}/api/v1/ingestion/run/${RUN_ID}" 2>&1) || STATUS_JSON=""
-    STATUS=$(echo "$STATUS_JSON" | /usr/bin/jq -r '.status // "unknown"' 2>/dev/null || echo "unknown")
+    STATUS=$(echo "$STATUS_JSON" | jq -r '.status // "unknown"' 2>/dev/null || echo "unknown")
 
     case "$STATUS" in
       completed)
         END_MS=$(( $(date +%s) * 1000 ))
         START_MS=$(cat "$STATE_DIR/$P.start_ms" 2>/dev/null || echo 0)
         DURATION_MS=$((END_MS - START_MS))
-        FILES=$(echo "$STATUS_JSON" | /usr/bin/jq -r '.result.filesIndexed // 0')
-        COMMITS=$(echo "$STATUS_JSON" | /usr/bin/jq -r '.result.commitsIndexed // 0')
+        FILES=$(echo "$STATUS_JSON" | jq -r '.result.filesIndexed // 0')
+        COMMITS=$(echo "$STATUS_JSON" | jq -r '.result.commitsIndexed // 0')
         echo "$P: COMPLETED in ${DURATION_MS}ms (files=$FILES commits=$COMMITS)"
         echo "$DURATION_MS" > "$STATE_DIR/$P.duration_ms"
         break
         ;;
       failed)
-        ERR=$(echo "$STATUS_JSON" | /usr/bin/jq -r '.error // "(no error)"')
+        ERR=$(echo "$STATUS_JSON" | jq -r '.error // "(no error)"')
         echo "$P: FAILED — $ERR" >&2
         FAIL=$((FAIL + 1))
         break

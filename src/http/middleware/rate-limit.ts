@@ -16,10 +16,13 @@ export function rateLimiter(options: {
   maxRequests: number;
   windowMs: number;
   maxMapSize?: number;
-  /** Optional predicate — when it returns true the request bypasses the limiter. */
+  /** Optional predicate — when it returns true the request bypasses the limiter entirely. */
   skip?: (c: Context) => boolean;
+  /** Elevated quota for admin-authed callers. Used when isAdmin(c) is true. */
+  adminMaxRequests?: number;
+  isAdmin?: (c: Context) => boolean;
 }) {
-  const { name, maxRequests, windowMs, maxMapSize = 10_000, skip } = options;
+  const { name, maxRequests, windowMs, maxMapSize = 10_000, skip, adminMaxRequests, isAdmin } = options;
   if (!stores.has(name)) stores.set(name, new Map());
   const limits = stores.get(name)!;
 
@@ -28,6 +31,8 @@ export function rateLimiter(options: {
 
     const ip = getClientIp(c);
     const now = Date.now();
+    const admin = isAdmin?.(c) === true;
+    const effectiveMax = admin && adminMaxRequests !== undefined ? adminMaxRequests : maxRequests;
 
     // Evict expired entries if map too large
     if (limits.size > maxMapSize) {
@@ -36,6 +41,9 @@ export function rateLimiter(options: {
       }
     }
 
+    // Admin and non-admin share the same IP-keyed bucket, but admin enjoys
+    // a higher ceiling. This prevents admin bursts from starving non-admin
+    // traffic, and prevents a compromised admin cred from DoS-ing the process.
     const entry = limits.get(ip);
     if (!entry || now > entry.resetAt) {
       limits.set(ip, { count: 1, resetAt: now + windowMs });
@@ -43,7 +51,7 @@ export function rateLimiter(options: {
     }
 
     entry.count++;
-    if (entry.count > maxRequests) {
+    if (entry.count > effectiveMax) {
       const retryAfterSeconds = Math.ceil((entry.resetAt - now) / 1000);
       c.header("Retry-After", String(retryAfterSeconds));
       return c.json({ error: "Too Many Requests", message: "Rate limit exceeded" }, 429);

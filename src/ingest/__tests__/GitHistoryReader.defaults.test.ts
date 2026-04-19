@@ -46,6 +46,15 @@ describe("GitHistoryReader defaults", () => {
       expect(parseNonNegativeIntEnv("abc", 42)).toBe(42);
       expect(parseNonNegativeIntEnv("NaN", 42)).toBe(42);
     });
+    test("rejects partial numeric strings (no silent truncation)", () => {
+      // Number.parseInt would accept these as 100 and 1 respectively; the
+      // tightened parser rejects them so malformed env config doesn't silently
+      // apply unintended ingestion limits.
+      expect(parseNonNegativeIntEnv("100abc", 42)).toBe(42);
+      expect(parseNonNegativeIntEnv("1.5", 42)).toBe(42);
+      expect(parseNonNegativeIntEnv(" 100 ", 42)).toBe(100); // trim OK
+      expect(parseNonNegativeIntEnv("08", 42)).toBe(8); // leading zeros OK, decimal parse
+    });
   });
 
   describe("resolveDefaultMaxCommits", () => {

@@ -50,8 +50,10 @@ if [ -d "$HOME/Library/Developer/Xcode/DerivedData" ]; then
   rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/* 2>/dev/null || true
 fi
 
-# 3. Playwright caches — SKIP if playwright is running (A-SAFE-1)
-if pgrep -f 'playwright' >/dev/null 2>&1; then
+# 3. Playwright caches — SKIP if playwright is actually running (A-SAFE-1)
+# Match the actual node process running the playwright CLI, not any shell/editor
+# that happens to have "playwright" in argv (log viewers, cleanup scripts, etc).
+if pgrep -f '(^|/)(node[^ ]* .*playwright(-core)?(/cli\.js| )|playwright(-core)? (test|install|codegen))' >/dev/null 2>&1; then
   log "SKIP ms-playwright: active playwright process detected"
 else
   if [ -d "$HOME/Library/Caches/ms-playwright" ]; then
@@ -70,8 +72,10 @@ fi
 log "Pruning worktree node_modules older than 14d"
 find "$HOME/Projects"/*/.worktrees -maxdepth 3 -name "node_modules" -type d -mtime +14 -exec rm -rf {} + 2>/dev/null || true
 
-# 6. Old .next caches in worktrees (14d+) — SKIP if next dev is running (A-SAFE-1)
-if pgrep -f 'next dev' >/dev/null 2>&1; then
+# 6. Old .next caches in worktrees (14d+) — SKIP if next dev is actually running (A-SAFE-1)
+# Tightened pattern: match the node invocation of next(-router-worker)? dev, not
+# any terminal or editor with "next dev" in argv.
+if pgrep -f '(^|/)(node[^ ]* .*next(-router-worker)?([^a-z-]| )dev|next([^a-z-]| )dev)' >/dev/null 2>&1; then
   log "SKIP worktree .next caches: active 'next dev' process detected"
 else
   log "Pruning worktree .next caches older than 14d"
@@ -88,8 +92,14 @@ log "Post: $(disk_line)"
 POST_PCT=$(disk_pct)
 log "Post disk pct: ${POST_PCT}"
 
-# Gate: assert <= 85%
+# Gate: assert <= 85%. Fail closed on unparseable df output (empty, non-numeric)
+# — otherwise the integer comparison silently evaluates false and masks the
+# condition this gate exists to catch.
 POST_NUM=${POST_PCT%\%}
+if ! [[ "${POST_NUM}" =~ ^[0-9]+$ ]]; then
+  log "GATE-FAIL: could not parse disk pct from '${POST_PCT}'"
+  exit 2
+fi
 if [ "${POST_NUM}" -gt 85 ]; then
   log "GATE-FAIL: disk still ${POST_PCT} (>85%)"
   exit 2

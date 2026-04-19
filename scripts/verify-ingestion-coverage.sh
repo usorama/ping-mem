@@ -162,6 +162,14 @@ count_eligible_files() {
     fi
     local path="$DIR/$rel"
     [ -e "$path" ] || continue
+    # Mirror ProjectScanner.hashAndValidateFile: skip non-regular files (gitlinks,
+    # submodules, directories registered as files), dotenv files, and binaries.
+    [ -f "$path" ] || continue
+    local base
+    base="$(basename "$rel")"
+    if [ "$base" = ".env" ] || [[ "$base" == .env.* ]]; then
+      continue
+    fi
     # Extension filter
     if echo "$rel" | grep -Eqi "$EXCLUDE_REGEX"; then
       continue
@@ -170,6 +178,10 @@ count_eligible_files() {
     local size
     size=$(stat -f '%z' "$path" 2>/dev/null || stat -c '%s' "$path" 2>/dev/null || echo 0)
     if [ "$size" -gt "$MAX_FILE_SIZE_BYTES" ] 2>/dev/null; then
+      continue
+    fi
+    # Binary filter — scanner rejects files with NUL bytes in the first 8KB.
+    if head -c 8192 "$path" 2>/dev/null | LC_ALL=C grep -q $'\x00'; then
       continue
     fi
     COUNT=$((COUNT + 1))
@@ -191,8 +203,18 @@ if ! curl -sf --max-time 5 "${PING_MEM_URL}/health" >/dev/null; then
   exit 2
 fi
 
+# Under `set -e`, a failing curl would exit with curl's status and hide the
+# documented infra-failure code 2. Capture exit explicitly and map any failure
+# to exit 2.
+set +e
 PROJECTS_JSON=$(curl -sf --max-time 30 -u "${ADMIN_USER}:${ADMIN_PASS}" \
   "${PING_MEM_URL}/api/v1/codebase/projects" 2>&1)
+CURL_EXIT=$?
+set -e
+if [ "$CURL_EXIT" -ne 0 ]; then
+  echo "ERROR: /api/v1/codebase/projects failed (curl=${CURL_EXIT}): ${PROJECTS_JSON}" >&2
+  exit 2
+fi
 if [ -z "$PROJECTS_JSON" ]; then
   echo "ERROR: /api/v1/codebase/projects returned empty" >&2
   exit 2

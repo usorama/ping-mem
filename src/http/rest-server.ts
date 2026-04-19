@@ -122,6 +122,27 @@ export type AppEnv = {
   };
 };
 
+/**
+ * Race a promise against a timeout. On timeout, rejects with the given message
+ * AND clears the timer so it doesn't leak per request. The underlying work
+ * still runs to completion (we can't cancel without a cooperative signal),
+ * so the returned error should signal "queued/running" to the caller to
+ * avoid retry storms against still-in-flight state changes.
+ */
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export class RESTPingMemServer {
   private app: Hono<AppEnv>;
   private config: HTTPServerConfig & PingMemServerConfig;
@@ -363,13 +384,17 @@ export class RESTPingMemServer {
       if (adminUser && adminPass) {
         const adminGuard = async (c: Parameters<Parameters<typeof this.app.use>[1]>[0], next: () => Promise<void>) => {
           const authHeader = c.req.header("Authorization") ?? "";
-          if (authHeader.startsWith("Basic ")) {
-            const decoded = atob(authHeader.slice(6));
-            const [user, ...passParts] = decoded.split(":");
-            const pass = passParts.join(":");
-            if (timingSafeStringEqual(user ?? "", adminUser) && timingSafeStringEqual(pass ?? "", adminPass)) {
-              return next();
+          try {
+            if (authHeader.startsWith("Basic ")) {
+              const decoded = atob(authHeader.slice(6));
+              const [user, ...passParts] = decoded.split(":");
+              const pass = passParts.join(":");
+              if (timingSafeStringEqual(user ?? "", adminUser) && timingSafeStringEqual(pass ?? "", adminPass)) {
+                return next();
+              }
             }
+          } catch {
+            // Malformed Authorization header (bad base64, etc.) — fall through to 401.
           }
           c.header("WWW-Authenticate", 'Basic realm="ping-mem admin"');
           return c.json({ error: "Unauthorized" }, 401);
@@ -404,20 +429,26 @@ export class RESTPingMemServer {
       }
     };
 
-    // Higher rate limit for auto-capture hooks (300 req/min)
+    // Higher rate limit for auto-capture hooks (300 req/min non-admin, 1500/min admin).
+    // Admin callers (hooks, doctor, dev scripts) get a bounded higher ceiling instead of
+    // a full bypass — keeps the route protected if admin creds leak.
     this.app.use("/api/v1/observations/*", rateLimiter({
       name: "observations",
       maxRequests: 300,
       windowMs: 60_000,
-      skip: isAdminAuthed,
+      adminMaxRequests: 1500,
+      isAdmin: isAdminAuthed,
     }));
 
-    // Rate limit state-changing API endpoints (60 req/min per IP)
+    // Rate limit state-changing API endpoints (60 req/min per IP non-admin, 600/min admin).
+    // Policy: every /api/v1/* caller faces SOME limit. Admin gets 10× headroom for
+    // legitimate bursts (full memory re-sync, ingestion sweeps) but never unbounded.
     this.app.use("/api/v1/*", rateLimiter({
       name: "api-v1",
       maxRequests: 60,
       windowMs: 60_000,
-      skip: isAdminAuthed,
+      adminMaxRequests: 600,
+      isAdmin: isAdminAuthed,
     }));
   }
 
@@ -1128,27 +1159,18 @@ export class RESTPingMemServer {
 
         const forceReingest = parseResult.data.forceReingest;
 
-        // Route through IngestionQueue to prevent concurrent Neo4j writes (deadlock)
+        // Route through IngestionQueue to prevent concurrent Neo4j writes (deadlock).
+        // Ingestion keeps running in the background after timeout — callers should
+        // treat timeout as "still running" and NOT retry, or they'll double-write.
         const INGEST_TIMEOUT_MS = 300_000; // 5 min
-        const result = this.ingestionQueue
-          ? await Promise.race([
-              this.ingestionQueue.enqueueAndWait({ projectDir, forceReingest }),
-              new Promise<never>((_, reject) =>
-                setTimeout(
-                  () => reject(new Error("Ingestion timed out after 5 minutes")),
-                  INGEST_TIMEOUT_MS
-                )
-              ),
-            ])
-          : await Promise.race([
-              this.config.ingestionService.ingestProject({ projectDir, forceReingest }),
-              new Promise<never>((_, reject) =>
-                setTimeout(
-                  () => reject(new Error("Ingestion timed out after 5 minutes")),
-                  INGEST_TIMEOUT_MS
-                )
-              ),
-            ]);
+        const ingestPromise = this.ingestionQueue
+          ? this.ingestionQueue.enqueueAndWait({ projectDir, forceReingest })
+          : this.config.ingestionService.ingestProject({ projectDir, forceReingest });
+        const result = await withTimeout(
+          ingestPromise,
+          INGEST_TIMEOUT_MS,
+          "Ingestion timed out after 5 minutes (still running in background)",
+        );
 
         if (result) {
           if (this.config.adminStore) {
@@ -3770,15 +3792,11 @@ export class RESTPingMemServer {
         for (const mod of modules) {
           const result = mod.handle(name, args);
           if (result !== undefined) {
-            const data = await Promise.race([
+            const data = await withTimeout(
               result,
-              new Promise<never>((_, reject) =>
-                setTimeout(
-                  () => reject(new Error(`Tool '${name}' timed out after 2 minutes`)),
-                  TOOL_INVOKE_TIMEOUT_MS
-                )
-              ),
-            ]);
+              TOOL_INVOKE_TIMEOUT_MS,
+              `Tool '${name}' timed out after 2 minutes`,
+            );
 
             // Sync session state back from tool module to REST server.
             // When context_session_start runs via /invoke, it updates

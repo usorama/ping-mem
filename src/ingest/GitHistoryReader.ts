@@ -35,11 +35,12 @@ export function parseNonNegativeIntEnv(
   raw: string | undefined,
   fallback: number,
 ): number {
-  if (raw === undefined || raw === "") return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed < 0) {
-    return fallback;
-  }
+  const trimmed = raw?.trim();
+  if (!trimmed) return fallback;
+  // Reject "100abc", "1.5", "-1", " 42", etc. Only pure non-negative integers pass.
+  if (!/^\d+$/.test(trimmed)) return fallback;
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isSafeInteger(parsed)) return fallback;
   return parsed;
 }
 

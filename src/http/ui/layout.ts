@@ -28,7 +28,7 @@ const staticDir = process.env.PING_MEM_STATIC_DIR ?? path.resolve(process.cwd(),
 const SRI_HTMX = computeSri(path.join(staticDir, "htmx.min.js"));
 const SRI_CHAT = computeSri(path.join(staticDir, "chat.js"));
 
-export type UIRoute = "dashboard" | "memories" | "diagnostics" | "ingestion" | "agents" | "knowledge" | "sessions" | "events" | "worklog" | "codebase" | "eval" | "insights" | "mining" | "profile";
+export type UIRoute = "dashboard" | "memories" | "diagnostics" | "ingestion" | "agents" | "knowledge" | "sessions" | "events" | "worklog" | "codebase" | "eval" | "insights" | "mining" | "profile" | "health";
 
 interface LayoutOptions {
   title: string;
@@ -55,6 +55,7 @@ const NAV_ITEMS: Array<{ route: UIRoute; path: string; icon: string; label: stri
   { route: "insights", path: "/ui/insights", icon: "\u25CE", label: "Insights" },
   { route: "mining", path: "/ui/mining", icon: "\u25BC", label: "Mining" },
   { route: "profile", path: "/ui/profile", icon: "\u25A6", label: "Profile" },
+  { route: "health", path: "/ui/health", icon: "\u2665", label: "Health" },
 ];
 
 export function renderLayout(options: LayoutOptions): string {
