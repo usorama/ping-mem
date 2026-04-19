@@ -25,6 +25,7 @@ import authCmd from "./commands/auth.js";
 import configCmd from "./commands/config.js";
 import shellHookCmd from "./commands/shell-hook.js";
 import daemonCmd from "./commands/daemon.js";
+import doctorCmd from "./commands/doctor.js";
 
 function readVersion(): string {
   try {
@@ -60,6 +61,7 @@ const main = defineCommand({
     config: configCmd,
     "shell-hook": shellHookCmd,
     daemon: daemonCmd,
+    doctor: doctorCmd,
   },
 });
 
