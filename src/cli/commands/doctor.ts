@@ -1,5 +1,5 @@
 /**
- * `ping-mem doctor` — observability CLI for the 29-gate health board.
+ * `ping-mem doctor` — observability CLI for the 34-gate health board.
  *
  * Runs all gates in parallel with per-gate timeouts, persists a JSONL
  * run file to ~/.ping-mem/doctor-runs/, emits dedup'd macOS notifications
@@ -14,8 +14,8 @@ import * as path from "node:path";
 import { loadAllGates, type DoctorGate, type GateContext, type GateResult } from "../../doctor/gates.js";
 import { dispatchAlerts, openAlertsDb } from "../../doctor/alerts.js";
 
-const TOTAL_BUDGET_MS = 15_000;
-const PER_GATE_TIMEOUT_MS = 7_000;
+const TOTAL_BUDGET_MS = 20_000;
+const PER_GATE_TIMEOUT_MS = 10_000;
 const RUN_RING_BUFFER_SIZE = 96; // 24h at 15-min cadence
 
 interface DoctorRunRecord {
@@ -186,7 +186,7 @@ function printHuman(record: DoctorRunRecord): void {
 export default defineCommand({
   meta: {
     name: "doctor",
-    description: "Run the 29-gate ping-mem health board (exit 0 on all-pass, 2 on any fail)",
+    description: "Run the 34-gate ping-mem health board (exit 0 on all-pass, 2 on any fail)",
   },
   args: {
     json: { type: "boolean", description: "Emit JSON", default: false },

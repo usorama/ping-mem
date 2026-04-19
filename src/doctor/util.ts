@@ -96,4 +96,9 @@ export const CANONICAL_QUERIES: readonly string[] = [
   "classroom redesign worktree",
   "PR 236 JWT secret isolation",
   "DPDP consent age 18",
+  "PingLearn voice tutor LiveKit",
+  "Supabase migration consent tokens",
+  "Ollama qwen3:8b recovery brain",
+  "ping-mem-doctor gates 29",
+  "native-sync hook truncation fix",
 ];

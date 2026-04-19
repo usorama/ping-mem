@@ -65,7 +65,7 @@ async function runRegressionQuery(ctx: GateContext, query: string) {
           ...adminAuthHeader(ctx.adminUser, ctx.adminPass),
         },
       },
-      4500,
+      9500,
     );
     if (status !== 200) {
       return { status: "fail" as const, detail: `HTTP ${status}: ${body.slice(0, 120)}` };

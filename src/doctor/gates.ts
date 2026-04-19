@@ -1,5 +1,6 @@
 /**
- * Doctor gate registry — single source of truth for all 29 ping-mem gates.
+ * Doctor gate registry — single source of truth for all 34 ping-mem gates
+ * (24 infra/service/data/selfheal/loghygiene/alerts + 10 regression queries).
  *
  * Each gate exposes `id`, `group`, `description`, and a `run(ctx)` function
  * returning a `GateResult`. Groups are wired as per A-DOM-1:
