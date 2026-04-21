@@ -170,7 +170,7 @@ export class CausalToolModule implements ToolModule {
       const links = await this.state.causalDiscoveryAgent.discover(text);
       return { discovered: links.length, links, persisted: false };
     } catch (error) {
-      log.error('Causal discovery failed', { error: error instanceof Error ? error.message : String(error) });
+      log.error('Causal discovery failed', { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
       throw new Error('Causal discovery failed', { cause: error });
     }
   }

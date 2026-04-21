@@ -103,7 +103,9 @@ export function isSameHostOrigin(header: string, host: string): boolean {
   try {
     return new URL(header).host === host;
   } catch {
-    console.debug("CSRF: unparseable origin", header);
+    // Log unparseable origin using local logger (log not yet defined in module scope at this function)
+    const log = createLogger("CSRF");
+    log.debug("unparseable origin", { header: header?.slice(0, 100) });
     return false;
   }
 }

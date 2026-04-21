@@ -236,10 +236,7 @@ function createOllamaClient(ollamaUrl: string): OpenAI {
   if (services.graphManager) {
     const fallbackExtractor = new EntityExtractor();
     if (ollamaUrl) {
-      const ollamaClient = new OpenAI({
-        apiKey: "ollama",
-        baseURL: `${ollamaUrl}/v1`,
-      }) as unknown as LLMEntityExtractorConfig["openai"];
+      const ollamaClient = createOllamaClient(ollamaUrl) as unknown as LLMEntityExtractorConfig["openai"];
       services.llmEntityExtractor = new LLMEntityExtractor({
         openai: ollamaClient,
         fallbackExtractor,
@@ -262,8 +259,9 @@ function createOllamaClient(ollamaUrl: string): OpenAI {
 
   // Wire ContradictionDetector: Ollama (primary) → OpenAI (fallback)
   // Uses OpenAI-compatible chat API — same pattern as LLMEntityExtractor
-  try {  if (ollamaUrl) {
-    const ollamaClientForContradiction = createOllamaClient(ollamaUrl) as unknown as ConstructorParameters<typeof ContradictionDetector>[0]["openai"];
+  try {
+    if (ollamaUrl) {
+      const ollamaClientForContradiction = createOllamaClient(ollamaUrl) as unknown as ConstructorParameters<typeof ContradictionDetector>[0]["openai"];
     services.contradictionDetector = new ContradictionDetector({
       openai: ollamaClientForContradiction,
       model: "llama3.2",
@@ -284,9 +282,10 @@ function createOllamaClient(ollamaUrl: string): OpenAI {
 
   // Wire CausalDiscoveryAgent: Ollama (primary) → OpenAI (fallback)
   // Requires both causalGraphManager and graphManager (both come from Neo4j block)
-  try {  if (services.causalGraphManager && services.graphManager) {
-    if (ollamaUrl) {
-      const ollamaClientForCausal = createOllamaClient(ollamaUrl) as unknown as CausalDiscoveryConfig["openai"];
+  try {
+    if (services.causalGraphManager && services.graphManager) {
+      if (ollamaUrl) {
+        const ollamaClientForCausal = createOllamaClient(ollamaUrl) as unknown as CausalDiscoveryConfig["openai"];
       services.causalDiscoveryAgent = new CausalDiscoveryAgent({
         openai: ollamaClientForCausal,
         causalGraphManager: services.causalGraphManager,

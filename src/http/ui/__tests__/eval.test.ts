@@ -61,6 +61,16 @@ describe("loadEvalRuns", () => {
     expect(runs).toEqual([]);
   });
 
+  test("blocks paths outside project root", () => {
+    // Create a real dir outside process.cwd() to distinguish traversal block from existsSync
+    const outsideDir = "/tmp/ping-mem-traversal-test";
+    mkdirSync(outsideDir, { recursive: true });
+    writeFileSync(join(outsideDir, "run.json"), JSON.stringify(makeRun()));
+    const result = loadEvalRuns(outsideDir);
+    expect(result).toEqual([]);
+    rmSync(outsideDir, { recursive: true });
+  });
+
   test("returns empty array when directory is empty", () => {
     const runs = loadEvalRuns(TEST_RUNS_DIR);
     expect(runs).toEqual([]);
