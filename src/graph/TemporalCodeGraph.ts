@@ -354,7 +354,7 @@ export class TemporalCodeGraph {
           projectId: projectId ?? null,
           limit: neo4j.int(limit),
         },
-        { timeout: 10000 }
+        { timeout: 30000 }
       );
 
       return result.records.map((r) => ({
@@ -798,7 +798,7 @@ export class TemporalCodeGraph {
          RETURN DISTINCT src.path AS file, min(depth) AS depth, via ORDER BY depth, src.path
          LIMIT $limit`,
         { fileId, projectId, limit: neo4j.int(limit) },
-        { timeout: 10000 }
+        { timeout: 30000 }
       );
       const records = result.records.map((r) => ({
         file: r.get("file") as string,
@@ -824,7 +824,7 @@ export class TemporalCodeGraph {
          RETURN DISTINCT tgt.path AS file, min(depth) AS depth ORDER BY depth, tgt.path
          LIMIT $limit`,
         { fileId, projectId, limit: neo4j.int(limit) },
-        { timeout: 10000 }
+        { timeout: 30000 }
       );
       const records = result.records.map((r) => ({
         file: r.get("file") as string,

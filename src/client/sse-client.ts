@@ -88,9 +88,8 @@ export class SSEPingMemClient implements PingMemClient {
         const url = new URL(this.config.sseEndpoint, this.config.baseUrl);
 
         // Build SSE URL with query parameters
-        if (this.config.apiKey) {
-          url.searchParams.set("api_key", this.config.apiKey);
-        }
+        // Note: API key is sent via X-API-Key header only, not as a URL parameter,
+        // to avoid leaking credentials in server logs and browser history.
         if (this.currentSessionId) {
           url.searchParams.set("session_id", this.currentSessionId);
         }

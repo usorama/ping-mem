@@ -12,7 +12,7 @@ import { statCard, emptyState, badge } from "./components.js";
 import { createLogger } from "../../util/logger.js";
 import type { EvalRunResult, EvalResult } from "../../eval/types.js";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 const log = createLogger("UI:Eval");
 
@@ -23,9 +23,12 @@ export interface EvalDashboardConfig {
 const DEFAULT_RUNS_DIR = ".ai/eval/runs";
 
 export function loadEvalRuns(runsDir: string): EvalRunResult[] {
-  if (!existsSync(runsDir)) return [];
+  // SEC-7: Path traversal guard — reject paths containing ".." after resolution
+  const resolved = resolve(runsDir);
+  if (runsDir.includes("..")) return [];
+  if (!existsSync(resolved)) return [];
 
-  const files = readdirSync(runsDir)
+  const files = readdirSync(resolved)
     .filter((f) => f.endsWith(".json"))
     .sort()
     .reverse();
@@ -33,7 +36,7 @@ export function loadEvalRuns(runsDir: string): EvalRunResult[] {
   const runs: EvalRunResult[] = [];
   for (const file of files) {
     try {
-      const content = readFileSync(join(runsDir, file), "utf-8");
+      const content = readFileSync(join(resolved, file), "utf-8");
       runs.push(JSON.parse(content) as EvalRunResult);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

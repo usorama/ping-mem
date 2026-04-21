@@ -1033,7 +1033,7 @@ function renderAdminPage(nonce: string): string {
         { "Content-Type": "application/json", "X-API-Key": state.apiKey },
         options.headers || {}
       );
-      const response = await fetch(path, { ...options, headers });
+      const response = await fetch(path, { ...options, headers, signal: AbortSignal.timeout(15_000) });
       // Check ok before calling .json(): a non-JSON error body (e.g. proxy HTML error page,
       // plain-text 429) would throw a SyntaxError, masking the real HTTP error status.
       if (!response.ok) {

@@ -1,6 +1,6 @@
 # CLAUDE.md - ping-mem
 
-**Version**: 3.0.0 | **Last Updated**: 2026-03-22
+**Version**: 3.1.0 | **Last Updated**: 2026-04-13
 
 Universal Memory Layer for AI agents — persistent, intelligent, contextually-aware memory across sessions, tools, and applications. Consumed by openclaw, sn-assist, ro-new, understory, u-os.
 
@@ -28,11 +28,14 @@ bun run dist/mcp/cli.js  # MCP stdio
 ## Key Rules
 
 - **Port 3003** is mandatory for ping-mem — never use 3000 (except prod internal, Nginx handles it)
+- **Admin auth** required for MCP proxy: `PING_MEM_ADMIN_USER=admin` / `PING_MEM_ADMIN_PASS=ping-mem-dev-local` in both `.env` and `~/.claude/mcp.json`
+- **Ollama is primary LLM**: Entity extraction, contradiction detection, causal discovery all use Ollama `llama3.2` via OpenAI-compatible API. OpenAI is fallback only.
 - **Codebase search** is GET `/api/v1/codebase/search?query=...` (NOT POST)
 - **Health** is GET `/health` — always 200, no auth required
 - **Neo4j + Qdrant** required for ingestion features; core memory works without them
 - **ProjectId** = `SHA-256(remoteUrl + "::" + relativeToGitRoot)` — path-independent
 - **Rate limit**: 60 requests/minute on `/api/v1/*` endpoints. Mining and dreaming endpoints are resource-intensive — use sparingly.
+- **SQLite data lives in a named Docker volume** (`ping-mem-data`) — NOT a bind mount. This prevents host-side file access from corrupting WAL. Use REST API or `docker exec` to interact with the DB.
 
 ## MCP Tools
 
@@ -84,3 +87,12 @@ Routes: `/ui` `/ui/memories` `/ui/diagnostics` `/ui/ingestion` `/ui/agents` `/ui
 ## Serena MCP
 
 Re-index: `uvx --from git+https://github.com/oraios/serena serena project index .`
+
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)
