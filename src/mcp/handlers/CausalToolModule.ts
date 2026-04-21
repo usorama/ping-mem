@@ -115,6 +115,7 @@ export class CausalToolModule implements ToolModule {
     // If entityId provided, use directly; otherwise need entity resolution
     // For now, if no entityId, return message to provide one
     if (!entityId) {
+      log.warn("search_causes: entityId required", { query });
       throw new Error("entityId required (entity name resolution not yet implemented)");
     }
 
@@ -131,6 +132,7 @@ export class CausalToolModule implements ToolModule {
     const limit = (args.limit as number) ?? 10;
 
     if (!entityId) {
+      log.warn("search_effects: entityId required", { query });
       throw new Error("entityId required (entity name resolution not yet implemented)");
     }
 

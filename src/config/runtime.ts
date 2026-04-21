@@ -67,6 +67,13 @@ function getNeo4jUsername(): string | undefined {
   return process.env["NEO4J_USERNAME"] ?? process.env["NEO4J_USER"];
 }
 
+function createOllamaClient(ollamaUrl: string): OpenAI {
+  return new OpenAI({
+    apiKey: "ollama",
+    baseURL: `${ollamaUrl}/v1`,
+  });
+}
+
 export function loadRuntimeConfig(): RuntimeConfig {
   const dbPath = process.env["PING_MEM_DB_PATH"] ?? ":memory:";
 
@@ -109,7 +116,6 @@ export function loadRuntimeConfig(): RuntimeConfig {
       ...(qdrantVectorDimensions && { vectorDimensions: qdrantVectorDimensions }),
     };
   }
-
   return {
     ...(neo4j && { neo4j }),
     ...(qdrant && { qdrant }),
@@ -222,13 +228,6 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
  * Create an OpenAI client pointed at Ollama.
  * Useful for LLMs that use the OpenAI-compatible chat API interface.
  */
-function createOllamaClient(ollamaUrl: string): OpenAI {
-  return new OpenAI({
-    apiKey: "ollama",
-    baseURL: `${ollamaUrl}/v1`,
-  });
-}
-
   // Wire LLMEntityExtractor: Ollama (primary) → OpenAI (fallback)
   // Ollama exposes an OpenAI-compatible chat API at /v1/chat/completions
   const ollamaUrl = process.env["OLLAMA_URL"];
@@ -277,7 +276,7 @@ function createOllamaClient(ollamaUrl: string): OpenAI {
     log.info("ContradictionDetector disabled (neither OLLAMA_URL nor OPENAI_API_KEY set)");
   }
   } catch (err) {
-    log.warn("ContradictionDetector creation failed, disabling", { error: err instanceof Error ? err.message : String(err) });
+    log.error("ContradictionDetector creation failed, disabling", { error: err instanceof Error ? err.message : String(err) });
   }
 
   // Wire CausalDiscoveryAgent: Ollama (primary) → OpenAI (fallback)
@@ -308,7 +307,7 @@ function createOllamaClient(ollamaUrl: string): OpenAI {
     log.info("CausalDiscoveryAgent disabled (causalGraphManager or graphManager not available)");
   }
   } catch (err) {
-    log.warn("CausalDiscoveryAgent creation failed, disabling", { error: err instanceof Error ? err.message : String(err) });
+    log.error("CausalDiscoveryAgent creation failed, disabling", { error: err instanceof Error ? err.message : String(err) });
   }
 
   return services;

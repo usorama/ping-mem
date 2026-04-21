@@ -252,7 +252,7 @@ export function registerHealthRunNow() {
           const pass = rest.join(":");
           ok = timingSafeStringEqual(user ?? "", adminUser) && timingSafeStringEqual(pass ?? "", adminPass);
         } catch {
-          /* fall-through */
+          log.warn("health run-now: malformed auth header", { ip: getClientIp(c) });
         }
       }
       if (!ok) {
