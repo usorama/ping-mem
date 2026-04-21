@@ -58,3 +58,17 @@ progress-*.txt
 
 # Claude Code
 .claude/
+
+# Tool artifacts (AI/LLM agents)
+.agent/
+.ai/
+.codex/
+.cursor/
+.gemini/
+.graphifyignore
+.opencode/
+.playwright-cli/
+GEMINI.md
+graphify-out/
+opencode.json
+output/
