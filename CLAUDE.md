@@ -21,6 +21,7 @@ bun run lint         # Lint
 bun run start        # REST server (:3003)
 bun run start:sse    # SSE server
 bun run dist/mcp/cli.js  # MCP stdio
+scripts/pre-push.sh  # pre-push gate (typecheck + bun test)
 ```
 
 **Quality gate**: `bun run typecheck && bun run lint && bun test`
