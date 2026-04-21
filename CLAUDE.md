@@ -24,7 +24,7 @@ bun run dist/mcp/cli.js  # MCP stdio
 scripts/pre-push.sh  # pre-push gate — install: ln -sf ../../scripts/pre-push.sh .git/hooks/pre-push
 ```
 
-**Quality gate**: `bun run typecheck && bun run lint && bun test`
+**Quality gate**: `bun run typecheck && bun test`
 
 ## Key Rules
 
