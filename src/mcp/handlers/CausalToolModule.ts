@@ -9,6 +9,9 @@
 
 import type { ToolDefinition, ToolModule } from "../types.js";
 import type { SessionState } from "./shared.js";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("MCP:CausalTools");
 
 // ============================================================================
 // Tool Schemas
@@ -148,7 +151,7 @@ export class CausalToolModule implements ToolModule {
 
   private async handleTriggerCausalDiscovery(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (!this.state.causalDiscoveryAgent) {
-      throw new Error("Causal discovery agent not configured");
+      throw new Error("Causal discovery agent not configured. Set OLLAMA_URL (primary) or OPENAI_API_KEY (fallback) to enable.");
     }
     const text = args.text as string | undefined;
     if (!text || typeof text !== "string") {
@@ -167,7 +170,8 @@ export class CausalToolModule implements ToolModule {
       const links = await this.state.causalDiscoveryAgent.discover(text);
       return { discovered: links.length, links, persisted: false };
     } catch (error) {
-      throw new Error(`Causal discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+      log.error('Causal discovery failed', { error: error instanceof Error ? error.message : String(error) });
+      throw new Error('Causal discovery failed', { cause: error });
     }
   }
 }

@@ -103,6 +103,7 @@ export function isSameHostOrigin(header: string, host: string): boolean {
   try {
     return new URL(header).host === host;
   } catch {
+    console.debug("CSRF: unparseable origin", header);
     return false;
   }
 }
@@ -1044,7 +1045,7 @@ function renderAdminPage(nonce: string): string {
         } catch {
           errMsg = await response.text().catch(() => errMsg);
         }
-        throw new Error(errMsg);
+        throw new Error("HTTP " + response.status + ": " + errMsg);
       }
       const json = await response.json();
       return json.data;

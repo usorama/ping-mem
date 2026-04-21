@@ -217,6 +217,18 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
     }
   }
 
+
+/**
+ * Create an OpenAI client pointed at Ollama.
+ * Useful for LLMs that use the OpenAI-compatible chat API interface.
+ */
+function createOllamaClient(ollamaUrl: string): OpenAI {
+  return new OpenAI({
+    apiKey: "ollama",
+    baseURL: `${ollamaUrl}/v1`,
+  });
+}
+
   // Wire LLMEntityExtractor: Ollama (primary) → OpenAI (fallback)
   // Ollama exposes an OpenAI-compatible chat API at /v1/chat/completions
   const ollamaUrl = process.env["OLLAMA_URL"];
@@ -250,11 +262,8 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
 
   // Wire ContradictionDetector: Ollama (primary) → OpenAI (fallback)
   // Uses OpenAI-compatible chat API — same pattern as LLMEntityExtractor
-  if (ollamaUrl) {
-    const ollamaClientForContradiction = new OpenAI({
-      apiKey: "ollama",
-      baseURL: `${ollamaUrl}/v1`,
-    }) as unknown as ConstructorParameters<typeof ContradictionDetector>[0]["openai"];
+  try {  if (ollamaUrl) {
+    const ollamaClientForContradiction = createOllamaClient(ollamaUrl) as unknown as ConstructorParameters<typeof ContradictionDetector>[0]["openai"];
     services.contradictionDetector = new ContradictionDetector({
       openai: ollamaClientForContradiction,
       model: "llama3.2",
@@ -269,15 +278,15 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
   } else {
     log.info("ContradictionDetector disabled (neither OLLAMA_URL nor OPENAI_API_KEY set)");
   }
+  } catch (err) {
+    log.warn("ContradictionDetector creation failed, disabling", { error: err instanceof Error ? err.message : String(err) });
+  }
 
   // Wire CausalDiscoveryAgent: Ollama (primary) → OpenAI (fallback)
   // Requires both causalGraphManager and graphManager (both come from Neo4j block)
-  if (services.causalGraphManager && services.graphManager) {
+  try {  if (services.causalGraphManager && services.graphManager) {
     if (ollamaUrl) {
-      const ollamaClientForCausal = new OpenAI({
-        apiKey: "ollama",
-        baseURL: `${ollamaUrl}/v1`,
-      }) as unknown as CausalDiscoveryConfig["openai"];
+      const ollamaClientForCausal = createOllamaClient(ollamaUrl) as unknown as CausalDiscoveryConfig["openai"];
       services.causalDiscoveryAgent = new CausalDiscoveryAgent({
         openai: ollamaClientForCausal,
         causalGraphManager: services.causalGraphManager,
@@ -298,6 +307,9 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
     }
   } else {
     log.info("CausalDiscoveryAgent disabled (causalGraphManager or graphManager not available)");
+  }
+  } catch (err) {
+    log.warn("CausalDiscoveryAgent creation failed, disabling", { error: err instanceof Error ? err.message : String(err) });
   }
 
   return services;

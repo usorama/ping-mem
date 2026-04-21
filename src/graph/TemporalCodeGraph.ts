@@ -336,6 +336,7 @@ export class TemporalCodeGraph {
             ? "ORDER BY filesCount DESC"
             : "ORDER BY p.rootPath ASC";
 
+      const startTime = Date.now();
       const result = await session.run(
         `
         MATCH (p:Project)
@@ -356,6 +357,12 @@ export class TemporalCodeGraph {
         },
         { timeout: 30000 }
       );
+      const duration = Date.now() - startTime;
+      if (duration > 15000) {
+        log.warn("Slow query: listProjects", { durationMs: duration });
+      } else {
+        log.debug("Query completed: listProjects", { durationMs: duration });
+      }
 
       return result.records.map((r) => ({
         projectId: r.get("projectId") as string,
@@ -790,6 +797,7 @@ export class TemporalCodeGraph {
     try {
       const fileId = this.computeFileId(filePath);
       const d = Math.min(maxDepth, 10);
+      const startTime = Date.now();
       const result = await session.run(
         `MATCH path = (src:File)-[:STRUCTURAL_EDGE*1..${d}]->(tgt:File { fileId: $fileId })
          WHERE ALL(r IN relationships(path) WHERE r.projectId = $projectId AND r.kind = 'IMPORTS_FROM')
@@ -800,6 +808,12 @@ export class TemporalCodeGraph {
         { fileId, projectId, limit: neo4j.int(limit) },
         { timeout: 30000 }
       );
+      const duration = Date.now() - startTime;
+      if (duration > 15000) {
+        log.warn("Slow query: queryImpact", { durationMs: duration, filePath });
+      } else {
+        log.debug("Query completed: queryImpact", { durationMs: duration });
+      }
       const records = result.records.map((r) => ({
         file: r.get("file") as string,
         depth: typeof r.get("depth") === "object" ? (r.get("depth") as { toNumber: () => number }).toNumber() : (r.get("depth") as number),
@@ -817,6 +831,7 @@ export class TemporalCodeGraph {
     try {
       const fileId = this.computeFileId(filePath);
       const d = Math.min(maxDepth, 10);
+      const startTime = Date.now();
       const result = await session.run(
         `MATCH path = (src:File { fileId: $fileId })-[:STRUCTURAL_EDGE*1..${d}]->(tgt:File)
          WHERE ALL(r IN relationships(path) WHERE r.projectId = $projectId AND r.kind = 'IMPORTS_FROM')
@@ -826,6 +841,12 @@ export class TemporalCodeGraph {
         { fileId, projectId, limit: neo4j.int(limit) },
         { timeout: 30000 }
       );
+      const duration = Date.now() - startTime;
+      if (duration > 15000) {
+        log.warn("Slow query: queryBlastRadius", { durationMs: duration, filePath });
+      } else {
+        log.debug("Query completed: queryBlastRadius", { durationMs: duration });
+      }
       const records = result.records.map((r) => ({
         file: r.get("file") as string,
         depth: typeof r.get("depth") === "object" ? (r.get("depth") as { toNumber: () => number }).toNumber() : (r.get("depth") as number),

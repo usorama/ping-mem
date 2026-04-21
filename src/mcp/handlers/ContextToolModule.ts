@@ -374,7 +374,7 @@ export class ContextToolModule implements ToolModule {
       void runner.run({ dream: false }).catch((err) => {
         log.warn("Auto-maintenance failed", { error: err instanceof Error ? err.message : String(err) });
       });
-    } catch { /* MaintenanceRunner not available */ }
+    } catch (err) { log.warn("Auto-maintenance setup failed", { error: err instanceof Error ? err.message : String(err) }); }
 
     return {
       success: true,
@@ -597,10 +597,11 @@ export class ContextToolModule implements ToolModule {
     // Supersede info is now handled internally by memoryManager.supersede()
 
     // Index memory for hybrid search (BM25 + semantic) — fire-and-forget
-    if (this.state.hybridSearchEngine && value.length >= 20) {
+    // BM25 minimum token threshold — shorter values produce noisy search results
+    if (this.state.hybridSearchEngine && value.length >= 20 && this.state.currentSessionId) {
       void this.state.hybridSearchEngine.indexDocument(
         savedMemory.id as import("../../types/index.js").MemoryId,
-        (this.state.currentSessionId ?? "unknown") as import("../../types/index.js").SessionId,
+        this.state.currentSessionId,
         `${args.key as string}: ${value}`,
         new Date(),
         category !== undefined || args.metadata !== undefined
@@ -612,6 +613,8 @@ export class ContextToolModule implements ToolModule {
       ).catch((err) => {
         log.warn("Hybrid search indexing failed", { error: err instanceof Error ? err.message : String(err) });
       });
+    } else if (this.state.hybridSearchEngine && value.length >= 20 && !this.state.currentSessionId) {
+      log.debug("Skipping hybrid index: no active session");
     }
 
     // Surface evidence gate warnings
@@ -975,8 +978,11 @@ export class ContextToolModule implements ToolModule {
     try {
       memoryManager = getActiveMemoryManager(this.state);
     } catch (err) {
-      log.warn("auto_recall session lookup failed", { error: err instanceof Error ? err.message : String(err) });
-      return { recalled: false, reason: "no active session", context: "" };
+      if (err instanceof Error && err.message.includes("No active session")) {
+        return { recalled: false, reason: "no active session", context: "" };
+      }
+      log.error("auto_recall: unexpected error in session lookup", { error: err instanceof Error ? err.message : String(err) });
+      throw err;
     }
 
     const query: MemoryQuery = {
