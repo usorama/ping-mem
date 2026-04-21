@@ -22,10 +22,17 @@ export interface EvalDashboardConfig {
 
 const DEFAULT_RUNS_DIR = ".ai/eval/runs";
 
-export function loadEvalRuns(runsDir: string): EvalRunResult[] {
-  // SEC-7: Path traversal guard — reject paths containing ".." after resolution
+export function loadEvalRuns(runsDir: string, baseDir?: string): EvalRunResult[] {
+  // SEC-7: Path traversal guard — resolve and verify containment
   const resolved = resolve(runsDir);
-  if (runsDir.includes("..")) return [];
+  const allowedBase = resolve(baseDir || DEFAULT_RUNS_DIR);
+
+  // Ensure the resolved path is within the allowed base directory.
+  // Append "/" to prevent "/etc/passwd" matching "/etc" in startsWith
+  if (!resolved.startsWith(allowedBase + "/") && resolved !== allowedBase) {
+    log.warn("loadEvalRuns: path traversal blocked", { runsDir, resolved, allowedBase });
+    return [];
+  }
   if (!existsSync(resolved)) return [];
 
   const files = readdirSync(resolved)
@@ -183,7 +190,7 @@ export function registerEvalRoutes(config?: Partial<EvalDashboardConfig>) {
 
   return async (c: Context) => {
     try {
-      const runs = loadEvalRuns(runsDir);
+      const runs = loadEvalRuns(runsDir, runsDir);
       const latest = runs[0];
 
       let content: string;

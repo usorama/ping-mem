@@ -57,12 +57,12 @@ afterEach(() => {
 
 describe("loadEvalRuns", () => {
   test("returns empty array when directory does not exist", () => {
-    const runs = loadEvalRuns("/tmp/nonexistent-eval-dir-xyz");
+    const runs = loadEvalRuns("/tmp/nonexistent-eval-dir-xyz", "/tmp/nonexistent-eval-dir-xyz");
     expect(runs).toEqual([]);
   });
 
   test("returns empty array when directory is empty", () => {
-    const runs = loadEvalRuns(TEST_RUNS_DIR);
+    const runs = loadEvalRuns(TEST_RUNS_DIR, TEST_RUNS_DIR);
     expect(runs).toEqual([]);
   });
 
@@ -70,7 +70,7 @@ describe("loadEvalRuns", () => {
     const run = makeRun();
     writeFileSync(join(TEST_RUNS_DIR, "2026-03-15T10-00.json"), JSON.stringify(run), "utf-8");
 
-    const runs = loadEvalRuns(TEST_RUNS_DIR);
+    const runs = loadEvalRuns(TEST_RUNS_DIR, TEST_RUNS_DIR);
     expect(runs).toHaveLength(1);
     expect(runs[0]?.runId).toBe("run-001-test");
   });
@@ -82,7 +82,7 @@ describe("loadEvalRuns", () => {
     writeFileSync(join(TEST_RUNS_DIR, "2026-03-14T10-00.json"), JSON.stringify(run1), "utf-8");
     writeFileSync(join(TEST_RUNS_DIR, "2026-03-15T10-00.json"), JSON.stringify(run2), "utf-8");
 
-    const runs = loadEvalRuns(TEST_RUNS_DIR);
+    const runs = loadEvalRuns(TEST_RUNS_DIR, TEST_RUNS_DIR);
     expect(runs).toHaveLength(2);
     // Files sorted reverse alphabetically, so 15 comes before 14
     expect(runs[0]?.runId).toBe("run-new");
@@ -97,7 +97,7 @@ describe("loadEvalRuns", () => {
       "utf-8",
     );
 
-    const runs = loadEvalRuns(TEST_RUNS_DIR);
+    const runs = loadEvalRuns(TEST_RUNS_DIR, TEST_RUNS_DIR);
     expect(runs).toHaveLength(1);
   });
 
@@ -109,7 +109,7 @@ describe("loadEvalRuns", () => {
       "utf-8",
     );
 
-    const runs = loadEvalRuns(TEST_RUNS_DIR);
+    const runs = loadEvalRuns(TEST_RUNS_DIR, TEST_RUNS_DIR);
     expect(runs).toHaveLength(1);
   });
 
@@ -117,7 +117,7 @@ describe("loadEvalRuns", () => {
     const run = makeRun();
     writeFileSync(join(TEST_RUNS_DIR, "run.json"), JSON.stringify(run), "utf-8");
 
-    const runs = loadEvalRuns(TEST_RUNS_DIR);
+    const runs = loadEvalRuns(TEST_RUNS_DIR, TEST_RUNS_DIR);
     expect(runs[0]?.aggregate.meanRecallAt10).toBe(0.65);
     expect(runs[0]?.aggregate.meanNdcgAt10).toBe(0.675);
     expect(runs[0]?.aggregate.meanMrrAt10).toBe(0.75);
@@ -129,7 +129,7 @@ describe("loadEvalRuns", () => {
     const run = makeRun();
     writeFileSync(join(TEST_RUNS_DIR, "run.json"), JSON.stringify(run), "utf-8");
 
-    const runs = loadEvalRuns(TEST_RUNS_DIR);
+    const runs = loadEvalRuns(TEST_RUNS_DIR, TEST_RUNS_DIR);
     expect(runs[0]?.results).toHaveLength(2);
     expect(runs[0]?.results[0]?.searchMode).toBe("code_search");
     expect(runs[0]?.results[1]?.searchMode).toBe("decision_recall");
