@@ -11,7 +11,7 @@ import type { EvalRunResult } from "../../../eval/types.js";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const TEST_RUNS_DIR = "/tmp/ping-mem-eval-ui-test-runs";
+const TEST_RUNS_DIR = ".ai/eval/runs/test-ui";
 
 function makeRun(overrides?: Partial<EvalRunResult>): EvalRunResult {
   return {

@@ -23,12 +23,16 @@ export interface EvalDashboardConfig {
 const DEFAULT_RUNS_DIR = ".ai/eval/runs";
 
 export function loadEvalRuns(runsDir: string): EvalRunResult[] {
-  // SEC-7: Path traversal guard — reject paths containing ".." after resolution
-  const resolved = resolve(runsDir);
-  if (runsDir.includes("..")) return [];
-  if (!existsSync(resolved)) return [];
+  // SEC-7: Path traversal — anchor to project root; DEFAULT_RUNS_DIR is the expected dir
+  const resolvedDir = resolve(runsDir);
+  const projectRoot = resolve(process.cwd());
+  if (!resolvedDir.startsWith(projectRoot + "/") && resolvedDir !== projectRoot) {
+    log.warn("loadEvalRuns: path traversal blocked", { runsDir, resolvedDir });
+    return [];
+  }
+  if (!existsSync(resolvedDir)) return [];
 
-  const files = readdirSync(resolved)
+  const files = readdirSync(resolvedDir)
     .filter((f) => f.endsWith(".json"))
     .sort()
     .reverse();
@@ -36,7 +40,7 @@ export function loadEvalRuns(runsDir: string): EvalRunResult[] {
   const runs: EvalRunResult[] = [];
   for (const file of files) {
     try {
-      const content = readFileSync(join(resolved, file), "utf-8");
+      const content = readFileSync(join(resolvedDir, file), "utf-8");
       runs.push(JSON.parse(content) as EvalRunResult);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
