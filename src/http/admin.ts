@@ -99,6 +99,8 @@ function getRemoteIp(req: IncomingMessage): string {
  *  whose name contains the server hostname as a substring (e.g., evil-myhost.com).
  *
  *  @internal Exported for unit testing only */
+const csrfLog = createLogger("CSRF");
+
 export function isSameHostOrigin(header: string, host: string): boolean {
   try {
     return new URL(header).host === host;
@@ -336,7 +338,6 @@ export interface AdminDependencies {
 }
 
 const log = createLogger("Admin");
-const csrfLog = createLogger("CSRF");
 
 const ADMIN_USER_ENV = "PING_MEM_ADMIN_USER";
 const ADMIN_PASS_ENV = "PING_MEM_ADMIN_PASS";

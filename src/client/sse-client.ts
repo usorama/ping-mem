@@ -320,7 +320,7 @@ export class SSEPingMemClient implements PingMemClient {
       }).catch((error) => {
         clearTimeout(timeout);
         this.messageQueue.delete(requestId);
-        reject(new NetworkError(`Failed to send request: ${error.message}`));
+        reject(new NetworkError(`Failed to send request: ${error instanceof Error ? error.message : String(error)}`));
       });
     });
   }

@@ -44,7 +44,7 @@ export function loadEvalRuns(runsDir: string): EvalRunResult[] {
       runs.push(JSON.parse(content) as EvalRunResult);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      log.warn("Failed to parse eval run file", { file, error: msg });
+      log.warn("Failed to parse eval run file", { file, resolvedPath: join(resolvedDir, file), error: msg });
     }
   }
   return runs;

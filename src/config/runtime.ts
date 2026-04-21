@@ -276,7 +276,7 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
       log.info("ContradictionDetector disabled (neither OLLAMA_URL nor OPENAI_API_KEY set)");
     }
   } catch (err) {
-    log.error("ContradictionDetector creation failed, disabling", { error: err instanceof Error ? err.message : String(err) });
+    log.error("ContradictionDetector creation failed, disabling", { backend: ollamaUrl ? "ollama" : openAiKey ? "openai" : "none", error: err instanceof Error ? err.message : String(err) });
   }
 
   // Wire CausalDiscoveryAgent: Ollama (primary) → OpenAI (fallback)
@@ -307,7 +307,7 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
       log.info("CausalDiscoveryAgent disabled (causalGraphManager or graphManager not available)");
     }
   } catch (err) {
-    log.error("CausalDiscoveryAgent creation failed, disabling", { error: err instanceof Error ? err.message : String(err) });
+    log.error("CausalDiscoveryAgent creation failed, disabling", { backend: ollamaUrl ? "ollama" : openAiKey ? "openai" : "none", error: err instanceof Error ? err.message : String(err) });
   }
 
   return services;
