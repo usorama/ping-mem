@@ -10,6 +10,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../rest-server.js";
 import * as fs from "node:fs";
 import * as os from "node:os";
+import { timingSafeStringEqual } from "../../util/auth-utils.js";
 import * as path from "node:path";
 
 import { renderLayout, escapeHtml, formatDate, getCspNonce, getCsrfToken, getClientIp } from "./layout.js";
@@ -249,9 +250,9 @@ export function registerHealthRunNow() {
           const decoded = atob(authHeader.slice(6));
           const [user, ...rest] = decoded.split(":");
           const pass = rest.join(":");
-          ok = user === adminUser && pass === adminPass;
+          ok = timingSafeStringEqual(user ?? "", adminUser) && timingSafeStringEqual(pass ?? "", adminPass);
         } catch {
-          /* fall-through */
+          log.warn("health run-now: malformed auth header", { ip: getClientIp(c) });
         }
       }
       if (!ok) {

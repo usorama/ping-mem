@@ -119,7 +119,7 @@ export class KnowledgeToolModule implements ToolModule {
     args: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
     if (!this.state.knowledgeStore) {
-      return { success: false, error: "KnowledgeStore not initialized" };
+      throw new Error("KnowledgeStore not initialized. Requires Neo4j (NEO4J_URI) and Qdrant (QDRANT_URL) to be configured.");
     }
 
     const query = args.query as string;
@@ -155,7 +155,7 @@ export class KnowledgeToolModule implements ToolModule {
     args: Record<string, unknown>
   ): Promise<Record<string, unknown>> {
     if (!this.state.knowledgeStore) {
-      return { success: false, error: "KnowledgeStore not initialized" };
+      throw new Error("KnowledgeStore not initialized. Requires Neo4j (NEO4J_URI) and Qdrant (QDRANT_URL) to be configured.");
     }
 
     // Build ingest entry with only defined properties (exactOptionalPropertyTypes)

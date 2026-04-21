@@ -58,3 +58,22 @@ progress-*.txt
 
 # Claude Code
 .claude/
+
+# Tool artifact directories
+.agent/
+.ai/
+.codex/
+.cursor/
+.gemini/
+.opencode/
+.playwright-cli/
+graphify-out/
+output/
+
+# Tool config files
+.graphifyignore
+GEMINI.md
+opencode.json
+
+# ping-mem local state (regenerates on ingest)
+.ping-mem/manifest.json

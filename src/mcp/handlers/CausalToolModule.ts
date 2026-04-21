@@ -9,6 +9,9 @@
 
 import type { ToolDefinition, ToolModule } from "../types.js";
 import type { SessionState } from "./shared.js";
+import { createLogger } from "../../util/logger.js";
+
+const log = createLogger("MCP:CausalTools");
 
 // ============================================================================
 // Tool Schemas
@@ -112,7 +115,8 @@ export class CausalToolModule implements ToolModule {
     // If entityId provided, use directly; otherwise need entity resolution
     // For now, if no entityId, return message to provide one
     if (!entityId) {
-      return { error: "entityId required (entity name resolution not yet implemented)", query, causes: [] };
+      log.warn("search_causes: entityId required", { query });
+      throw new Error("entityId required (entity name resolution not yet implemented)");
     }
 
     const causes = await this.state.causalGraphManager.getCausesOf(entityId, { limit });
@@ -128,7 +132,8 @@ export class CausalToolModule implements ToolModule {
     const limit = (args.limit as number) ?? 10;
 
     if (!entityId) {
-      return { error: "entityId required (entity name resolution not yet implemented)", query, effects: [] };
+      log.warn("search_effects: entityId required", { query });
+      throw new Error("entityId required (entity name resolution not yet implemented)");
     }
 
     const effects = await this.state.causalGraphManager.getEffectsOf(entityId, { limit });
@@ -148,14 +153,14 @@ export class CausalToolModule implements ToolModule {
 
   private async handleTriggerCausalDiscovery(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (!this.state.causalDiscoveryAgent) {
-      return { error: "Causal discovery agent not configured", discovered: 0 };
+      throw new Error("Causal discovery agent not configured. Set OLLAMA_URL (primary) or OPENAI_API_KEY (fallback) to enable.");
     }
     const text = args.text as string | undefined;
     if (!text || typeof text !== "string") {
-      return { error: "text is required and must be a string", discovered: 0 };
+      throw new Error("text is required and must be a string");
     }
     if (text.length > 50_000) {
-      return { error: "Text exceeds maximum length of 50000 characters", discovered: 0 };
+      throw new Error("Text exceeds maximum length of 50000 characters");
     }
     const persist = (args.persist as boolean) ?? false;
 
@@ -167,7 +172,8 @@ export class CausalToolModule implements ToolModule {
       const links = await this.state.causalDiscoveryAgent.discover(text);
       return { discovered: links.length, links, persisted: false };
     } catch (error) {
-      return { error: `Causal discovery failed: ${error instanceof Error ? error.message : String(error)}`, discovered: 0, links: [] };
+      log.error('Causal discovery failed', { error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined });
+      throw new Error('Causal discovery failed', { cause: error });
     }
   }
 }

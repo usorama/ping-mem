@@ -11,7 +11,7 @@ import type { EvalRunResult } from "../../../eval/types.js";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-const TEST_RUNS_DIR = "/tmp/ping-mem-eval-ui-test-runs";
+const TEST_RUNS_DIR = ".ai/eval/runs/test-ui";
 
 function makeRun(overrides?: Partial<EvalRunResult>): EvalRunResult {
   return {
@@ -59,6 +59,16 @@ describe("loadEvalRuns", () => {
   test("returns empty array when directory does not exist", () => {
     const runs = loadEvalRuns("/tmp/nonexistent-eval-dir-xyz");
     expect(runs).toEqual([]);
+  });
+
+  test("blocks paths outside project root", () => {
+    // Create a real dir outside process.cwd() to distinguish traversal block from existsSync
+    const outsideDir = "/tmp/ping-mem-traversal-test";
+    mkdirSync(outsideDir, { recursive: true });
+    writeFileSync(join(outsideDir, "run.json"), JSON.stringify(makeRun()));
+    const result = loadEvalRuns(outsideDir);
+    expect(result).toEqual([]);
+    rmSync(outsideDir, { recursive: true });
   });
 
   test("returns empty array when directory is empty", () => {

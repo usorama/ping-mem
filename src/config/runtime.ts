@@ -21,6 +21,8 @@ import { createEmbeddingServiceFromEnv, type EmbeddingService } from "../search/
 import { LLMEntityExtractor, type LLMEntityExtractorConfig } from "../graph/LLMEntityExtractor.js";
 import { EntityExtractor } from "../graph/EntityExtractor.js";
 import { CausalGraphManager } from "../graph/CausalGraphManager.js";
+import { ContradictionDetector } from "../graph/ContradictionDetector.js";
+import { CausalDiscoveryAgent, type CausalDiscoveryConfig } from "../graph/CausalDiscoveryAgent.js";
 import OpenAI from "openai";
 import { createLogger } from "../util/logger.js";
 
@@ -57,10 +59,23 @@ export interface RuntimeServices {
   embeddingService?: EmbeddingService;
   llmEntityExtractor?: LLMEntityExtractor;
   causalGraphManager?: CausalGraphManager;
+  contradictionDetector?: ContradictionDetector;
+  causalDiscoveryAgent?: CausalDiscoveryAgent;
 }
 
 function getNeo4jUsername(): string | undefined {
   return process.env["NEO4J_USERNAME"] ?? process.env["NEO4J_USER"];
+}
+
+/**
+ * Create an OpenAI client pointed at a local Ollama instance.
+ * Ollama exposes an OpenAI-compatible chat API at /v1.
+ */
+function createOllamaClient(ollamaUrl: string): OpenAI {
+  return new OpenAI({
+    apiKey: "ollama",
+    baseURL: `${ollamaUrl}/v1`,
+  });
 }
 
 export function loadRuntimeConfig(): RuntimeConfig {
@@ -105,7 +120,6 @@ export function loadRuntimeConfig(): RuntimeConfig {
       ...(qdrantVectorDimensions && { vectorDimensions: qdrantVectorDimensions }),
     };
   }
-
   return {
     ...(neo4j && { neo4j }),
     ...(qdrant && { qdrant }),
@@ -213,20 +227,87 @@ export async function createRuntimeServices(): Promise<RuntimeServices> {
     }
   }
 
-  // Wire LLMEntityExtractor if OPENAI_API_KEY and graphManager are available
+
+  // Wire LLMEntityExtractor: Ollama (primary) → OpenAI (fallback)
+  // Ollama exposes an OpenAI-compatible chat API at /v1/chat/completions
+  const ollamaUrl = process.env["OLLAMA_URL"];
   const openAiKey = process.env["OPENAI_API_KEY"];
-  if (openAiKey && services.graphManager) {
-    const openaiClient = new OpenAI({ apiKey: openAiKey }) as unknown as LLMEntityExtractorConfig["openai"];
+  if (services.graphManager) {
     const fallbackExtractor = new EntityExtractor();
-    services.llmEntityExtractor = new LLMEntityExtractor({
-      openai: openaiClient,
-      fallbackExtractor,
-    });
-    log.info("LLMEntityExtractor created (OpenAI gpt-4o-mini)");
-  } else if (!openAiKey) {
-    log.info("LLMEntityExtractor disabled (OPENAI_API_KEY not set)");
+    if (ollamaUrl) {
+      const ollamaClient = createOllamaClient(ollamaUrl) as unknown as LLMEntityExtractorConfig["openai"];
+      services.llmEntityExtractor = new LLMEntityExtractor({
+        openai: ollamaClient,
+        fallbackExtractor,
+        model: "llama3.2",
+      });
+      log.info("LLMEntityExtractor created (Ollama llama3.2)", { ollamaUrl });
+    } else if (openAiKey) {
+      const openaiClient = new OpenAI({ apiKey: openAiKey }) as unknown as LLMEntityExtractorConfig["openai"];
+      services.llmEntityExtractor = new LLMEntityExtractor({
+        openai: openaiClient,
+        fallbackExtractor,
+      });
+      log.info("LLMEntityExtractor created (OpenAI gpt-4o-mini)");
+    } else {
+      log.info("LLMEntityExtractor disabled (neither OLLAMA_URL nor OPENAI_API_KEY set)");
+    }
   } else {
     log.info("LLMEntityExtractor disabled (graphManager not available)");
+  }
+
+  // Wire ContradictionDetector: Ollama (primary) → OpenAI (fallback)
+  // Uses OpenAI-compatible chat API — same pattern as LLMEntityExtractor
+  try {
+    if (ollamaUrl) {
+      const ollamaClientForContradiction = createOllamaClient(ollamaUrl) as unknown as ConstructorParameters<typeof ContradictionDetector>[0]["openai"];
+      services.contradictionDetector = new ContradictionDetector({
+        openai: ollamaClientForContradiction,
+        model: "llama3.2",
+      });
+      log.info("ContradictionDetector created (Ollama llama3.2)", { ollamaUrl });
+    } else if (openAiKey) {
+      const openaiClientForContradiction = new OpenAI({ apiKey: openAiKey }) as unknown as ConstructorParameters<typeof ContradictionDetector>[0]["openai"];
+      services.contradictionDetector = new ContradictionDetector({
+        openai: openaiClientForContradiction,
+      });
+      log.info("ContradictionDetector created (OpenAI gpt-4o-mini)");
+    } else {
+      log.info("ContradictionDetector disabled (neither OLLAMA_URL nor OPENAI_API_KEY set)");
+    }
+  } catch (err) {
+    log.error("ContradictionDetector creation failed, disabling", { backend: ollamaUrl ? "ollama" : openAiKey ? "openai" : "none", error: err instanceof Error ? err.message : String(err) });
+  }
+
+  // Wire CausalDiscoveryAgent: Ollama (primary) → OpenAI (fallback)
+  // Requires both causalGraphManager and graphManager (both come from Neo4j block)
+  try {
+    if (services.causalGraphManager && services.graphManager) {
+      if (ollamaUrl) {
+        const ollamaClientForCausal = createOllamaClient(ollamaUrl) as unknown as CausalDiscoveryConfig["openai"];
+        services.causalDiscoveryAgent = new CausalDiscoveryAgent({
+          openai: ollamaClientForCausal,
+          causalGraphManager: services.causalGraphManager,
+          graphManager: services.graphManager,
+          model: "llama3.2",
+        });
+        log.info("CausalDiscoveryAgent created (Ollama llama3.2)", { ollamaUrl });
+      } else if (openAiKey) {
+        const openaiClientForCausal = new OpenAI({ apiKey: openAiKey }) as unknown as CausalDiscoveryConfig["openai"];
+        services.causalDiscoveryAgent = new CausalDiscoveryAgent({
+          openai: openaiClientForCausal,
+          causalGraphManager: services.causalGraphManager,
+          graphManager: services.graphManager,
+        });
+        log.info("CausalDiscoveryAgent created (OpenAI gpt-4o-mini)");
+      } else {
+        log.info("CausalDiscoveryAgent disabled (neither OLLAMA_URL nor OPENAI_API_KEY set)");
+      }
+    } else {
+      log.info("CausalDiscoveryAgent disabled (causalGraphManager or graphManager not available)");
+    }
+  } catch (err) {
+    log.error("CausalDiscoveryAgent creation failed, disabling", { backend: ollamaUrl ? "ollama" : openAiKey ? "openai" : "none", error: err instanceof Error ? err.message : String(err) });
   }
 
   return services;

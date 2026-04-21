@@ -28,15 +28,6 @@ export {
 } from "./EntityExtractor.js";
 
 export {
-  RelationshipInferencer,
-  RelationshipInferencerConfig,
-  InferenceRule,
-  createRelationshipInferencer,
-  createRelationshipInferencerWithConfig,
-  DEFAULT_INFERENCE_RULES,
-} from "./RelationshipInferencer.js";
-
-export {
   TemporalStore,
   TemporalStoreConfig,
   TemporalStoreError,

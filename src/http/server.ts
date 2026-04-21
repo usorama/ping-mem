@@ -107,6 +107,8 @@ export async function startHTTPServer(): Promise<void> {
     llmEntityExtractor: services.llmEntityExtractor,
     embeddingService: services.embeddingService,
     causalGraphManager: services.causalGraphManager,
+    causalDiscoveryAgent: services.causalDiscoveryAgent,
+    contradictionDetector: services.contradictionDetector,
   });
 
   // Always create SSE/MCP server (handles /mcp endpoint for MCP streamable-http)

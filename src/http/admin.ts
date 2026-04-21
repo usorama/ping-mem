@@ -99,10 +99,13 @@ function getRemoteIp(req: IncomingMessage): string {
  *  whose name contains the server hostname as a substring (e.g., evil-myhost.com).
  *
  *  @internal Exported for unit testing only */
+const csrfLog = createLogger("CSRF");
+
 export function isSameHostOrigin(header: string, host: string): boolean {
   try {
     return new URL(header).host === host;
   } catch {
+    csrfLog.debug("unparseable origin", { header: header?.slice(0, 100) });
     return false;
   }
 }
@@ -1033,7 +1036,7 @@ function renderAdminPage(nonce: string): string {
         { "Content-Type": "application/json", "X-API-Key": state.apiKey },
         options.headers || {}
       );
-      const response = await fetch(path, { ...options, headers });
+      const response = await fetch(path, { ...options, headers, signal: AbortSignal.timeout(15_000) });
       // Check ok before calling .json(): a non-JSON error body (e.g. proxy HTML error page,
       // plain-text 429) would throw a SyntaxError, masking the real HTTP error status.
       if (!response.ok) {
@@ -1044,7 +1047,7 @@ function renderAdminPage(nonce: string): string {
         } catch {
           errMsg = await response.text().catch(() => errMsg);
         }
-        throw new Error(errMsg);
+        throw new Error("HTTP " + response.status + ": " + errMsg);
       }
       const json = await response.json();
       return json.data;

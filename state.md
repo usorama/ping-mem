@@ -1,14 +1,15 @@
 # ping-mem — Project State
 
-**Last updated**: 2026-04-19 (end of Phase 8 session — remediation complete)
-**Phase**: Remediation plan execution — **8 of 8 phases closed**
-**Health**: All gates green. Doctor 34/34 pass. 10/10 E2E regression queries pass (8.09s). Full bun suite 1973/0/0. Baseline soak day 0.
+**Last updated**: 2026-04-19 (PR #125 merged; remediation shipped)
+**Phase**: Remediation plan execution — **8 of 8 phases closed + /pr-zero 3-cycle clean + MERGED**
+**Health**: All gates green. Doctor 34/34 pass. 10/10 E2E regression queries pass (~9s). Full bun suite clean. Baseline soak day 0.
 
 ## Active work
 
-**Plan**: `docs/plans/2026-04-18-ping-mem-complete-remediation-plan.md` (1051 lines, 8 phases — CLOSED)
-**PR**: #125 on `fix/ping-mem-complete-remediation-plan` — ready to merge
+**Plan**: `docs/plans/2026-04-18-ping-mem-complete-remediation-plan.md` — CLOSED
+**PR #125**: MERGED 2026-04-19T16:49:39Z as squash commit **9e35b30**. Branch auto-deleted.
 **Tag**: `v2.0.0-ping-mem-complete-remediation` pushed to origin
+**/pr-zero cycles**: 3 cycles run. Final verdict clean across code-reviewer + silent-failure-hunter + security-sentinel. 5 fix commits squashed into 9e35b30: cycle-1 code findings + docs findings, cycle-2 critical NUL-detection bug + TimeoutError class + injection-hardening, cycle-3 residual creds + stderr visibility + admin-bucket test, plus workflow permissions fix.
 **Session memory** (for orientation): `~/.claude/projects/-Users-umasankr-Projects-ping-learn/memory/project_ping_mem_remediation.md`
 
 ### All phases closed — evidence table
@@ -32,21 +33,20 @@
 - **Soft gates** (5, tolerate 6 red days): orbstack-warm-latency, log-rotation-last-7d, pattern-confidence-nonzero, auto-os-cross-project-hit, ping-mem-doctor-exec-time-below-10s
 - Live state: `~/.ping-mem/soak-state.json` (updated daily by `com.ping-mem.soak-monitor`)
 
-## Open GH issues (follow-ups, not blockers)
+## Open GH issues (follow-ups, queued for 2026-04-20 brainstorm)
 
 | Issue | Repo | Summary |
 |-------|------|---------|
 | [ping-mem#126](https://github.com/usorama/ping-mem/issues/126) | ping-mem | Wire regression suite into a GitHub Actions workflow on the self-hosted runner (currently local-only). |
-| [ping-mem#127](https://github.com/usorama/ping-mem/issues/127) | ping-mem | Triage the uncommitted `/system-execute-2026-04-13` diff carried in the working tree — decide to commit, cherry-pick, or discard. Outside this plan's scope. |
+| [ping-mem#127](https://github.com/usorama/ping-mem/issues/127) | ping-mem | Triage the uncommitted `/system-execute-2026-04-13` diff carried in the working tree — decide to commit, cherry-pick, or discard. |
+| [ping-mem#128](https://github.com/usorama/ping-mem/issues/128) | ping-mem | CI hardening — Diagnostics Collection workflow hangs (no Ollama on runner, no step timeout). Needs `timeout-minutes`, either Ollama service or mock, and branch protection on main (currently none). |
 | [auto-os#168](https://github.com/usorama/auto-os/issues/168) | auto-os | Wire paro-jobs runner to consume ping-mem `deep_search` output via cron-adjacent scheduler. |
 
-## Next actions
+## Next actions (tomorrow 2026-04-20)
 
-1. **Wait for 30-day soak to go green** (target: 2026-05-19). Monitor reports to `~/.ping-mem/soak-events.log`.
-2. **Merge PR #125** once /pr-zero is clean.
-3. **Triage dirty-tree (ping-mem#127)** — separate decision, does not block merge.
-4. **Resolve ping-mem#126** — wire regression to CI runner (current run is manual / local).
-5. **Resolve auto-os#168** — runner wire-up for paro integration.
+1. **Brainstorm with user** (explicit mandate): ping-mem#126, #127, #128, auto-os#168 — decide priority + sequencing.
+2. **Soak watch** (daily): `cat ~/.ping-mem/soak-state.json`. Day-30 target 2026-05-19.
+3. Consider enabling branch protection on main (per #128) requiring benchmark + CodeRabbit green.
 
 ## Artifacts index
 
