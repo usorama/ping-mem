@@ -371,19 +371,12 @@ export class ContextToolModule implements ToolModule {
         eventStore: this.state.eventStore,
         relevanceEngine: this.state.relevanceEngine,
       });
-      if (typeof runner.run !== "function") {
-        log.warn("Auto-maintenance: runner.run is not callable", { runnerType: typeof runner });
-        return {
-          success: true,
-          sessionId: previousSessionId,
-          status: session.status,
-          endedAt: session.endedAt?.toISOString(),
-        };
-      }
       void runner.run({ dream: false }).catch((err) => {
         log.warn("Auto-maintenance failed", { error: err instanceof Error ? err.message : String(err) });
       });
-    } catch (err) { log.warn("Auto-maintenance setup failed", { error: err instanceof Error ? err.message : String(err) }); }
+    } catch (err) {
+      log.warn("Auto-maintenance setup failed", { error: err instanceof Error ? err.message : String(err) });
+    }
 
     return {
       success: true,

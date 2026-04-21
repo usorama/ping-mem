@@ -103,9 +103,7 @@ export function isSameHostOrigin(header: string, host: string): boolean {
   try {
     return new URL(header).host === host;
   } catch {
-    // Log unparseable origin using local logger (log not yet defined in module scope at this function)
-    const log = createLogger("CSRF");
-    log.debug("unparseable origin", { header: header?.slice(0, 100) });
+    csrfLog.debug("unparseable origin", { header: header?.slice(0, 100) });
     return false;
   }
 }
@@ -338,6 +336,7 @@ export interface AdminDependencies {
 }
 
 const log = createLogger("Admin");
+const csrfLog = createLogger("CSRF");
 
 const ADMIN_USER_ENV = "PING_MEM_ADMIN_USER";
 const ADMIN_PASS_ENV = "PING_MEM_ADMIN_PASS";
