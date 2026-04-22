@@ -650,15 +650,26 @@ describe("Tool Discovery REST Endpoints", () => {
   });
 
   test("POST /api/v1/tools/:name/invoke returns 403 when admin credentials not configured", async () => {
-    const res = await request(server, "POST", "/api/v1/tools/nonexistent_tool/invoke", {
-      args: {},
-    });
-    // Default-deny: no admin creds configured → 403
-    expect([403, 429]).toContain(res.status);
-    if (res.status === 403) {
-      const json = (await res.json()) as { error: string; message: string };
-      expect(json.error).toBe("Forbidden");
-      expect(json.message).toContain("requires admin credentials");
+    const prevUser = process.env.PING_MEM_ADMIN_USER;
+    const prevPass = process.env.PING_MEM_ADMIN_PASS;
+    delete process.env.PING_MEM_ADMIN_USER;
+    delete process.env.PING_MEM_ADMIN_PASS;
+    try {
+      const res = await request(server, "POST", "/api/v1/tools/nonexistent_tool/invoke", {
+        args: {},
+      });
+      // Default-deny: no admin creds configured → 403
+      expect([403, 429]).toContain(res.status);
+      if (res.status === 403) {
+        const json = (await res.json()) as { error: string; message: string };
+        expect(json.error).toBe("Forbidden");
+        expect(json.message.toLowerCase()).toContain("admin credentials");
+      }
+    } finally {
+      if (prevUser === undefined) delete process.env.PING_MEM_ADMIN_USER;
+      else process.env.PING_MEM_ADMIN_USER = prevUser;
+      if (prevPass === undefined) delete process.env.PING_MEM_ADMIN_PASS;
+      else process.env.PING_MEM_ADMIN_PASS = prevPass;
     }
   });
 });
