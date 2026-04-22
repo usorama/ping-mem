@@ -15,7 +15,7 @@ Production VPS: 72.62.117.123, install path: `/opt/ping-mem/`, shared with SN-As
 |----------|----------|---------|-------------|
 | `PING_MEM_DB_PATH` | No | `:memory:` | SQLite database path |
 | `PING_MEM_PORT` | No | `3003` | HTTP server port |
-| `PING_MEM_TRANSPORT` | No | `rest` | Transport mode (`rest`, `sse`, `streamable-http`) |
+| `PING_MEM_TRANSPORT` | No | `streamable-http` | Compatibility transport label; runtime still exposes REST and `/mcp` on the same listener |
 | `NEO4J_URI` | For ingestion | | `bolt://localhost:7687` |
 | `NEO4J_USERNAME` / `NEO4J_PASSWORD` | For ingestion | | Neo4j credentials |
 | `QDRANT_URL` | For ingestion | | `http://localhost:6333` |
@@ -33,9 +33,9 @@ Production VPS: 72.62.117.123, install path: `/opt/ping-mem/`, shared with SN-As
 
 ```bash
 bun install && bun run build
-bun run start           # REST mode
-bun run start:sse       # SSE mode
-bun run dist/mcp/cli.js # MCP stdio
+bun run start               # unified HTTP server on :3003
+bun run dist/mcp/proxy-cli.js # recommended local MCP path against the running server
+bun run dist/mcp/cli.js     # direct stdio fallback for isolated development
 ```
 
 ## Full Stack (Neo4j + Qdrant required for ingestion)
@@ -44,7 +44,7 @@ bun run dist/mcp/cli.js # MCP stdio
 docker-compose up -d neo4j qdrant
 export NEO4J_URI="bolt://localhost:7687" NEO4J_USERNAME="neo4j" NEO4J_PASSWORD="your-pw"
 export QDRANT_URL="http://localhost:6333"
-bun run dist/mcp/cli.js
+bun run start
 ```
 
 ## Docker Deployment
@@ -56,8 +56,8 @@ docker run -d -v ping-mem-data:/data -p 3003:3003 -e PING_MEM_DB_PATH=/data/ping
 
 ## Docker Compose Configs
 
-- **Dev**: `docker-compose.yml` — REST on :3003
-- **Prod**: `docker-compose.prod.yml` — REST on :3000 (Nginx proxies to it)
+- **Dev**: `docker-compose.yml` — unified server on :3003
+- **Prod**: `docker-compose.prod.yml` — unified server on :3003
 - **Improvement**: `docker-compose.improvement.yml` — Blue-green overlay, Green on :3001
 
 ## Production Notes

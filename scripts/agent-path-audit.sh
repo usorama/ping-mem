@@ -4,6 +4,9 @@
 # Exit code 0 = all paths work, non-zero = failures found
 
 BASE="${PING_MEM_URL:-http://localhost:3003}"
+ADMIN_USER="${PING_MEM_ADMIN_USER:-admin}"
+ADMIN_PASS="${PING_MEM_ADMIN_PASS:-ping-mem-dev-local}"
+AUTH_HEADER="Authorization: Basic $(printf '%s:%s' "$ADMIN_USER" "$ADMIN_PASS" | base64 | tr -d '\n')"
 FAILURES=0
 
 fail() { echo "FAIL  $1"; FAILURES=$((FAILURES + 1)); }
@@ -94,7 +97,7 @@ curl -sf -X POST "$BASE/api/v1/session/end" -H "Content-Type: application/json" 
 # --- PATH 5: New features present ---
 echo ""
 echo "--- NEW FEATURES ---"
-curl -sf "$BASE/api/v1/mining/status" | jq -e '.data.total >= 0' > /dev/null 2>&1 && pass "Mining status endpoint" || fail "Mining status endpoint"
+curl -sf -H "$AUTH_HEADER" "$BASE/api/v1/mining/status" | jq -e '.data.total >= 0' > /dev/null 2>&1 && pass "Mining status endpoint" || fail "Mining status endpoint"
 curl -sf -o /dev/null -w "%{http_code}" "$BASE/ui/mining" | grep -q 200 && pass "Mining UI page" || fail "Mining UI page"
 curl -sf -o /dev/null -w "%{http_code}" "$BASE/ui/insights" | grep -q 200 && pass "Insights UI page" || fail "Insights UI page"
 curl -sf -o /dev/null -w "%{http_code}" "$BASE/ui/profile" | grep -q 200 && pass "Profile UI page" || fail "Profile UI page"

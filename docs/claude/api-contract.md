@@ -3,11 +3,14 @@
 ## How Other Projects Consume ping-mem
 
 ```
-Consumer Project → HTTP (REST) or MCP (stdio) → ping-mem Infrastructure
-                                                  ├─ REST API :3003
-                                                  ├─ MCP (stdio)
-                                                  ├─ Neo4j :7687
-                                                  └─ Qdrant :6333
+Consumer Project → HTTP (REST or MCP) or MCP (stdio) → ping-mem Infrastructure
+                                                        ├─ Unified HTTP :3003
+                                                        │  ├─ REST API
+                                                        │  ├─ MCP /mcp
+                                                        │  └─ App SSE /api/v1/events/stream
+                                                        ├─ MCP (stdio or proxy-cli)
+                                                        ├─ Neo4j :7687
+                                                        └─ Qdrant :6333
 ```
 
 ## REST API Contract
@@ -27,6 +30,7 @@ All codebase endpoints require IngestionService (Neo4j + Qdrant). Returns **503*
 | POST | `/api/v1/knowledge/ingest` | Ingest knowledge entry |
 | POST | `/api/v1/knowledge/search` | Full-text knowledge search |
 | GET | `/api/v1/events/stream` | SSE stream of real-time events |
+| POST/GET/DELETE | `/mcp` | MCP streamable HTTP transport |
 
 **Important**: Codebase search is **GET** with query params, NOT POST.
 
@@ -53,9 +57,11 @@ volumes:
 ## Consumer Integration Checklist
 
 1. Register: Add project path to `~/.ping-mem/registered-projects.txt`
+   `GET /api/v1/codebase/projects` now returns only that registered/canonical set by default.
+   Use `GET /api/v1/codebase/projects?scope=all` to inspect every ingested row, including stale or ad hoc worktrees.
 2. Verify: `curl http://localhost:3003/api/v1/codebase/search?query=test&limit=1`
 3. Health: `curl http://localhost:3003/health`
-4. If 503: Ensure Docker containers running (`docker ps | grep ping-mem`)
+4. If 503: Ensure Neo4j + Qdrant are running and the unified server was restarted after they became available
 5. Force reingest: `bun run scripts/force-ingest.ts /path/to/project`
 
 ## Failure Modes

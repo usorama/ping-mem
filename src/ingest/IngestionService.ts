@@ -14,6 +14,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { IngestionOrchestrator, type IngestionResult } from "./IngestionOrchestrator.js";
 import { resolveDefaultMaxCommits, resolveDefaultMaxCommitAgeDays } from "./GitHistoryReader.js";
+import { normalizeIngestionIdentity } from "./identity.js";
+import { filterProjectsToRegisteredRoots, loadRegisteredProjectRoots, type ProjectInventoryScope } from "./registered-projects.js";
 import { TemporalCodeGraph } from "../graph/TemporalCodeGraph.js";
 import { StructuralAnalyzer } from "../graph/StructuralAnalyzer.js";
 import { CodeIndexer } from "../search/CodeIndexer.js";
@@ -46,14 +48,13 @@ export interface IngestProjectOptions {
   forceReingest?: boolean;
   /**
    * Max git commits to ingest.
-   * Default: 10000 (env override: PING_MEM_MAX_COMMITS).
-   * Phase 2: raised from 200 to achieve ≥95% commit coverage.
+   * Default: unbounded (env override: PING_MEM_MAX_COMMITS).
+   * Use 0 to ingest the full commit history explicitly.
    */
   maxCommits?: number;
   /**
-   * Only include commits from last N days. Default: 365 (env override:
-   * PING_MEM_MAX_COMMIT_AGE_DAYS). Use 0 to disable the age filter entirely.
-   * Phase 2: raised from 30 days so multi-year repos (ping-learn) re-ingest fully.
+   * Only include commits from last N days. Default: unbounded (env override:
+   * PING_MEM_MAX_COMMIT_AGE_DAYS). Use 0 to disable the age filter explicitly.
    */
   maxCommitAgeDays?: number;
 }
@@ -144,8 +145,10 @@ export class IngestionService {
     ingestOptions.maxCommitAgeDays = effectiveMaxCommitAgeDays;
     if (options.maxCommitAgeDays === undefined) {
       log.info(
-        `maxCommitAgeDays not specified — defaulting to ${effectiveMaxCommitAgeDays} days ` +
-          `(env: PING_MEM_MAX_COMMIT_AGE_DAYS; 0 disables the filter)`,
+        effectiveMaxCommitAgeDays > 0
+          ? `maxCommitAgeDays not specified — defaulting to ${effectiveMaxCommitAgeDays} days ` +
+              `(env: PING_MEM_MAX_COMMIT_AGE_DAYS; 0 disables the filter)`
+          : "maxCommitAgeDays not specified — ingesting full history (no age filter)",
       );
     }
 
@@ -164,11 +167,13 @@ export class IngestionService {
     });
 
     try {
-      const ingestionResult = await this.orchestrator.ingest(options.projectDir, ingestOptions);
+      const rawIngestionResult = await this.orchestrator.ingest(options.projectDir, ingestOptions);
 
-      if (!ingestionResult) {
+      if (!rawIngestionResult) {
         return null; // No changes
       }
+
+      const ingestionResult = normalizeIngestionIdentity(rawIngestionResult);
 
       // Suppress HealthMonitor drift alerts during Neo4j+Qdrant writes (EVAL G-06 fix)
       activeProjectId = ingestionResult.projectId;
@@ -415,9 +420,30 @@ export class IngestionService {
     projectId?: string;
     limit?: number;
     sortBy?: "lastIngestedAt" | "filesCount" | "rootPath";
+    scope?: ProjectInventoryScope;
   } = {}): Promise<ProjectInfo[]> {
     try {
-      return await this.codeGraph.listProjects(options);
+      const { scope = "registered", projectId, limit = 100, sortBy } = options;
+      const queryOptions: {
+        limit: number;
+        projectId?: string;
+        sortBy?: "lastIngestedAt" | "filesCount" | "rootPath";
+      } = {
+        limit: projectId || scope === "all" ? limit : Math.max(limit, 5000),
+      };
+      if (projectId !== undefined) {
+        queryOptions.projectId = projectId;
+      }
+      if (sortBy !== undefined) {
+        queryOptions.sortBy = sortBy;
+      }
+
+      const projects = await this.codeGraph.listProjects(queryOptions);
+      if (projectId || scope === "all") {
+        return projects;
+      }
+
+      return filterProjectsToRegisteredRoots(projects, loadRegisteredProjectRoots()).slice(0, limit);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -433,11 +459,21 @@ export class IngestionService {
   }
 
   // Structural intelligence queries
-  async queryImpact(projectId: string, filePath: string, maxDepth?: number, limit?: number): Promise<Array<{ file: string; depth: number; via: string[] }>> {
+  async queryImpact(
+    projectId: string,
+    filePath: string,
+    maxDepth?: number,
+    limit?: number
+  ): Promise<{ results: Array<{ file: string; depth: number; via: string[] }>; truncated: boolean; limit: number }> {
     return this.codeGraph.queryImpact(projectId, filePath, maxDepth, limit);
   }
-  async queryBlastRadius(projectId: string, filePath: string, maxDepth?: number): Promise<Array<{ file: string; depth: number }>> {
-    return this.codeGraph.queryBlastRadius(projectId, filePath, maxDepth);
+  async queryBlastRadius(
+    projectId: string,
+    filePath: string,
+    maxDepth?: number,
+    limit?: number
+  ): Promise<{ results: Array<{ file: string; depth: number }>; truncated: boolean; limit: number }> {
+    return this.codeGraph.queryBlastRadius(projectId, filePath, maxDepth, limit);
   }
   async queryDependencyMap(projectId: string, includeExternal?: boolean): Promise<Array<{ sourceFile: string; targetFile: string; symbolName: string; isExternal: boolean }>> {
     return this.codeGraph.queryDependencyMap(projectId, includeExternal);
@@ -469,14 +505,19 @@ export class IngestionService {
       log.warn("Structural analysis skipped unreadable files", { skippedFiles, totalFiles: ingestionResult.codeFiles.length });
     }
     const structuralResult = this.structuralAnalyzer.analyzeProject(files, allProjectFiles);
+    await this.codeGraph.deleteStructuralEdges(ingestionResult.projectId);
     if (structuralResult.edges.length > 0) {
-      await this.codeGraph.deleteStructuralEdges(ingestionResult.projectId);
       await this.codeGraph.persistStructuralEdges(
         ingestionResult.projectId, structuralResult.edges, ingestionResult.ingestedAt,
       );
       log.info("Structural analysis complete", {
         projectId: ingestionResult.projectId,
         edgesFound: structuralResult.edges.length,
+        filesAnalyzed: structuralResult.filesAnalyzed,
+      });
+    } else {
+      log.info("Structural analysis complete with no edges", {
+        projectId: ingestionResult.projectId,
         filesAnalyzed: structuralResult.filesAnalyzed,
       });
     }

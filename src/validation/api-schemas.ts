@@ -98,6 +98,8 @@ export const CodebaseIngestSchema = z.object({
       message: "projectDir cannot contain path traversal sequences",
     }),
   forceReingest: z.boolean().optional().default(false),
+  maxCommits: z.number().int().min(0).optional(),
+  maxCommitAgeDays: z.number().int().min(0).optional(),
 });
 
 export type CodebaseIngestInput = z.infer<typeof CodebaseIngestSchema>;
@@ -115,8 +117,8 @@ export const IngestionEnqueueSchema = z.object({
       message: "path traversal not allowed",
     }),
   forceReingest: z.boolean().optional().default(false),
-  maxCommits: z.number().int().min(1).max(10000).optional(),
-  maxCommitAgeDays: z.number().int().min(1).max(3650).optional(),
+  maxCommits: z.number().int().min(0).optional(),
+  maxCommitAgeDays: z.number().int().min(0).optional(),
 });
 
 export type IngestionEnqueueInput = z.infer<typeof IngestionEnqueueSchema>;

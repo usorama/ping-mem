@@ -489,7 +489,8 @@ const CODEBASE_TOOLS: ToolDefinition[] = [
       properties: {
         projectDir: { type: "string", description: "Absolute path to project root" },
         forceReingest: { type: "boolean", description: "Force re-ingestion even if no changes detected" },
-        maxCommits: { type: "number", description: "Max git commits to ingest (default 200). Lower for cloned repos you don't own." },
+        maxCommits: { type: "number", description: "Max git commits to ingest. Use 0 or omit for full history." },
+        maxCommitAgeDays: { type: "number", description: "Only include commits from the last N days. Use 0 or omit for full history." },
       },
       required: ["projectDir"],
     },
@@ -539,7 +540,7 @@ const CODEBASE_TOOLS: ToolDefinition[] = [
   },
   {
     name: "codebase_list_projects",
-    description: "List all ingested projects with metadata (file/chunk/commit counts). Returns project info sorted by lastIngestedAt (default), filesCount, or rootPath.",
+    description: "List ingested projects with metadata (file/chunk/commit counts). Defaults to the registered/canonical set; pass scope='all' to include stale or ad hoc ingests.",
     inputSchema: {
       type: "object",
       properties: {
@@ -549,6 +550,11 @@ const CODEBASE_TOOLS: ToolDefinition[] = [
           type: "string",
           description: "Sort field: 'lastIngestedAt' (default), 'filesCount', or 'rootPath'",
           enum: ["lastIngestedAt", "filesCount", "rootPath"],
+        },
+        scope: {
+          type: "string",
+          description: "Project inventory scope: 'registered' (default) for the canonical set, or 'all' to include stale/ad hoc ingests",
+          enum: ["registered", "all"],
         },
       },
     },
@@ -592,6 +598,10 @@ const STRUCTURAL_TOOLS: ToolDefinition[] = [
           type: "number",
           description: "Maximum traversal depth (default: 5, max: 10)",
         },
+        maxResults: {
+          type: "number",
+          description: "Maximum results to return before truncation is flagged (default: 500, max: 2000)",
+        },
       },
       required: ["projectId", "filePath"],
     },
@@ -615,6 +625,10 @@ const STRUCTURAL_TOOLS: ToolDefinition[] = [
         maxDepth: {
           type: "number",
           description: "Maximum traversal depth (default: 5, max: 10)",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum results to return before truncation is flagged (default: 500, max: 2000)",
         },
       },
       required: ["projectId", "filePath"],

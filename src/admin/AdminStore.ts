@@ -70,6 +70,9 @@ export class AdminStore {
   private stmtListProjects!: Statement;
   private stmtDeleteProject!: Statement;
   private stmtFindProjectByDir!: Statement;
+  private stmtFindProjectById!: Statement;
+  private stmtDeleteProjectAliasesByDir!: Statement;
+  private stmtDeleteProjectsByDir!: Statement;
 
   private stmtUpsertLLMConfig!: Statement;
   private stmtGetLLMConfig!: Statement;
@@ -88,7 +91,8 @@ export class AdminStore {
     this.db = new Database(this.config.dbPath);
     if (this.config.walMode && this.config.dbPath !== ":memory:") {
       this.db.exec("PRAGMA journal_mode = WAL");
-      this.db.exec("PRAGMA synchronous = NORMAL");
+      // Admin writes must survive container restarts; prefer durability over speed.
+      this.db.exec("PRAGMA synchronous = FULL");
       this.db.exec("PRAGMA wal_autocheckpoint = 1000");
     }
     if (this.config.foreignKeys) {
@@ -189,7 +193,19 @@ export class AdminStore {
     );
 
     this.stmtFindProjectByDir = this.db.prepare(
-      "SELECT project_id, project_dir, tree_hash, last_ingested_at FROM admin_projects WHERE project_dir = $project_dir LIMIT 1"
+      "SELECT project_id, project_dir, tree_hash, last_ingested_at FROM admin_projects WHERE project_dir = $project_dir ORDER BY COALESCE(last_ingested_at, '') DESC, rowid DESC LIMIT 1"
+    );
+
+    this.stmtFindProjectById = this.db.prepare(
+      "SELECT project_id, project_dir, tree_hash, last_ingested_at FROM admin_projects WHERE project_id = $project_id LIMIT 1"
+    );
+
+    this.stmtDeleteProjectAliasesByDir = this.db.prepare(
+      "DELETE FROM admin_projects WHERE project_dir = $project_dir AND project_id != $project_id"
+    );
+
+    this.stmtDeleteProjectsByDir = this.db.prepare(
+      "DELETE FROM admin_projects WHERE project_dir = $project_dir"
     );
 
     this.stmtUpsertLLMConfig = this.db.prepare(`
@@ -300,6 +316,10 @@ export class AdminStore {
   }
 
   upsertProject(record: ProjectRecord): void {
+    this.stmtDeleteProjectAliasesByDir.run({
+      $project_dir: record.projectDir,
+      $project_id: record.projectId,
+    });
     this.stmtUpsertProject.run({
       $project_id: record.projectId,
       $project_dir: record.projectDir,
@@ -343,8 +363,32 @@ export class AdminStore {
     };
   }
 
+  findProjectById(projectId: string): ProjectRecord | null {
+    const row = this.stmtFindProjectById.get({ $project_id: projectId }) as
+      | {
+          project_id: string;
+          project_dir: string;
+          tree_hash: string | null;
+          last_ingested_at: string | null;
+        }
+      | undefined;
+    if (!row) {
+      return null;
+    }
+    return {
+      projectId: row.project_id,
+      projectDir: row.project_dir,
+      treeHash: row.tree_hash ?? undefined,
+      lastIngestedAt: row.last_ingested_at ?? undefined,
+    };
+  }
+
   deleteProject(projectId: string): void {
     this.stmtDeleteProject.run({ $project_id: projectId });
+  }
+
+  deleteProjectsByDir(projectDir: string): void {
+    this.stmtDeleteProjectsByDir.run({ $project_dir: projectDir });
   }
 
   setLLMConfig(input: LLMConfigInput): LLMConfigInfo {
@@ -424,6 +468,13 @@ export class AdminStore {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    if (this.config.walMode && this.config.dbPath !== ":memory:") {
+      try {
+        this.db.exec("PRAGMA wal_checkpoint(FULL)");
+      } catch {
+        // Best-effort only; close still proceeds.
+      }
+    }
     this.db.close();
   }
 

@@ -38,7 +38,8 @@ export const CODEBASE_TOOLS: ToolDefinition[] = [
       properties: {
         projectDir: { type: "string", description: "Absolute path to project root" },
         forceReingest: { type: "boolean", description: "Force re-ingestion even if no changes detected" },
-        maxCommits: { type: "number", description: "Max git commits to ingest (default 200). Lower for cloned repos you don't own." },
+        maxCommits: { type: "number", description: "Max git commits to ingest. Use 0 or omit for full history." },
+        maxCommitAgeDays: { type: "number", description: "Only include commits from the last N days. Use 0 or omit for full history." },
       },
       required: ["projectDir"],
     },
@@ -153,6 +154,24 @@ export class CodebaseToolModule implements ToolModule {
   // Handlers (moved verbatim from PingMemServer)
   // --------------------------------------------------------------------------
 
+  private withAdminStore<T>(fn: (store: AdminStore) => T): T | null {
+    const adminDbPath = process.env.PING_MEM_ADMIN_DB_PATH ?? path.join(os.homedir(), ".ping-mem", "admin.db");
+    try {
+      const adminStore = new AdminStore({ dbPath: adminDbPath });
+      try {
+        return fn(adminStore);
+      } finally {
+        adminStore.close();
+      }
+    } catch (error) {
+      log.error("CodebaseToolModule admin store operation failed", {
+        error: error instanceof Error ? error.message : String(error),
+        adminDbPath,
+      });
+      return null;
+    }
+  }
+
   private async handleCodebaseIngest(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (!this.state.ingestionService) {
       throw new Error("IngestionService not configured. Provide ingestionService in PingMemServerConfig.");
@@ -174,16 +193,39 @@ export class CodebaseToolModule implements ToolModule {
     if (typeof args.maxCommits === "number") {
       ingestOpts.maxCommits = args.maxCommits;
     }
+    if (typeof args.maxCommitAgeDays === "number") {
+      ingestOpts.maxCommitAgeDays = args.maxCommitAgeDays;
+    }
 
     const result = await this.state.ingestionService.ingestProject(ingestOpts);
 
     if (!result) {
+      const verify = await this.state.ingestionService.verifyProject(projectDir);
+      if (verify.projectId) {
+        this.withAdminStore((adminStore) => {
+          adminStore.upsertProject({
+            projectId: verify.projectId as string,
+            projectDir: path.resolve(projectDir),
+            treeHash: verify.currentTreeHash ?? undefined,
+            lastIngestedAt: new Date().toISOString(),
+          });
+        });
+      }
       return {
         success: true,
         hadChanges: false,
         message: "No changes detected since last ingestion.",
       };
     }
+
+    this.withAdminStore((adminStore) => {
+      adminStore.upsertProject({
+        projectId: result.projectId,
+        projectDir: path.resolve(projectDir),
+        treeHash: result.treeHash,
+        lastIngestedAt: result.ingestedAt,
+      });
+    });
 
     return {
       success: true,
@@ -325,6 +367,7 @@ export class CodebaseToolModule implements ToolModule {
       const options: Parameters<typeof this.state.ingestionService.listProjects>[0] = {
         limit: validated.limit,
         sortBy: validated.sortBy,
+        scope: validated.scope,
         ...(validated.projectId !== undefined && { projectId: validated.projectId }),
       };
 
@@ -333,6 +376,7 @@ export class CodebaseToolModule implements ToolModule {
       return {
         count: projects.length,
         sortBy: validated.sortBy,
+        scope: validated.scope,
         projects: projects.map((p) => ({
           projectId: p.projectId,
           rootPath: p.rootPath,
@@ -451,25 +495,10 @@ export class CodebaseToolModule implements ToolModule {
       }
     }
 
-    const adminDbPath = process.env.PING_MEM_ADMIN_DB_PATH ?? path.join(os.homedir(), ".ping-mem", "admin.db");
-    if (adminDbPath) {
-      try {
-        const adminStore = new AdminStore({ dbPath: adminDbPath });
-        adminStore.deleteProject(projectId);
-        adminStore.close();
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        // Log admin cleanup failure - critical for diagnosing admin DB inconsistencies
-        log.error(`ProjectDelete: Failed to cleanup admin store for project ${projectId}`, {
-          error: errorMessage,
-          stack: error instanceof Error ? error.stack : undefined,
-          adminDbPath,
-        });
-
-        // Don't re-throw - admin cleanup failure shouldn't block project deletion
-      }
-    }
+    this.withAdminStore((adminStore) => {
+      adminStore.deleteProject(projectId);
+      adminStore.deleteProjectsByDir(normalized);
+    });
 
     return {
       success: true,

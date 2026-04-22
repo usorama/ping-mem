@@ -206,7 +206,10 @@ export class EventStore {
     // Configure database
     if (this.config.walMode && this.config.dbPath !== ":memory:") {
       this.db.exec("PRAGMA journal_mode = WAL");
-      this.db.exec("PRAGMA synchronous = NORMAL");
+      // Deterministic memory durability matters more than peak write throughput.
+      // FULL reduces the chance of losing acknowledged writes across container
+      // restarts or unclean shutdowns on host-mounted volumes.
+      this.db.exec("PRAGMA synchronous = FULL");
       this.db.exec("PRAGMA wal_autocheckpoint = 1000");
     }
     if (this.config.foreignKeys) {
@@ -1018,6 +1021,15 @@ export class EventStore {
       // Assignment is synchronous — any concurrent caller that reaches here before
       // the microtask runs will find closePromise already set and return the same promise.
       this.closePromise = Promise.resolve().then(() => {
+        if (this.config.walMode && this.config.dbPath !== ":memory:") {
+          try {
+            this.db.exec("PRAGMA wal_checkpoint(FULL)");
+          } catch (err) {
+            log.warn("EventStore close: WAL checkpoint failed before close", {
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
         this.db.close();
       }).catch((err: unknown) => {
         // Clear the stuck promise so a retry is possible after a failed close attempt.

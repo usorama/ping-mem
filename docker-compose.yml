@@ -48,7 +48,7 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  # ping-mem Unified Server (SSE + REST on single instance)
+  # ping-mem Unified Server (REST + MCP + UI/admin on single instance)
   # Single instance avoids SQLite concurrency issues
   ping-mem:
     build:
@@ -56,11 +56,11 @@ services:
       dockerfile: Dockerfile
     container_name: ping-mem
     ports:
-      - "3003:3003"   # Primary port (SSE or REST based on PING_MEM_TRANSPORT)
+      - "3003:3003"   # Unified port for REST, /mcp, UI/admin, and app SSE
     environment:
       - PING_MEM_HOST=0.0.0.0
       - PING_MEM_PORT=3003
-      - PING_MEM_TRANSPORT=rest
+      - PING_MEM_TRANSPORT=streamable-http
       - PING_MEM_DB_PATH=/data/ping-mem.db
       - PING_MEM_DIAGNOSTICS_DB_PATH=/data/ping-mem-diagnostics.db
       - PING_MEM_ADMIN_DB_PATH=/data/ping-mem-admin.db
@@ -100,7 +100,7 @@ services:
       ping-mem-qdrant:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 3003 || exit 1"]
+      test: ["CMD-SHELL", "curl -fs http://localhost:3003/health | grep -q '\"status\":\"ok\"'"]
       interval: 30s
       timeout: 10s
       retries: 3

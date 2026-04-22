@@ -2,8 +2,8 @@
  * GitHistoryReader defaults + env-var override tests (Phase 2 remediation).
  *
  * Regression coverage:
- *   - DEFAULT_MAX_COMMITS raised 200 → 10000 (plan P2.1)
- *   - DEFAULT_MAX_COMMIT_AGE_DAYS raised 30 → 365 (plan P2.1)
+ *   - DEFAULT_MAX_COMMITS defaults to 0 ("full history")
+ *   - DEFAULT_MAX_COMMIT_AGE_DAYS defaults to 0 ("full history")
  *   - env override accepts only non-negative integers; NaN/negative falls back
  *   - value 0 for age means "no age filter"
  */
@@ -58,9 +58,9 @@ describe("GitHistoryReader defaults", () => {
   });
 
   describe("resolveDefaultMaxCommits", () => {
-    test("defaults to 10000 when env not set", () => {
+    test("defaults to 0 when env not set", () => {
       delete process.env.PING_MEM_MAX_COMMITS;
-      expect(resolveDefaultMaxCommits()).toBe(10000);
+      expect(resolveDefaultMaxCommits()).toBe(0);
     });
     test("reads PING_MEM_MAX_COMMITS when set to valid int", () => {
       process.env.PING_MEM_MAX_COMMITS = "50";
@@ -68,14 +68,14 @@ describe("GitHistoryReader defaults", () => {
     });
     test("falls back to default on invalid PING_MEM_MAX_COMMITS", () => {
       process.env.PING_MEM_MAX_COMMITS = "not-a-number";
-      expect(resolveDefaultMaxCommits()).toBe(10000);
+      expect(resolveDefaultMaxCommits()).toBe(0);
     });
   });
 
   describe("resolveDefaultMaxCommitAgeDays", () => {
-    test("defaults to 365 when env not set", () => {
+    test("defaults to 0 when env not set", () => {
       delete process.env.PING_MEM_MAX_COMMIT_AGE_DAYS;
-      expect(resolveDefaultMaxCommitAgeDays()).toBe(365);
+      expect(resolveDefaultMaxCommitAgeDays()).toBe(0);
     });
     test("reads PING_MEM_MAX_COMMIT_AGE_DAYS when set to valid int", () => {
       process.env.PING_MEM_MAX_COMMIT_AGE_DAYS = "730";
@@ -87,7 +87,7 @@ describe("GitHistoryReader defaults", () => {
     });
     test("falls back to default on invalid value", () => {
       process.env.PING_MEM_MAX_COMMIT_AGE_DAYS = "abc";
-      expect(resolveDefaultMaxCommitAgeDays()).toBe(365);
+      expect(resolveDefaultMaxCommitAgeDays()).toBe(0);
     });
   });
 });

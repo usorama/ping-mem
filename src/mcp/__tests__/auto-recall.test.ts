@@ -56,6 +56,9 @@ describe("context_auto_recall", () => {
     });
     expect(result.recalled).toBe(false);
     expect(result.reason).toBe("no relevant memories found");
+    expect(typeof result.hint).toBe("string");
+    expect(result.hint).toContain("Consider saving the missing context");
+    expect(result.suggestedActions).toEqual(["context_save", "context_search"]);
   });
 
   it("emits RECALL_MISS event when zero-result recall occurs", async () => {

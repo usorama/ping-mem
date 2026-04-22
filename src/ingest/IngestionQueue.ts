@@ -40,6 +40,13 @@ export interface QueueStatus {
   runs: IngestionRun[];
 }
 
+export interface IngestionQueueHooks {
+  onCompleted?: (
+    options: IngestProjectOptions,
+    result: IngestProjectResult | null
+  ) => Promise<void> | void;
+}
+
 export class IngestionQueue {
   private chain: Promise<void> = Promise.resolve();
   private readonly runs = new Map<string, IngestionRun>();
@@ -50,11 +57,14 @@ export class IngestionQueue {
 
   constructor(
     private readonly ingestionService: IngestionService,
-    options?: { maxRunHistory?: number; maxQueueDepth?: number }
+    options?: { maxRunHistory?: number; maxQueueDepth?: number } & IngestionQueueHooks
   ) {
     this.maxRunHistory = options?.maxRunHistory ?? 50;
     this.maxQueueDepth = options?.maxQueueDepth ?? 10;
+    this.onCompleted = options?.onCompleted;
   }
+
+  private readonly onCompleted?: IngestionQueueHooks["onCompleted"];
 
   async enqueue(options: IngestProjectOptions): Promise<string> {
     if (this.pendingCount >= this.maxQueueDepth) {
@@ -85,6 +95,10 @@ export class IngestionQueue {
         log.info(`Starting ingestion run ${runId}`, { projectDir: options.projectDir });
 
         const result = await this.ingestionService.ingestProject(options);
+
+        if (this.onCompleted) {
+          await this.onCompleted(options, result);
+        }
 
         run.status = "completed";
         run.result = result;
@@ -136,6 +150,9 @@ export class IngestionQueue {
           run.status = "scanning";
           log.info(`Starting ingestion run ${runId}`, { projectDir: options.projectDir });
           const result = await this.ingestionService.ingestProject(options);
+          if (this.onCompleted) {
+            await this.onCompleted(options, result);
+          }
           run.status = "completed";
           run.result = result;
           run.projectId = result?.projectId ?? null;

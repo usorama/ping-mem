@@ -305,6 +305,68 @@ describe("DiagnosticsStore", () => {
     expect(storedFindings).toHaveLength(1);
   });
 
+  test("saveRun tolerates repeated ingestion of the same analysis findings", () => {
+    const findings: FindingInput[] = [
+      {
+        ruleId: "TS1001",
+        severity: "error",
+        message: "Repeated deterministic finding",
+        filePath: "src/example.ts",
+        startLine: 1,
+      },
+    ];
+
+    const findingsDigest = computeFindingsDigest(normalizeFindings(findings, "temp-analysis"));
+    const analysisId = computeAnalysisId({
+      projectId: "project-123",
+      treeHash: "tree-abc",
+      toolName: "tsc",
+      toolVersion: "5.9.3",
+      configHash: "config-xyz",
+      findingsDigest,
+    });
+    const normalized = normalizeFindings(findings, analysisId);
+
+    const run1: DiagnosticRun = {
+      runId: store.createRunId(),
+      analysisId,
+      projectId: "project-123",
+      treeHash: "tree-abc",
+      tool: { name: "tsc", version: "5.9.3" },
+      configHash: "config-xyz",
+      status: "failed",
+      createdAt: new Date(Date.now() - 1000).toISOString(),
+      findingsDigest,
+      metadata: {},
+    };
+
+    const run2: DiagnosticRun = {
+      runId: store.createRunId(),
+      analysisId,
+      projectId: "project-123",
+      treeHash: "tree-abc",
+      tool: { name: "tsc", version: "5.9.3" },
+      configHash: "config-xyz",
+      status: "failed",
+      createdAt: new Date().toISOString(),
+      findingsDigest,
+      metadata: {},
+    };
+
+    store.saveRun(run1, normalized);
+    store.saveRun(run2, normalized);
+
+    const storedFindings = store.listFindings(analysisId);
+    expect(storedFindings).toHaveLength(1);
+
+    const latest = store.getLatestRun({
+      projectId: "project-123",
+      toolName: "tsc",
+      treeHash: "tree-abc",
+    });
+    expect(latest?.runId).toBe(run2.runId);
+  });
+
   test("createRunId generates unique UUIDv7-like IDs", () => {
     const id1 = store.createRunId();
     const id2 = store.createRunId();

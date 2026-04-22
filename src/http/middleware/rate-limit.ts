@@ -13,6 +13,7 @@ const stores = new Map<string, Map<string, { count: number; resetAt: number }>>(
 
 export function rateLimiter(options: {
   name: string;
+  namespace?: string;
   maxRequests: number;
   windowMs: number;
   maxMapSize?: number;
@@ -22,16 +23,18 @@ export function rateLimiter(options: {
   adminMaxRequests?: number;
   isAdmin?: (c: Context) => boolean;
 }) {
-  const { name, maxRequests, windowMs, maxMapSize = 10_000, skip, adminMaxRequests, isAdmin } = options;
+  const { name, namespace, maxRequests, windowMs, maxMapSize = 10_000, skip, adminMaxRequests, isAdmin } = options;
+  const storeName = namespace ? `${namespace}:${name}` : name;
+  const adminStoreName = `${storeName}:admin`;
   // Admin and non-admin counts live in separate IP-keyed buckets so an admin
   // burst can't push a non-admin request from the same IP (dev laptop, shared
   // NAT) over the non-admin ceiling. Each class has its own sliding window.
-  if (!stores.has(name)) stores.set(name, new Map());
-  if (adminMaxRequests !== undefined && !stores.has(name + ":admin")) {
-    stores.set(name + ":admin", new Map());
+  if (!stores.has(storeName)) stores.set(storeName, new Map());
+  if (adminMaxRequests !== undefined && !stores.has(adminStoreName)) {
+    stores.set(adminStoreName, new Map());
   }
-  const nonAdminLimits = stores.get(name)!;
-  const adminLimits = adminMaxRequests !== undefined ? stores.get(name + ":admin")! : nonAdminLimits;
+  const nonAdminLimits = stores.get(storeName)!;
+  const adminLimits = adminMaxRequests !== undefined ? stores.get(adminStoreName)! : nonAdminLimits;
 
   return createMiddleware(async (c: Context, next: Next) => {
     if (skip?.(c)) return next();

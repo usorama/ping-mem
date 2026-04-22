@@ -74,9 +74,11 @@ export class SafeGit {
     if (/[^\x20-\x7E]/.test(format)) {
       throw new Error("SafeGit.getLog: format must contain only printable ASCII characters");
     }
-    // Clamp limit to prevent excessive memory usage via maxBuffer
-    const clampedLimit = Math.max(1, Math.min(Math.floor(limit), 10000));
-    const args = ["log", "--all", "--topo-order", `--format=${format}`, `-n${clampedLimit}`];
+    const normalizedLimit = Number.isFinite(limit) ? Math.floor(limit) : 0;
+    const args = ["log", "--all", "--topo-order", `--format=${format}`];
+    if (normalizedLimit > 0) {
+      args.push(`-n${normalizedLimit}`);
+    }
     if (since) {
       // Validate since: only allow safe date patterns (e.g. "30 days ago", "2024-01-01")
       if (!/^\d+ days? ago$|^\d{4}-\d{2}-\d{2}$/.test(since)) {

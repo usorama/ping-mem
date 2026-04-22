@@ -32,7 +32,7 @@ export interface CodeFileResult {
 }
 
 export interface ChunkWithId {
-  chunkId: string; // Deterministic: hash(filePath + chunkType + startOffset + content)
+  chunkId: string; // Deterministic within a project after IngestionService scopes local chunk IDs by projectId
   type: "code" | "comment" | "docstring" | "function" | "class" | "file" | "block";
   start: number;
   end: number;
@@ -58,8 +58,8 @@ export interface IngestionResult {
 export interface IngestionOptions {
   scanOptions?: ProjectScanOptions;
   forceReingest?: boolean; // Ignore cached manifest
-  maxCommits?: number; // Max git commits to ingest (default 10000, env: PING_MEM_MAX_COMMITS)
-  maxCommitAgeDays?: number; // Only include commits from last N days (default 365, env: PING_MEM_MAX_COMMIT_AGE_DAYS; 0 disables filter)
+  maxCommits?: number; // Max git commits to ingest (default 0/unbounded, env: PING_MEM_MAX_COMMITS)
+  maxCommitAgeDays?: number; // Only include commits from last N days (default 0/unbounded, env: PING_MEM_MAX_COMMIT_AGE_DAYS)
   skipManifestSave?: boolean; // Defer manifest save to caller (Phase 2 manifest fix)
 }
 

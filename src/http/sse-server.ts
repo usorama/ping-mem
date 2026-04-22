@@ -26,6 +26,11 @@ import { SessionRegistry } from "../mcp/SessionRegistry.js";
 
 const log = createLogger("SSE Server");
 
+const SSE_RATE_LIMIT_MAX = 60;
+const SSE_RATE_LIMIT_WINDOW_MS = 60_000;
+const SSE_MAX_RATE_LIMIT_ENTRIES = 10_000;
+const sseRateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
 import { PingMemServer } from "../mcp/PingMemServer.js";
 
 import type { SSEServerConfig } from "./types.js";
@@ -174,6 +179,7 @@ export class SSEPingMemServer {
   ): Promise<void> {
     // Add CORS headers
     this.addCorsHeaders(req, res);
+    this.addSecurityHeaders(req, res);
 
     // Handle preflight OPTIONS request
     if (req.method === "OPTIONS") {
@@ -184,6 +190,10 @@ export class SSEPingMemServer {
 
     // Validate API key if configured
     if (!this.validateAuth(req, res)) {
+      return;
+    }
+
+    if (!this.checkRateLimit(req, res)) {
       return;
     }
 
@@ -289,6 +299,76 @@ export class SSEPingMemServer {
     }
 
     return true;
+  }
+
+  /**
+   * Apply API-focused security headers to the MCP-over-HTTP surface.
+   */
+  private addSecurityHeaders(_req: IncomingMessage, res: ServerResponse): void {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    );
+    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+    if (process.env["PING_MEM_BEHIND_PROXY"] === "true" || process.env["NODE_ENV"] === "production") {
+      res.setHeader("Strict-Transport-Security", "max-age=63072000; includeSubDomains");
+    }
+  }
+
+  /**
+   * Apply a lightweight per-IP sliding-window rate limit to the MCP surface.
+   */
+  private checkRateLimit(req: IncomingMessage, res: ServerResponse): boolean {
+    const ip = this.getRemoteIp(req);
+    const now = Date.now();
+
+    if (sseRateLimitMap.size > SSE_MAX_RATE_LIMIT_ENTRIES) {
+      for (const [key, entry] of sseRateLimitMap) {
+        if (now > entry.resetAt) {
+          sseRateLimitMap.delete(key);
+        }
+      }
+    }
+
+    const entry = sseRateLimitMap.get(ip);
+    if (!entry || now > entry.resetAt) {
+      sseRateLimitMap.set(ip, { count: 1, resetAt: now + SSE_RATE_LIMIT_WINDOW_MS });
+      return true;
+    }
+
+    entry.count++;
+    if (entry.count > SSE_RATE_LIMIT_MAX) {
+      const retryAfterSeconds = Math.ceil((entry.resetAt - now) / 1000);
+      res.setHeader("Retry-After", String(retryAfterSeconds));
+      res.writeHead(429, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        error: "Too Many Requests",
+        message: "Rate limit exceeded",
+      }));
+      return false;
+    }
+
+    return true;
+  }
+
+  private getRemoteIp(req: IncomingMessage): string {
+    if (process.env.PING_MEM_BEHIND_PROXY === "true") {
+      const forwarded = req.headers["x-forwarded-for"];
+      if (forwarded) {
+        const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+        const firstIp = raw?.split(",")[0]?.trim();
+        if (firstIp) {
+          return firstIp.slice(0, 64);
+        }
+      }
+    }
+
+    return req.socket?.remoteAddress ?? "unknown";
   }
 
   /**
@@ -412,4 +492,8 @@ export function createDefaultSSEConfig(
     },
     ...overrides,
   };
+}
+
+export function _resetSseRateLimitMapForTest(): void {
+  sseRateLimitMap.clear();
 }

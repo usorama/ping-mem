@@ -18,8 +18,8 @@ bun run build        # Compile TypeScript
 bun test             # Run tests (ALWAYS bun, never vitest/jest)
 bun run typecheck    # Type check (0 errors required)
 bun run lint         # Lint
-bun run start        # REST server (:3003)
-bun run start:sse    # SSE server
+bun run start        # unified server (:3003)
+bun run start:sse    # legacy label; unified HTTP server still exposes /mcp on :3003
 bun run dist/mcp/cli.js  # MCP stdio
 scripts/pre-push.sh  # pre-push gate — install: ln -sf ../../scripts/pre-push.sh .git/hooks/pre-push
 ```
@@ -28,7 +28,7 @@ scripts/pre-push.sh  # pre-push gate — install: ln -sf ../../scripts/pre-push.
 
 ## Key Rules
 
-- **Port 3003** is mandatory for ping-mem — never use 3000 (except prod internal, Nginx handles it)
+- **Port 3003** is the supported local/public listener for the unified server
 - **Admin auth** required for MCP proxy: `PING_MEM_ADMIN_USER=admin` / `PING_MEM_ADMIN_PASS=ping-mem-dev-local` in both `.env` and `~/.claude/mcp.json`
 - **Ollama is primary LLM**: Entity extraction, contradiction detection, causal discovery all use Ollama `llama3.2` via OpenAI-compatible API. OpenAI is fallback only.
 - **Codebase search** is GET `/api/v1/codebase/search?query=...` (NOT POST)
@@ -36,6 +36,7 @@ scripts/pre-push.sh  # pre-push gate — install: ln -sf ../../scripts/pre-push.
 - **Neo4j + Qdrant** required for ingestion features; core memory works without them
 - **ProjectId** = `SHA-256(remoteUrl + "::" + relativeToGitRoot)` — path-independent
 - **Rate limit**: 60 requests/minute on `/api/v1/*` endpoints. Mining and dreaming endpoints are resource-intensive — use sparingly.
+- **HTTP contract**: `/mcp` is MCP streamable HTTP, `/api/v1/events/stream` is app SSE, and the same `:3003` server also serves REST, UI, and admin routes.
 - **SQLite data lives in a named Docker volume** (`ping-mem-data`) — NOT a bind mount. This prevents host-side file access from corrupting WAL. Use REST API or `docker exec` to interact with the DB.
 
 ## MCP Tools

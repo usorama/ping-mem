@@ -1006,7 +1006,13 @@ export class ContextToolModule implements ToolModule {
           { query: queryText, timestamp: now }
         ).catch((err) => { log.warn("Failed to emit RECALL_MISS event", { error: err instanceof Error ? err.message : String(err) }); });
       }
-      return { recalled: false, reason: "no relevant memories found", context: "" };
+      return {
+        recalled: false,
+        reason: "no relevant memories found",
+        context: "",
+        hint: `No memories matched "${queryText}". Consider saving the missing context or broadening the query.`,
+        suggestedActions: ["context_save", "context_search"],
+      };
     }
 
     const lines = filtered.map((r, i) => {

@@ -5,6 +5,9 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { EventStore, createInMemoryEventStore } from "../EventStore.js";
 import type { Event } from "../EventStore.js";
 
@@ -215,6 +218,24 @@ describe("EventStore", () => {
       expect(stats.eventCount).toBe(2);
     });
 
+    test("should return numeric fallbacks when stats queries fail", () => {
+      const originalEventStmt = (store as any).stmtGetEventCount;
+      const originalCheckpointStmt = (store as any).stmtGetCheckpointCount;
+
+      (store as any).stmtGetEventCount = { get: () => { throw new Error("locked"); } };
+      (store as any).stmtGetCheckpointCount = { get: () => { throw new Error("locked"); } };
+
+      try {
+        const stats = store.getStats();
+        expect(stats.eventCount).toBe(0);
+        expect(stats.checkpointCount).toBe(0);
+        expect(stats.dbSize).toBe(0);
+      } finally {
+        (store as any).stmtGetEventCount = originalEventStmt;
+        (store as any).stmtGetCheckpointCount = originalCheckpointStmt;
+      }
+    });
+
     test("should track checkpoint count", async () => {
       const sessionId = "test-session-12";
       await store.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Test" });
@@ -314,6 +335,33 @@ describe("EventStore", () => {
       ).run({ $agent_id: "agent-expired", $expires_at: past, $now: now });
 
       expect(store.isAgentActive("agent-expired")).toBe(false);
+    });
+  });
+
+  describe("Persistence", () => {
+    test("should preserve committed events across close and reopen for file-backed stores", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ping-mem-event-store-"));
+      const dbPath = path.join(tmpDir, "events.db");
+      const sessionId = "persist-session";
+
+      const firstStore = new EventStore({ dbPath });
+      await firstStore.createEvent(sessionId, "SESSION_STARTED", { sessionId, name: "Persist Test" });
+      await firstStore.createEvent(sessionId, "MEMORY_SAVED", {
+        memoryId: "persist-memory-1",
+        key: "persist-key",
+        sessionId,
+        operation: "save",
+      });
+      await firstStore.close();
+
+      const reopenedStore = new EventStore({ dbPath });
+      const events = await reopenedStore.getBySession(sessionId);
+      expect(events.length).toBe(2);
+      expect(events[0]?.eventType).toBe("SESSION_STARTED");
+      expect(events[1]?.eventType).toBe("MEMORY_SAVED");
+      await reopenedStore.close();
+
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     });
   });
 });

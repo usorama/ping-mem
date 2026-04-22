@@ -267,13 +267,39 @@ describe("RESTPingMemClient", () => {
       mockFetchResponse({ data: [] });
 
       const client = new RESTPingMemClient({ baseUrl: "http://localhost:3000" });
-      await client.search({ query: "test query", limit: 5, category: "note" });
+      await client.search({
+        key: "memory-key",
+        keyPattern: "memory-*",
+        query: "test query",
+        category: "note",
+        sessionId: "session-123",
+        minSimilarity: 0.5,
+        limit: 5,
+      });
 
       const fetchCall = fetchMock.mock.calls[0] as [string, RequestInit];
-      const url = fetchCall[0] as string;
-      expect(url).toContain("query=test+query");
-      expect(url).toContain("limit=5");
-      expect(url).toContain("category=note");
+      const url = new URL(fetchCall[0] as string);
+      expect(url.searchParams.get("key")).toBe("memory-key");
+      expect(url.searchParams.get("keyPattern")).toBe("memory-*");
+      expect(url.searchParams.get("query")).toBe("test query");
+      expect(url.searchParams.get("limit")).toBe("5");
+      expect(url.searchParams.get("category")).toBe("note");
+      expect(url.searchParams.get("sessionId")).toBe("session-123");
+      expect(url.searchParams.get("minSimilarity")).toBe("0.5");
+      expect(fetchCall[1]?.method).toBe("GET");
+    });
+
+    it("includes zero-value numeric params", async () => {
+      mockFetchResponse({ data: [] });
+
+      const client = new RESTPingMemClient({ baseUrl: "http://localhost:3000" });
+      await client.search({ query: "zero", offset: 0, limit: 0, minSimilarity: 0 });
+
+      const fetchCall = fetchMock.mock.calls[0] as [string, RequestInit];
+      const url = new URL(fetchCall[0] as string);
+      expect(url.searchParams.get("offset")).toBe("0");
+      expect(url.searchParams.get("limit")).toBe("0");
+      expect(url.searchParams.get("minSimilarity")).toBe("0");
       expect(fetchCall[1]?.method).toBe("GET");
     });
   });

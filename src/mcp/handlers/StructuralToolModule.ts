@@ -38,6 +38,10 @@ export const STRUCTURAL_TOOLS: ToolDefinition[] = [
           type: "number",
           description: "Maximum traversal depth (default: 5, max: 10)",
         },
+        maxResults: {
+          type: "number",
+          description: "Maximum results to return before truncation is flagged (default: 500, max: 2000)",
+        },
       },
       required: ["projectId", "filePath"],
     },
@@ -61,6 +65,10 @@ export const STRUCTURAL_TOOLS: ToolDefinition[] = [
         maxDepth: {
           type: "number",
           description: "Maximum traversal depth (default: 5, max: 10)",
+        },
+        maxResults: {
+          type: "number",
+          description: "Maximum results to return before truncation is flagged (default: 500, max: 2000)",
         },
       },
       required: ["projectId", "filePath"],
@@ -135,23 +143,30 @@ export class StructuralToolModule implements ToolModule {
       typeof args.maxDepth === "number"
         ? Math.max(1, Math.min(args.maxDepth, 10))
         : 5;
+    const maxResults =
+      typeof args.maxResults === "number"
+        ? Math.max(1, Math.min(args.maxResults, 2000))
+        : 500;
 
     if (!projectId || !filePath) {
       throw new Error("projectId and filePath are required");
     }
 
-    const results = await this.state.ingestionService.queryImpact(
+    const outcome = await this.state.ingestionService.queryImpact(
       projectId,
       filePath,
       maxDepth,
+      maxResults,
     );
 
     return {
       projectId,
       filePath,
       maxDepth,
-      affectedFiles: results.length,
-      results,
+      maxResults: outcome.limit,
+      truncated: outcome.truncated,
+      affectedFiles: outcome.results.length,
+      results: outcome.results,
     };
   }
 
@@ -170,23 +185,30 @@ export class StructuralToolModule implements ToolModule {
       typeof args.maxDepth === "number"
         ? Math.max(1, Math.min(args.maxDepth, 10))
         : 5;
+    const maxResults =
+      typeof args.maxResults === "number"
+        ? Math.max(1, Math.min(args.maxResults, 2000))
+        : 500;
 
     if (!projectId || !filePath) {
       throw new Error("projectId and filePath are required");
     }
 
-    const results = await this.state.ingestionService.queryBlastRadius(
+    const outcome = await this.state.ingestionService.queryBlastRadius(
       projectId,
       filePath,
       maxDepth,
+      maxResults,
     );
 
     return {
       projectId,
       filePath,
       maxDepth,
-      dependencyCount: results.length,
-      results,
+      maxResults: outcome.limit,
+      truncated: outcome.truncated,
+      dependencyCount: outcome.results.length,
+      results: outcome.results,
     };
   }
 

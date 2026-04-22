@@ -84,7 +84,7 @@ const results = await pm.contextSearch("database", { limit: 5 });
 | `codebase_verify` | `POST /api/v1/codebase/verify` | `ping-mem codebase verify <dir>` | Verify manifest integrity |
 | `codebase_search` | `GET /api/v1/codebase/search` | `ping-mem codebase search <query>` | Semantic code search |
 | `codebase_timeline` | `GET /api/v1/codebase/timeline` | `ping-mem codebase timeline` | Git commit history with "why" extraction |
-| `codebase_list_projects` | `GET /api/v1/codebase/projects` | `ping-mem codebase projects` | List ingested projects |
+| `codebase_list_projects` | `GET /api/v1/codebase/projects` | `ping-mem codebase projects` | List registered projects by default; pass `scope=all` to include stale/ad hoc ingests |
 | `codebase_impact` | `GET /api/v1/codebase/impact` | `ping-mem codebase impact` | Transitive dependents of a file |
 | `codebase_blast_radius` | `GET /api/v1/codebase/blast-radius` | `ping-mem codebase blast-radius` | Risk score (fan-in, git churn, centrality) |
 | `codebase_dependency_map` | `GET /api/v1/codebase/dependency-map` | `ping-mem codebase dependency-map` | Module dependency graph |
@@ -200,7 +200,7 @@ curl http://localhost:3003/api/v1/tools | jq '.data.count'
 
 ```bash
 bun install && bun run build
-bun run start  # REST server on :3003
+bun run start  # unified server on :3003
 ```
 
 ### CLI
@@ -226,6 +226,11 @@ ping-mem daemon start
 
 ### Claude Code Integration
 
+Proxy mode is the recommended local integration when the OrbStack or Docker
+service is already running. It avoids opening SQLite directly from the MCP
+subprocess and keeps Claude Code on the same live server state as REST, UI,
+and admin flows.
+
 Add to `~/.claude/mcp.json`:
 
 ```json
@@ -233,18 +238,19 @@ Add to `~/.claude/mcp.json`:
   "mcpServers": {
     "ping-mem": {
       "command": "bun",
-      "args": ["run", "/path/to/ping-mem/dist/mcp/cli.js"],
+      "args": ["run", "/path/to/ping-mem/dist/mcp/proxy-cli.js"],
       "env": {
-        "PING_MEM_DB_PATH": "~/.ping-mem/ping-mem.db",
-        "NEO4J_URI": "bolt://localhost:7687",
-        "NEO4J_USERNAME": "neo4j",
-        "NEO4J_PASSWORD": "neo4j_password",
-        "QDRANT_URL": "http://localhost:6333"
+        "PING_MEM_REST_URL": "http://localhost:3003",
+        "PING_MEM_ADMIN_USER": "admin",
+        "PING_MEM_ADMIN_PASS": "ping-mem-dev-local"
       }
     }
   }
 }
 ```
+
+Use `dist/mcp/cli.js` only for isolated direct-mode development when you
+intentionally want the MCP process to open its own local database.
 
 ## Web UI
 
@@ -266,7 +272,7 @@ Add to `~/.claude/mcp.json`:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PING_MEM_PORT` | `3003` | Server port |
-| `PING_MEM_TRANSPORT` | `rest` | Transport (rest serves REST + MCP on same port) |
+| `PING_MEM_TRANSPORT` | `streamable-http` | Compatibility transport label; the unified server still serves REST and `/mcp` on the same port |
 | `PING_MEM_DB_PATH` | `:memory:` | SQLite database path |
 | `PING_MEM_API_KEY` | | API key for authentication |
 | `NEO4J_URI` | | Neo4j Bolt URI (for graph features) |

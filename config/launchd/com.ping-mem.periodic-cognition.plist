@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ping-mem.periodic-cognition</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/umasankr/Projects/ping-mem/scripts/periodic-cognition.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/umasankr/Projects/ping-mem</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/umasankr</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/umasankr/.bun/bin</string>
+    <key>PING_MEM_ENV_FILE</key>
+    <string>/Users/umasankr/Projects/ping-mem/.env</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StartInterval</key>
+  <integer>86400</integer>
+
+  <key>ThrottleInterval</key>
+  <integer>300</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/umasankr/Library/Logs/ping-mem-periodic-cognition.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/umasankr/Library/Logs/ping-mem-periodic-cognition.log</string>
+</dict>
+</plist>

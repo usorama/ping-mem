@@ -180,6 +180,43 @@ describe("AdminStore", () => {
       expect(found).toBeNull();
     });
 
+    test("should converge duplicate project_dir rows onto latest project id", () => {
+      store.upsertProject({
+        projectId: "proj-old",
+        projectDir: "/same/dir",
+        treeHash: "old-hash",
+        lastIngestedAt: "2026-04-20T00:00:00.000Z",
+      });
+      store.upsertProject({
+        projectId: "proj-new",
+        projectDir: "/same/dir",
+        treeHash: "new-hash",
+        lastIngestedAt: "2026-04-22T00:00:00.000Z",
+      });
+
+      const projects = store.listProjects().filter((p) => p.projectDir === "/same/dir");
+      expect(projects.length).toBe(1);
+      expect(projects[0].projectId).toBe("proj-new");
+      expect(store.findProjectByDir("/same/dir")?.projectId).toBe("proj-new");
+      expect(store.findProjectById("proj-new")?.projectDir).toBe("/same/dir");
+    });
+
+    test("should delete all rows for a project directory", () => {
+      store.upsertProject({
+        projectId: "proj-a",
+        projectDir: "/dup/dir",
+      });
+      store.upsertProject({
+        projectId: "proj-b",
+        projectDir: "/other/dir",
+      });
+      store.deleteProjectsByDir("/dup/dir");
+
+      expect(store.findProjectByDir("/dup/dir")).toBeNull();
+      expect(store.findProjectById("proj-a")).toBeNull();
+      expect(store.findProjectById("proj-b")?.projectDir).toBe("/other/dir");
+    });
+
     test("should delete project", () => {
       store.upsertProject({
         projectId: "proj-del",

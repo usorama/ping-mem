@@ -238,4 +238,34 @@ describe("IngestionQueue", () => {
     expect(run!.result).toBeNull();
     expect(run!.projectId).toBeNull();
   });
+
+  test("onCompleted hook receives completed result", async () => {
+    const service = createMockIngestionService();
+    const onCompleted = mock(async () => {});
+    const queue = new IngestionQueue(service, { onCompleted });
+
+    await queue.enqueue({ projectDir: "/test/project" });
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(onCompleted).toHaveBeenCalledTimes(1);
+    expect(onCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ projectDir: "/test/project" }),
+      expect.objectContaining({ projectId: "test-project-id" })
+    );
+  });
+
+  test("onCompleted hook receives null result for no-change runs", async () => {
+    const service = createMockIngestionService(async () => null);
+    const onCompleted = mock(async () => {});
+    const queue = new IngestionQueue(service, { onCompleted });
+
+    await queue.enqueue({ projectDir: "/test/project" });
+    await new Promise(r => setTimeout(r, 100));
+
+    expect(onCompleted).toHaveBeenCalledTimes(1);
+    expect(onCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({ projectDir: "/test/project" }),
+      null
+    );
+  });
 });

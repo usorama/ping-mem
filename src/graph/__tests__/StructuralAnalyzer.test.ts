@@ -15,6 +15,17 @@ describe("StructuralAnalyzer", () => {
     "src/service/UserService.ts",
     "src/service/AuthService.ts",
     "src/graph/Neo4jClient.ts",
+    "backend/rankforge/__init__.py",
+    "backend/rankforge/api/main.py",
+    "backend/rankforge/api/routers/profile.py",
+    "backend/rankforge/api/routers/dashboard.py",
+    "backend/rankforge/practice/__init__.py",
+    "backend/rankforge/practice/ap_integer.py",
+    "backend/rankforge/practice/base.py",
+    "backend/rankforge/scoring/__init__.py",
+    "backend/rankforge/scoring/predict.py",
+    "backend/tests/practice/__init__.py",
+    "backend/tests/practice/_helpers.py",
   ]);
 
   // ===========================================================================
@@ -88,6 +99,81 @@ describe("StructuralAnalyzer", () => {
       const imports = result.edges.filter((e) => e.kind === "IMPORTS_FROM");
       expect(imports.length).toBe(1);
       expect(imports[0]?.symbolName).toBe("SessionId");
+    });
+
+    test("extracts Python package imports from internal modules", () => {
+      const content = `
+from rankforge.practice.base import Drill, rng_from_seed
+from rankforge.scoring import predict
+`;
+      const result = analyzer.analyzeFile(
+        "backend/rankforge/practice/ap_integer.py",
+        content,
+        projectFiles,
+      );
+
+      const imports = result.edges.filter((e) => e.kind === "IMPORTS_FROM");
+      expect(imports.length).toBe(3);
+      expect(imports[0]?.targetFile).toBe("backend/rankforge/practice/base.py");
+      expect(imports[0]?.isExternal).toBe(false);
+      expect(imports[1]?.targetFile).toBe("backend/rankforge/practice/base.py");
+      expect(imports[2]?.targetFile).toBe("backend/rankforge/scoring/predict.py");
+    });
+
+    test("extracts Python relative imports", () => {
+      const content = `
+from .base import Drill
+from ..scoring.predict import predict_board_score
+from . import base
+`;
+      const result = analyzer.analyzeFile(
+        "backend/rankforge/practice/ap_integer.py",
+        content,
+        projectFiles,
+      );
+
+      const imports = result.edges.filter((e) => e.kind === "IMPORTS_FROM");
+      expect(imports.length).toBe(3);
+      expect(imports[0]?.targetFile).toBe("backend/rankforge/practice/base.py");
+      expect(imports[1]?.targetFile).toBe("backend/rankforge/scoring/predict.py");
+      expect(imports[2]?.targetFile).toBe("backend/rankforge/practice/base.py");
+    });
+
+    test("extracts multiline Python imports", () => {
+      const content = `
+from rankforge.api.routers import (
+  profile,
+  dashboard as dashboard_router,
+)
+`;
+      const result = analyzer.analyzeFile(
+        "backend/rankforge/api/main.py",
+        content,
+        projectFiles,
+      );
+
+      const imports = result.edges.filter((e) => e.kind === "IMPORTS_FROM");
+      expect(imports.length).toBe(2);
+      expect(imports[0]?.symbolName).toBe("profile");
+      expect(imports[0]?.targetFile).toBe("backend/rankforge/api/routers/profile.py");
+      expect(imports[1]?.symbolName).toBe("dashboard");
+      expect(imports[1]?.targetFile).toBe("backend/rankforge/api/routers/dashboard.py");
+    });
+
+    test("treats unresolved Python stdlib imports as external", () => {
+      const content = `import json as _json, os`;
+      const result = analyzer.analyzeFile(
+        "backend/tests/practice/_helpers.py",
+        content,
+        projectFiles,
+      );
+
+      const imports = result.edges.filter((e) => e.kind === "IMPORTS_FROM");
+      expect(imports.length).toBe(2);
+      expect(imports[0]?.isExternal).toBe(true);
+      expect(imports[0]?.targetFile).toBe("json");
+      expect(imports[1]?.isExternal).toBe(true);
+      expect(imports[1]?.targetFile).toBe("os");
     });
   });
 
@@ -258,6 +344,26 @@ const service = new auth.UserService();
       const result = analyzer.analyzeProject(files, projectFiles);
       expect(result.filesAnalyzed).toBe(2);
       expect(result.edges.length).toBe(0);
+    });
+
+    test("analyzes Python files in projects", () => {
+      const files = [
+        {
+          filePath: "backend/rankforge/practice/ap_integer.py",
+          content: `from rankforge.practice.base import Drill`,
+        },
+        {
+          filePath: "backend/rankforge/practice/base.py",
+          content: `class Drill: pass`,
+        },
+      ];
+
+      const result = analyzer.analyzeProject(files, projectFiles);
+      const imports = result.edges.filter((e) => e.kind === "IMPORTS_FROM");
+
+      expect(result.filesAnalyzed).toBe(2);
+      expect(imports.length).toBe(1);
+      expect(imports[0]?.targetFile).toBe("backend/rankforge/practice/base.py");
     });
   });
 

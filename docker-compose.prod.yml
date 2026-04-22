@@ -49,7 +49,7 @@ services:
     environment:
       - PING_MEM_HOST=0.0.0.0
       - PING_MEM_PORT=3003
-      - PING_MEM_TRANSPORT=rest
+      - PING_MEM_TRANSPORT=streamable-http
       - PING_MEM_DB_PATH=/data/ping-mem.db
       - PING_MEM_DIAGNOSTICS_DB_PATH=/data/ping-mem-diagnostics.db
       - PING_MEM_ADMIN_DB_PATH=/data/ping-mem-admin.db
@@ -85,7 +85,7 @@ services:
     restart: unless-stopped
     mem_limit: 512m
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      test: ["CMD-SHELL", "curl -fs http://localhost:3003/health | grep -q '\"status\":\"ok\"'"]
       interval: 30s
       timeout: 10s
       retries: 3

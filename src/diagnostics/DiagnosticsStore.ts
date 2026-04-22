@@ -103,7 +103,8 @@ export class DiagnosticsStore {
     this.db = new Database(this.config.dbPath);
     if (this.config.walMode && this.config.dbPath !== ":memory:") {
       this.db.exec("PRAGMA journal_mode = WAL");
-      this.db.exec("PRAGMA synchronous = NORMAL");
+      // Diagnostics are acceptance evidence; don't optimize away durability.
+      this.db.exec("PRAGMA synchronous = FULL");
       this.db.exec("PRAGMA wal_autocheckpoint = 1000");
     }
     if (this.config.foreignKeys) {
@@ -205,7 +206,7 @@ export class DiagnosticsStore {
     `);
 
     this.stmtInsertFinding = this.db.prepare(`
-      INSERT INTO diagnostic_findings (
+      INSERT OR IGNORE INTO diagnostic_findings (
         finding_id, analysis_id, rule_id, severity, message, file_path,
         start_line, start_col, end_line, end_col, chunk_id, fingerprint,
         symbol_id, symbol_name, symbol_kind, properties
@@ -524,6 +525,13 @@ export class DiagnosticsStore {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    if (this.config.walMode && this.config.dbPath !== ":memory:") {
+      try {
+        this.db.exec("PRAGMA wal_checkpoint(FULL)");
+      } catch {
+        // Best-effort only; close still proceeds.
+      }
+    }
     this.db.close();
   }
 }
