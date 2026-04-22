@@ -1,10 +1,13 @@
 /**
- * StructuralAnalyzer: Extract import/export/call relationships from TypeScript/JavaScript AST.
+ * StructuralAnalyzer: Extract import/export/call relationships from source files.
  *
- * Leverages the TypeScript Compiler API (already used by SymbolExtractor) to parse:
+ * TypeScript/JavaScript uses the TypeScript Compiler API to parse:
  * - Import declarations → IMPORTS_FROM edges
  * - Export declarations → EXPORTS edges
  * - Function/method calls → CALLS edges
+ *
+ * Python uses deterministic import-statement parsing to extract:
+ * - import ... / from ... import ... → IMPORTS_FROM edges
  *
  * Deterministic: Same source → same edges.
  * Zero new runtime dependencies (uses existing `typescript` package).
@@ -55,13 +58,21 @@ export interface ProjectStructuralResult {
   filesAnalyzed: number;
 }
 
+interface PythonImportStatement {
+  kind: "import" | "from";
+  line: number;
+  module: string;
+  importedNames: string[];
+  aliases: Map<string, string>;
+}
+
 // ============================================================================
 // StructuralAnalyzer
 // ============================================================================
 
 export class StructuralAnalyzer {
   private static readonly SUPPORTED_EXTENSIONS = new Set([
-    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py",
   ]);
 
   /**
@@ -80,6 +91,10 @@ export class StructuralAnalyzer {
     const ext = this.getExtension(filePath);
     if (!StructuralAnalyzer.SUPPORTED_EXTENSIONS.has(ext)) {
       return { edges: [], filePath };
+    }
+
+    if (ext === ".py") {
+      return this.analyzePythonFile(filePath, content, projectFiles);
     }
 
     const sourceFile = ts.createSourceFile(
@@ -121,6 +136,87 @@ export class StructuralAnalyzer {
     };
 
     visit(sourceFile);
+
+    return { edges, filePath };
+  }
+
+  private analyzePythonFile(
+    filePath: string,
+    content: string,
+    projectFiles: Set<string>,
+  ): StructuralAnalysisResult {
+    const edges: StructuralEdge[] = [];
+    const statements = this.extractPythonImportStatements(content);
+
+    for (const statement of statements) {
+      if (statement.kind === "import") {
+        for (const importedName of statement.importedNames) {
+          const specifier = importedName.trim();
+          if (!specifier) continue;
+
+          const resolved = this.resolvePythonModulePath(specifier, filePath, projectFiles);
+          const isExternal = resolved === null && !specifier.startsWith(".");
+          const targetFile =
+            resolved ??
+            (specifier.startsWith(".")
+              ? this.normalizeRelativePythonModuleSpecifier(specifier, filePath)
+              : specifier);
+          const symbolName = statement.aliases.get(specifier) ?? specifier;
+
+          edges.push(
+            this.createEdge(
+              "IMPORTS_FROM",
+              filePath,
+              targetFile,
+              symbolName,
+              statement.line,
+              isExternal,
+            ),
+          );
+        }
+        continue;
+      }
+
+      const resolvedModule = this.resolvePythonModulePath(
+        statement.module,
+        filePath,
+        projectFiles,
+      );
+      const moduleTarget =
+        resolvedModule ??
+        (statement.module.startsWith(".")
+          ? this.normalizeRelativePythonModuleSpecifier(statement.module, filePath)
+          : statement.module);
+
+      for (const importedName of statement.importedNames) {
+        const symbolName = importedName.trim();
+        if (!symbolName) continue;
+
+        const submoduleSpecifier = this.buildPythonImportedModuleSpecifier(
+          statement.module,
+          symbolName,
+        );
+        const resolvedSubmodule = submoduleSpecifier
+          ? this.resolvePythonModulePath(submoduleSpecifier, filePath, projectFiles)
+          : null;
+        const targetFile = resolvedSubmodule ?? moduleTarget;
+        const isExternal =
+          resolvedSubmodule === null &&
+          resolvedModule === null &&
+          !statement.module.startsWith(".");
+
+        edges.push(
+          this.createEdge(
+            "IMPORTS_FROM",
+            filePath,
+            targetFile,
+            symbolName,
+            statement.line,
+            isExternal,
+          ),
+        );
+      }
+    }
 
     return { edges, filePath };
   }
@@ -384,6 +480,263 @@ export class StructuralAnalyzer {
 
     // Couldn't resolve within project — treat as resolved-but-missing
     return resolved;
+  }
+
+  private extractPythonImportStatements(content: string): PythonImportStatement[] {
+    const lines = content.split(/\r?\n/);
+    const statements: PythonImportStatement[] = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const startLine = i + 1;
+      const firstLine = this.stripPythonComment(lines[i] ?? "");
+      const trimmed = firstLine.trim();
+      if (!trimmed.startsWith("import ") && !trimmed.startsWith("from ")) {
+        continue;
+      }
+
+      const statementLines = [firstLine];
+      let parenDepth = this.countPythonParens(firstLine);
+      let hasContinuation = firstLine.trimEnd().endsWith("\\");
+
+      while ((parenDepth > 0 || hasContinuation) && i + 1 < lines.length) {
+        i++;
+        const nextLine = this.stripPythonComment(lines[i] ?? "");
+        statementLines.push(nextLine);
+        parenDepth += this.countPythonParens(nextLine);
+        hasContinuation = nextLine.trimEnd().endsWith("\\");
+      }
+
+      const normalized = statementLines
+        .map((line) => line.replace(/\\\s*$/, "").trim())
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const parsed = this.parsePythonImportStatement(normalized, startLine);
+      if (parsed) {
+        statements.push(parsed);
+      }
+    }
+
+    return statements;
+  }
+
+  private parsePythonImportStatement(
+    statement: string,
+    line: number,
+  ): PythonImportStatement | null {
+    if (statement.startsWith("import ")) {
+      const imports = statement.slice("import ".length).trim();
+      const parsedImports = this.parsePythonImportList(imports);
+      const importedNames = parsedImports.map(({ name }) => name);
+      const aliases = new Map(
+        parsedImports.map(({ name, alias }) => [name, alias ?? name]),
+      );
+      return {
+        kind: "import",
+        line,
+        module: "",
+        importedNames,
+        aliases,
+      };
+    }
+
+    const fromMatch = statement.match(/^from\s+([.\w]+)\s+import\s+(.+)$/);
+    if (!fromMatch) {
+      return null;
+    }
+
+    const module = fromMatch[1] ?? "";
+    const importClause = fromMatch[2] ?? "";
+    const parsedImports = this.parsePythonImportList(importClause);
+    const importedNames = parsedImports.map(({ name }) => name);
+    const aliases = new Map(
+      parsedImports.map(({ name, alias }) => [name, alias ?? name]),
+    );
+
+    return {
+      kind: "from",
+      line,
+      module,
+      importedNames,
+      aliases,
+    };
+  }
+
+  private parsePythonImportList(
+    value: string,
+  ): Array<{ name: string; alias: string | null }> {
+    const normalized = value
+      .trim()
+      .replace(/^\(\s*/, "")
+      .replace(/\s*\)$/, "");
+
+    return normalized
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part) => {
+        if (part === "*") {
+          return { name: "*", alias: null };
+        }
+        const aliasMatch = part.match(/^([A-Za-z_][\w.]*)\s+as\s+([A-Za-z_][\w]*)$/);
+        if (aliasMatch) {
+          return {
+            name: aliasMatch[1] ?? part,
+            alias: aliasMatch[2] ?? null,
+          };
+        }
+        return { name: part, alias: null };
+      });
+  }
+
+  private resolvePythonModulePath(
+    specifier: string,
+    fromFile: string,
+    projectFiles: Set<string>,
+  ): string | null {
+    if (!specifier) {
+      return null;
+    }
+
+    if (specifier.startsWith(".")) {
+      return this.resolveRelativePythonModulePath(specifier, fromFile, projectFiles);
+    }
+
+    const modulePath = specifier.replace(/\./g, "/");
+    const candidates = this.getPythonModuleCandidates(modulePath);
+    return this.findBestPythonProjectMatch(candidates, fromFile, projectFiles);
+  }
+
+  private resolveRelativePythonModulePath(
+    specifier: string,
+    fromFile: string,
+    projectFiles: Set<string>,
+  ): string | null {
+    const dotCount = specifier.match(/^\.+/)?.[0].length ?? 0;
+    const remainder = specifier.slice(dotCount);
+    let baseDir = path.posix.dirname(fromFile);
+
+    for (let i = 1; i < dotCount; i++) {
+      baseDir = path.posix.dirname(baseDir);
+    }
+
+    const modulePath = remainder
+      ? path.posix.join(baseDir, remainder.replace(/\./g, "/"))
+      : baseDir;
+
+    for (const candidate of this.getPythonModuleCandidates(modulePath)) {
+      if (projectFiles.has(candidate)) {
+        return candidate;
+      }
+    }
+
+    return null;
+  }
+
+  private getPythonModuleCandidates(modulePath: string): string[] {
+    return [
+      `${modulePath}.py`,
+      path.posix.join(modulePath, "__init__.py"),
+    ];
+  }
+
+  private findBestPythonProjectMatch(
+    candidates: string[],
+    fromFile: string,
+    projectFiles: Set<string>,
+  ): string | null {
+    const sourceSegments = path.posix.dirname(fromFile).split("/").filter(Boolean);
+    const matches: string[] = [];
+
+    for (const candidate of candidates) {
+      for (const projectFile of projectFiles) {
+        if (projectFile === candidate || projectFile.endsWith(`/${candidate}`)) {
+          matches.push(projectFile);
+        }
+      }
+    }
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    matches.sort((a, b) => {
+      const scoreDiff = this.getSharedPrefixLength(sourceSegments, a) -
+        this.getSharedPrefixLength(sourceSegments, b);
+      if (scoreDiff !== 0) {
+        return scoreDiff > 0 ? -1 : 1;
+      }
+      if (a.length !== b.length) {
+        return a.length - b.length;
+      }
+      return a.localeCompare(b);
+    });
+
+    return matches[0] ?? null;
+  }
+
+  private getSharedPrefixLength(sourceSegments: string[], candidateFile: string): number {
+    const candidateSegments = path.posix.dirname(candidateFile).split("/").filter(Boolean);
+    let count = 0;
+    const limit = Math.min(sourceSegments.length, candidateSegments.length);
+
+    while (count < limit && sourceSegments[count] === candidateSegments[count]) {
+      count++;
+    }
+
+    return count;
+  }
+
+  private buildPythonImportedModuleSpecifier(
+    moduleSpecifier: string,
+    importedName: string,
+  ): string | null {
+    if (importedName === "*") {
+      return null;
+    }
+
+    if (/^\.+$/.test(moduleSpecifier)) {
+      return `${moduleSpecifier}${importedName}`;
+    }
+
+    return `${moduleSpecifier}.${importedName}`;
+  }
+
+  private normalizeRelativePythonModuleSpecifier(
+    specifier: string,
+    fromFile: string,
+  ): string {
+    const dotCount = specifier.match(/^\.+/)?.[0].length ?? 0;
+    const remainder = specifier.slice(dotCount);
+    let baseDir = path.posix.dirname(fromFile);
+
+    for (let i = 1; i < dotCount; i++) {
+      baseDir = path.posix.dirname(baseDir);
+    }
+
+    if (!remainder) {
+      return path.posix.join(baseDir, "__init__.py");
+    }
+
+    return path.posix.join(baseDir, `${remainder.replace(/\./g, "/")}.py`);
+  }
+
+  private stripPythonComment(line: string): string {
+    const commentIndex = line.indexOf("#");
+    if (commentIndex === -1) {
+      return line;
+    }
+    return line.slice(0, commentIndex);
+  }
+
+  private countPythonParens(line: string): number {
+    let depth = 0;
+    for (const char of line) {
+      if (char === "(") depth++;
+      if (char === ")") depth--;
+    }
+    return depth;
   }
 
   // --------------------------------------------------------------------------

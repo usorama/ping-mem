@@ -174,4 +174,104 @@ describe("TemporalCodeGraph", () => {
       expect(mockSession.close).toHaveBeenCalled();
     });
   });
+
+  describe("project-scoped graph identities", () => {
+    it("uses project-scoped file keys when querying chunks", async () => {
+      mockSession.run.mockResolvedValue({ records: [] });
+
+      await graph.queryFileChunks("project-a", "src/index.ts");
+      const paramsA = mockSession.run.mock.calls[0][1];
+
+      mockSession.run.mockClear();
+
+      await graph.queryFileChunks("project-b", "src/index.ts");
+      const paramsB = mockSession.run.mock.calls[0][1];
+
+      expect(paramsA.fileKey).toBeTruthy();
+      expect(paramsB.fileKey).toBeTruthy();
+      expect(paramsA.fileKey).not.toBe(paramsB.fileKey);
+    });
+
+    it("ensures uniqueness constraints for project-scoped nodes", async () => {
+      mockSession.run.mockResolvedValue({ records: [] });
+
+      await graph.ensureConstraints();
+
+      const statements = mockSession.run.mock.calls.map((call) => call[0]);
+      expect(statements).toContain(
+        "CREATE CONSTRAINT project_id_unique IF NOT EXISTS FOR (p:Project) REQUIRE p.projectId IS UNIQUE",
+      );
+      expect(statements).toContain(
+        "CREATE CONSTRAINT file_key_unique IF NOT EXISTS FOR (f:File) REQUIRE f.fileKey IS UNIQUE",
+      );
+      expect(statements).toContain(
+        "CREATE CONSTRAINT chunk_key_unique IF NOT EXISTS FOR (c:Chunk) REQUIRE c.chunkKey IS UNIQUE",
+      );
+      expect(statements).toContain(
+        "CREATE CONSTRAINT symbol_key_unique IF NOT EXISTS FOR (s:Symbol) REQUIRE s.symbolKey IS UNIQUE",
+      );
+    });
+  });
+
+  describe("deleteProject", () => {
+    it("deletes project data in bounded batches and only sweeps orphans", async () => {
+      const countRecord = (deleted: number) => ({
+        get: (key: string) => {
+          if (key !== "deleted") return undefined;
+          return { toNumber: () => deleted };
+        },
+      });
+
+      const responses = [
+        { records: [countRecord(25)] },
+        { records: [countRecord(3)] },
+        { records: [countRecord(0)] },
+        { records: [countRecord(25)] },
+        { records: [countRecord(2)] },
+        { records: [countRecord(0)] },
+        { records: [countRecord(25)] },
+        { records: [countRecord(4)] },
+        { records: [countRecord(0)] },
+        { records: [countRecord(1)] },
+        { records: [countRecord(25)] },
+        { records: [countRecord(1)] },
+        { records: [countRecord(0)] },
+        { records: [countRecord(25)] },
+        { records: [countRecord(5)] },
+        { records: [countRecord(0)] },
+        { records: [countRecord(25)] },
+        { records: [countRecord(6)] },
+        { records: [countRecord(0)] },
+        { records: [countRecord(25)] },
+        { records: [countRecord(7)] },
+        { records: [countRecord(0)] },
+      ];
+
+      mockSession.run.mockImplementation(async () => {
+        const next = responses.shift();
+        return next ?? { records: [countRecord(0)] };
+      });
+
+      await graph.deleteProject("proj-1");
+
+      const queries = mockSession.run.mock.calls.map((call) => call[0] as string);
+      expect(queries[0]).toContain("MATCH ()-[r:STRUCTURAL_EDGE { projectId: $projectId }]->()");
+      expect(queries[0]).toContain("LIMIT $batchSize");
+      expect(queries[3]).toContain("MATCH (p:Project { projectId: $projectId })-[r:HAS_COMMIT]->()");
+      expect(queries[6]).toContain("MATCH (p:Project { projectId: $projectId })-[r:HAS_FILE]->()");
+      expect(queries[9]).toContain("MATCH (p:Project { projectId: $projectId })");
+      expect(queries[9]).toContain("DELETE p");
+      expect(queries[10]).toContain("MATCH (c:Commit)");
+      expect(queries[10]).toContain("NOT EXISTS { MATCH (:Project)-[:HAS_COMMIT]->(c) }");
+      expect(queries[13]).toContain("MATCH (f:File)");
+      expect(queries[13]).toContain("NOT EXISTS { MATCH (:Project)-[:HAS_FILE]->(f) }");
+      expect(queries[16]).toContain("MATCH (c:Chunk)");
+      expect(queries[16]).toContain("NOT EXISTS { MATCH (:File)-[:HAS_CHUNK]->(c) }");
+      expect(queries[19]).toContain("MATCH (s:Symbol)");
+      expect(queries[19]).toContain("NOT EXISTS { MATCH (:File)-[:DEFINES_SYMBOL]->(s) }");
+      expect(queries[19]).toContain("NOT EXISTS { MATCH (:Chunk)-[:CONTAINS_SYMBOL]->(s) }");
+
+      expect(mockSession.close).toHaveBeenCalledTimes(mockSession.run.mock.calls.length);
+    });
+  });
 });

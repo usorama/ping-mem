@@ -23,7 +23,7 @@ describe("shell routes", () => {
     app = new Hono<AppEnv>();
     registerShellRoutes(app, {
       eventStore,
-      getCurrentSessionId: () => sessionId,
+      resolveSessionId: () => sessionId,
     });
   });
 
@@ -103,7 +103,7 @@ describe("shell routes", () => {
     const noSessionApp = new Hono<AppEnv>();
     registerShellRoutes(noSessionApp, {
       eventStore,
-      getCurrentSessionId: () => null,
+      resolveSessionId: () => null,
     });
 
     const res = await noSessionApp.request("/api/v1/shell/event", {

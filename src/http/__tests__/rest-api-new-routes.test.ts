@@ -27,6 +27,8 @@ function createTestServer(): RESTPingMemServer {
   });
 }
 
+let requestCounter = 0;
+
 async function request(
   server: RESTPingMemServer,
   method: string,
@@ -35,9 +37,14 @@ async function request(
   headers?: Record<string, string>
 ): Promise<Response> {
   const app = server.getApp();
+  const requestId = ++requestCounter;
   const init: RequestInit = {
     method,
-    headers: { "Content-Type": "application/json", ...(headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      "X-Forwarded-For": `127.0.0.${(requestId % 250) + 1}`,
+      ...(headers ?? {}),
+    },
   };
   if (body) {
     init.body = JSON.stringify(body);
@@ -116,6 +123,164 @@ describe("Graph REST Endpoints", () => {
     expect(json.data.status).toBeDefined();
     expect(json.data.timestamp).toBeDefined();
     expect(json.data.version).toBe("1.0.0");
+  });
+});
+
+describe("Operational Truth REST Endpoints", () => {
+  let server: RESTPingMemServer;
+
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  test("GET /api/v1/observability/status reflects critical alerts in health status", async () => {
+    const fakeHealthMonitor = {
+      getStatus: () => ({
+        running: true,
+        lastSnapshot: {
+          status: "ok" as const,
+          timestamp: new Date().toISOString(),
+          components: {
+            sqlite: { status: "healthy" as const, configured: true, metrics: { integrity_ok: 1 } },
+            neo4j: { status: "healthy" as const, configured: true },
+            qdrant: { status: "healthy" as const, configured: true },
+          },
+        },
+        lastFastTickAt: new Date().toISOString(),
+        lastQualityTickAt: new Date().toISOString(),
+        activeAlerts: [
+          {
+            key: "sqlite:integrity_ok",
+            severity: "critical" as const,
+            source: "sqlite" as const,
+            message: "integrity_ok=0 below 1",
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      }),
+    };
+
+    server = new RESTPingMemServer({
+      dbPath: ":memory:",
+      port: 0,
+      healthMonitor: fakeHealthMonitor as never,
+    });
+
+    const res = await request(server, "GET", "/api/v1/observability/status");
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { data: { health: { status: string } } };
+    expect(json.data.health.status).toBe("degraded");
+  });
+
+  test("shell routes reject ambiguous requests when multiple active sessions exist", async () => {
+    server = createTestServer();
+    await startSession(server);
+    await request(server, "POST", "/api/v1/session/start", { name: "second-session" });
+
+    const postRes = await request(server, "POST", "/api/v1/shell/event", {
+      type: "precmd",
+      directory: "/tmp",
+    });
+    expect(postRes.status).toBe(400);
+
+    const getRes = await request(server, "GET", "/api/v1/shell/latest");
+    expect(getRes.status).toBe(400);
+  });
+});
+
+describe("Memory auto-recall REST endpoint", () => {
+  let server: RESTPingMemServer;
+
+  beforeEach(() => {
+    server = createTestServer();
+  });
+
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  test("POST /api/v1/memory/auto-recall returns a hint when no memories match", async () => {
+    const sessionId = await startSession(server);
+
+    const res = await request(
+      server,
+      "POST",
+      "/api/v1/memory/auto-recall",
+      { query: "something completely unrelated to anything" },
+      { "X-Session-ID": sessionId }
+    );
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      data: { recalled: boolean; hint: string; suggestedActions: string[] };
+    };
+    expect(json.data.recalled).toBe(false);
+    expect(json.data.hint).toContain("Consider saving the missing context");
+    expect(json.data.suggestedActions).toEqual(["context_save", "context_search"]);
+  });
+});
+
+describe("Codebase structural REST endpoints", () => {
+  let server: RESTPingMemServer;
+
+  beforeEach(() => {
+    server = createTestServer();
+    (server as any).config.ingestionService = {
+      queryImpact: async () => ({
+        results: [{ file: "src/dependent.ts", depth: 1, via: ["src/index.ts"] }],
+        truncated: true,
+        limit: 25,
+      }),
+      queryBlastRadius: async () => ({
+        results: [{ file: "src/dependency.ts", depth: 1 }],
+        truncated: false,
+        limit: 10,
+      }),
+    };
+  });
+
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  test("GET /api/v1/codebase/impact returns truncation metadata", async () => {
+    const res = await request(
+      server,
+      "GET",
+      "/api/v1/codebase/impact?projectId=test-project&filePath=src/index.ts&maxDepth=3&maxResults=25"
+    );
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      truncated: boolean;
+      maxResults: number;
+      affectedFiles: number;
+      results: Array<{ file: string }>;
+    };
+    expect(json.truncated).toBe(true);
+    expect(json.maxResults).toBe(25);
+    expect(json.affectedFiles).toBe(1);
+    expect(json.results[0]?.file).toBe("src/dependent.ts");
+  });
+
+  test("GET /api/v1/codebase/blast-radius returns truncation metadata", async () => {
+    const res = await request(
+      server,
+      "GET",
+      "/api/v1/codebase/blast-radius?projectId=test-project&filePath=src/index.ts&maxDepth=3&maxResults=10"
+    );
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      truncated: boolean;
+      maxResults: number;
+      dependencyCount: number;
+      results: Array<{ file: string }>;
+    };
+    expect(json.truncated).toBe(false);
+    expect(json.maxResults).toBe(10);
+    expect(json.dependencyCount).toBe(1);
+    expect(json.results[0]?.file).toBe("src/dependency.ts");
   });
 });
 
@@ -335,6 +500,48 @@ describe("Codebase Additional REST Endpoints", () => {
     expect(res.status).toBe(503);
   });
 
+  test("GET /api/v1/codebase/projects defaults to registered scope", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    server = new RESTPingMemServer({
+      dbPath: ":memory:",
+      port: 0,
+      ingestionService: {
+        listProjects: async (options: Record<string, unknown>) => {
+          calls.push(options);
+          return [];
+        },
+      } as any,
+    });
+
+    const res = await request(server, "GET", "/api/v1/codebase/projects");
+
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([{ limit: 100, sortBy: "lastIngestedAt", scope: "registered" }]);
+    const json = (await res.json()) as { data: { scope: string } };
+    expect(json.data.scope).toBe("registered");
+  });
+
+  test("GET /api/v1/codebase/projects forwards scope=all", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    server = new RESTPingMemServer({
+      dbPath: ":memory:",
+      port: 0,
+      ingestionService: {
+        listProjects: async (options: Record<string, unknown>) => {
+          calls.push(options);
+          return [];
+        },
+      } as any,
+    });
+
+    const res = await request(server, "GET", "/api/v1/codebase/projects?scope=all&limit=5");
+
+    expect(res.status).toBe(200);
+    expect(calls).toEqual([{ limit: 5, sortBy: "lastIngestedAt", scope: "all" }]);
+    const json = (await res.json()) as { data: { scope: string } };
+    expect(json.data.scope).toBe("all");
+  });
+
   test("DELETE /api/v1/codebase/projects/:id returns 403 when admin credentials not configured", async () => {
     const res = await request(server, "DELETE", "/api/v1/codebase/projects/test-id");
     expect(res.status).toBe(403);
@@ -443,15 +650,26 @@ describe("Tool Discovery REST Endpoints", () => {
   });
 
   test("POST /api/v1/tools/:name/invoke returns 403 when admin credentials not configured", async () => {
-    const res = await request(server, "POST", "/api/v1/tools/nonexistent_tool/invoke", {
-      args: {},
-    });
-    // Default-deny: no admin creds configured → 403
-    expect([403, 429]).toContain(res.status);
-    if (res.status === 403) {
-      const json = (await res.json()) as { error: string; message: string };
-      expect(json.error).toBe("Forbidden");
-      expect(json.message).toContain("admin credentials not configured");
+    const prevUser = process.env.PING_MEM_ADMIN_USER;
+    const prevPass = process.env.PING_MEM_ADMIN_PASS;
+    delete process.env.PING_MEM_ADMIN_USER;
+    delete process.env.PING_MEM_ADMIN_PASS;
+    try {
+      const res = await request(server, "POST", "/api/v1/tools/nonexistent_tool/invoke", {
+        args: {},
+      });
+      // Default-deny: no admin creds configured → 403
+      expect([403, 429]).toContain(res.status);
+      if (res.status === 403) {
+        const json = (await res.json()) as { error: string; message: string };
+        expect(json.error).toBe("Forbidden");
+        expect(json.message.toLowerCase()).toContain("admin credentials");
+      }
+    } finally {
+      if (prevUser === undefined) delete process.env.PING_MEM_ADMIN_USER;
+      else process.env.PING_MEM_ADMIN_USER = prevUser;
+      if (prevPass === undefined) delete process.env.PING_MEM_ADMIN_PASS;
+      else process.env.PING_MEM_ADMIN_PASS = prevPass;
     }
   });
 });

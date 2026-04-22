@@ -14,6 +14,10 @@ export const ListProjectsSchema = z.object({
     .enum(["lastIngestedAt", "filesCount", "rootPath"])
     .optional()
     .default("lastIngestedAt"),
+  scope: z
+    .enum(["registered", "all"])
+    .optional()
+    .default("registered"),
 });
 
 export type ListProjectsInput = z.infer<typeof ListProjectsSchema>;

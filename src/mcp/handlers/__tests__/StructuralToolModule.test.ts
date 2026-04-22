@@ -17,6 +17,7 @@ describe("StructuralToolModule", () => {
       expect(tool?.inputSchema.required).toContain("projectId");
       expect(tool?.inputSchema.required).toContain("filePath");
       expect(tool?.inputSchema.properties).toHaveProperty("maxDepth");
+      expect(tool?.inputSchema.properties).toHaveProperty("maxResults");
     });
 
     test("defines codebase_blast_radius tool", () => {
@@ -24,6 +25,7 @@ describe("StructuralToolModule", () => {
       expect(tool).toBeDefined();
       expect(tool?.inputSchema.required).toContain("projectId");
       expect(tool?.inputSchema.required).toContain("filePath");
+      expect(tool?.inputSchema.properties).toHaveProperty("maxResults");
     });
 
     test("defines codebase_dependency_map tool", () => {
@@ -93,6 +95,53 @@ describe("StructuralToolModule", () => {
       const promise = module.handle("codebase_impact", { projectId: "test", filePath: "src/index.ts" });
       expect(promise).toBeDefined();
       await expect(promise!).rejects.toThrow("IngestionService not configured");
+    });
+
+    test("returns truncation metadata for codebase_impact", async () => {
+      const module = new StructuralToolModule({
+        currentSessionId: null,
+        memoryManagers: new Map(),
+        sessionManager: {} as never,
+        eventStore: {} as never,
+        vectorIndex: null,
+        graphManager: null,
+        entityExtractor: null,
+        llmEntityExtractor: null,
+        hybridSearchEngine: null,
+        lineageEngine: null,
+        evolutionEngine: null,
+        ingestionService: {
+          queryImpact: async () => ({
+            results: [{ file: "src/dependent.ts", depth: 2, via: ["src/a.ts", "src/b.ts"] }],
+            truncated: true,
+            limit: 25,
+          }),
+          queryBlastRadius: async () => ({ results: [], truncated: false, limit: 500 }),
+          getDependencyMap: async () => [],
+        } as never,
+        diagnosticsStore: null,
+        summaryGenerator: null,
+        relevanceEngine: null,
+        causalGraphManager: null,
+        causalDiscoveryAgent: null,
+        pubsub: null,
+        knowledgeStore: null,
+        qdrantClient: null,
+        ccMemoryBridge: null,
+      });
+
+      const result = await module.handle("codebase_impact", {
+        projectId: "test-project",
+        filePath: "src/index.ts",
+        maxDepth: 4,
+        maxResults: 25,
+      });
+
+      expect(result).toBeDefined();
+      expect(result?.truncated).toBe(true);
+      expect(result?.maxResults).toBe(25);
+      expect(result?.affectedFiles).toBe(1);
+      expect(result?.results).toHaveLength(1);
     });
   });
 });

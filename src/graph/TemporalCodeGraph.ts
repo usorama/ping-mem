@@ -7,9 +7,9 @@
  *
  * Nodes:
  * - Project { projectId, rootPath, treeHash }
- * - File { fileId (sha256 of path), path, sha256, bytes }
- * - Chunk { chunkId, type: code|comment|docstring, start, end, content }
- * - Symbol { symbolId, name, kind, line }
+ * - File { fileKey (sha256 of projectId + filePath), fileId, path, sha256, bytes }
+ * - Chunk { chunkKey (sha256 of projectId + chunkId), chunkId, type, start, end, content }
+ * - Symbol { symbolKey (sha256 of projectId + symbolId), symbolId, name, kind, line }
  * - Commit { hash, authorDate, message, parentHashes[] }
  *
  * Relationships:
@@ -36,6 +36,7 @@ import type { ExtractedSymbol } from "../ingest/SymbolExtractor.js";
 import type { StructuralEdge } from "./StructuralAnalyzer.js";
 import * as crypto from "crypto";
 import * as path from "path";
+import { createProjectScopedId } from "../ingest/identity.js";
 import { createLogger } from "../util/logger.js";
 import { sanitizeHealthError } from "../observability/health-probes.js";
 
@@ -53,6 +54,7 @@ export class TemporalCodeGraph {
   }
 
   private static readonly BATCH_SIZE = 100;
+  private static readonly DELETE_BATCH_SIZE = 25;
   private static readonly ALLOWED_SORT_VALUES = new Set(["lastIngestedAt", "filesCount", "rootPath"]);
 
   /**
@@ -110,10 +112,10 @@ export class TemporalCodeGraph {
     await this.persistFilesBatch(result.projectId, result.ingestedAt, result.codeFiles);
 
     log.info("Phase 3/8: Chunks");
-    await this.persistChunksBatch(result.ingestedAt, result.codeFiles);
+    await this.persistChunksBatch(result.projectId, result.ingestedAt, result.codeFiles);
 
     log.info("Phase 4/8: Symbols");
-    await this.persistSymbolsBatch(result.ingestedAt, result.codeFiles);
+    await this.persistSymbolsBatch(result.projectId, result.ingestedAt, result.codeFiles);
 
     log.info("Phase 5/8: Commits", { count: result.gitHistory.commits.length });
     await this.persistCommitsBatch(result.projectId, result.gitHistory.commits);
@@ -122,10 +124,10 @@ export class TemporalCodeGraph {
     await this.persistParentsBatch(result.gitHistory.commits);
 
     log.info("Phase 7/8: File changes", { count: result.gitHistory.fileChanges.length });
-    await this.persistFileChangesBatch(result.gitHistory.fileChanges);
+    await this.persistFileChangesBatch(result.projectId, result.gitHistory.fileChanges);
 
     log.info("Phase 8/8: Diff hunks", { count: result.gitHistory.hunks.length });
-    await this.persistDiffHunksBatch(result.gitHistory.hunks);
+    await this.persistDiffHunksBatch(result.projectId, result.gitHistory.hunks);
   }
 
   /**
@@ -165,14 +167,14 @@ export class TemporalCodeGraph {
   ): Promise<Array<ChunkWithId>> {
     const session = this.neo4j.getSession();
     try {
-      const fileId = this.computeFileId(filePath);
+      const fileKey = this.computeFileKey(projectId, filePath);
       const result = await session.run(
         `
-        MATCH (p:Project { projectId: $projectId })-[:HAS_FILE]->(f:File { fileId: $fileId })-[:HAS_CHUNK]->(c:Chunk)
+        MATCH (p:Project { projectId: $projectId })-[:HAS_FILE]->(f:File { fileKey: $fileKey })-[:HAS_CHUNK]->(c:Chunk)
         RETURN c.chunkId AS chunkId, c.type AS type, c.start AS start, c.end AS end, c.lineStart AS lineStart, c.lineEnd AS lineEnd, c.content AS content
         ORDER BY c.start
         `,
-        { projectId, fileId }
+        { projectId, fileKey }
       );
 
       return result.records.map((r) => ({
@@ -263,14 +265,14 @@ export class TemporalCodeGraph {
 
     const session = this.neo4j.getSession();
     try {
-      const fileId = this.computeFileId(filePath);
+      const fileKey = this.computeFileKey(projectId, filePath);
       const result = await session.run(
         `
-        MATCH (p:Project { projectId: $projectId })-[:HAS_COMMIT]->(c:Commit)-[m:MODIFIES]->(f:File { fileId: $fileId })
+        MATCH (p:Project { projectId: $projectId })-[:HAS_COMMIT]->(c:Commit)-[m:MODIFIES]->(f:File { fileKey: $fileKey })
         RETURN c.hash AS commitHash, m.changeType AS changeType, c.authorDate AS date
         ORDER BY c.authorDate DESC
         `,
-        { projectId, fileId }
+        { projectId, fileKey }
       );
 
       return result.records.map((r) => ({
@@ -287,22 +289,123 @@ export class TemporalCodeGraph {
    * Delete all nodes and relationships for a project.
    */
   async deleteProject(projectId: string): Promise<void> {
+    const batchSize = neo4j.int(TemporalCodeGraph.DELETE_BATCH_SIZE);
+
+    // Order matters:
+    // 1. Remove project-owned relationships in bounded slices.
+    // 2. Delete the Project node once detached.
+    // 3. Sweep orphaned commits/files/chunks/symbols in bounded slices.
+    //
+    // This avoids a single large DETACH DELETE transaction and preserves any
+    // nodes that are still referenced by another project row.
+    const deletedStructuralEdges = await this.deleteInBatches(
+      `
+      MATCH ()-[r:STRUCTURAL_EDGE { projectId: $projectId }]->()
+      WITH r LIMIT $batchSize
+      DELETE r
+      RETURN count(r) AS deleted
+      `,
+      { projectId, batchSize },
+      "deleteProject:structuralEdges",
+    );
+
+    const deletedHasCommitEdges = await this.deleteInBatches(
+      `
+      MATCH (p:Project { projectId: $projectId })-[r:HAS_COMMIT]->()
+      WITH r LIMIT $batchSize
+      DELETE r
+      RETURN count(r) AS deleted
+      `,
+      { projectId, batchSize },
+      "deleteProject:projectCommitEdges",
+    );
+
+    const deletedHasFileEdges = await this.deleteInBatches(
+      `
+      MATCH (p:Project { projectId: $projectId })-[r:HAS_FILE]->()
+      WITH r LIMIT $batchSize
+      DELETE r
+      RETURN count(r) AS deleted
+      `,
+      { projectId, batchSize },
+      "deleteProject:projectFileEdges",
+    );
+
     const session = this.neo4j.getSession();
+    let deletedProjects = 0;
     try {
-      await session.run(
+      const result = await session.run(
         `
         MATCH (p:Project { projectId: $projectId })
-        OPTIONAL MATCH (p)-[:HAS_FILE]->(f:File)
-        OPTIONAL MATCH (f)-[:HAS_CHUNK]->(c:Chunk)
-        OPTIONAL MATCH (c)-[:DEFINES_SYMBOL]->(s:Symbol)
-        OPTIONAL MATCH (p)-[:HAS_COMMIT]->(commit:Commit)
-        DETACH DELETE p, f, c, s, commit
+        DELETE p
+        RETURN count(p) AS deleted
         `,
-        { projectId }
+        { projectId },
       );
+      deletedProjects = this.getCount(result.records[0], "deleted");
     } finally {
       await session.close();
     }
+
+    const deletedCommits = await this.deleteInBatches(
+      `
+      MATCH (c:Commit)
+      WHERE NOT EXISTS { MATCH (:Project)-[:HAS_COMMIT]->(c) }
+      WITH c LIMIT $batchSize
+      DETACH DELETE c
+      RETURN count(c) AS deleted
+      `,
+      { batchSize },
+      "deleteProject:orphanCommits",
+    );
+
+    const deletedFiles = await this.deleteInBatches(
+      `
+      MATCH (f:File)
+      WHERE NOT EXISTS { MATCH (:Project)-[:HAS_FILE]->(f) }
+      WITH f LIMIT $batchSize
+      DETACH DELETE f
+      RETURN count(f) AS deleted
+      `,
+      { batchSize },
+      "deleteProject:orphanFiles",
+    );
+
+    const deletedChunks = await this.deleteInBatches(
+      `
+      MATCH (c:Chunk)
+      WHERE NOT EXISTS { MATCH (:File)-[:HAS_CHUNK]->(c) }
+      WITH c LIMIT $batchSize
+      DETACH DELETE c
+      RETURN count(c) AS deleted
+      `,
+      { batchSize },
+      "deleteProject:orphanChunks",
+    );
+
+    await this.deleteInBatches(
+      `
+      MATCH (s:Symbol)
+      WHERE NOT EXISTS { MATCH (:File)-[:DEFINES_SYMBOL]->(s) }
+        AND NOT EXISTS { MATCH (:Chunk)-[:CONTAINS_SYMBOL]->(s) }
+      WITH s LIMIT $batchSize
+      DETACH DELETE s
+      RETURN count(s) AS deleted
+      `,
+      { batchSize },
+      "deleteProject:orphanSymbols",
+    );
+
+    log.info("Deleted project graph in bounded batches", {
+      projectId,
+      deletedStructuralEdges,
+      deletedHasCommitEdges,
+      deletedHasFileEdges,
+      deletedProjects,
+      deletedCommits,
+      deletedFiles,
+      deletedChunks,
+    });
   }
 
   /**
@@ -446,6 +549,7 @@ export class TemporalCodeGraph {
     codeFiles: CodeFileResult[]
   ): Promise<void> {
     const items = codeFiles.map((f) => ({
+      fileKey: this.computeFileKey(projectId, f.filePath),
       fileId: this.computeFileId(f.filePath),
       path: f.filePath,
       sha256: f.sha256,
@@ -455,11 +559,15 @@ export class TemporalCodeGraph {
       `
       UNWIND $items AS item
       MATCH (p:Project { projectId: $projectId })
-      MERGE (f:File { fileId: item.fileId })
+      MERGE (f:File { fileKey: item.fileKey })
       SET f.path = item.path,
+          f.fileId = item.fileId,
+          f.fileKey = item.fileKey,
+          f.projectId = $projectId,
           f.sha256 = item.sha256,
           f.lastIngestedAt = $ingestedAt
-      MERGE (p)-[:HAS_FILE { ingestedAt: $ingestedAt }]->(f)
+      MERGE (p)-[r:HAS_FILE]->(f)
+      SET r.ingestedAt = $ingestedAt
       `,
       (batch) => ({ items: batch, projectId, ingestedAt }),
       "Files"
@@ -467,11 +575,14 @@ export class TemporalCodeGraph {
   }
 
   private async persistChunksBatch(
+    projectId: string,
     ingestedAt: string,
     codeFiles: CodeFileResult[]
   ): Promise<void> {
     const items: Array<{
+      fileKey: string;
       fileId: string;
+      chunkKey: string;
       chunkId: string;
       type: string;
       start: number;
@@ -483,9 +594,12 @@ export class TemporalCodeGraph {
 
     for (const fileResult of codeFiles) {
       const fileId = this.computeFileId(fileResult.filePath);
+      const fileKey = this.computeFileKey(projectId, fileResult.filePath);
       for (const chunk of fileResult.chunks) {
         items.push({
+          fileKey,
           fileId,
+          chunkKey: this.computeChunkKey(projectId, chunk.chunkId),
           chunkId: chunk.chunkId,
           type: chunk.type,
           start: chunk.start,
@@ -500,29 +614,36 @@ export class TemporalCodeGraph {
     await this.runBatched(items,
       `
       UNWIND $items AS item
-      MATCH (f:File { fileId: item.fileId })
+      MATCH (f:File { fileKey: item.fileKey })
       WITH f, item WHERE f IS NOT NULL
-      MERGE (c:Chunk { chunkId: item.chunkId })
+      MERGE (c:Chunk { chunkKey: item.chunkKey })
       SET c.type = item.type,
+          c.projectId = $projectId,
+          c.chunkKey = item.chunkKey,
+          c.chunkId = item.chunkId,
           c.start = item.start,
           c.end = item.end,
           c.lineStart = item.lineStart,
           c.lineEnd = item.lineEnd,
           c.content = item.content,
           c.lastIngestedAt = $ingestedAt
-      MERGE (f)-[:HAS_CHUNK { ingestedAt: $ingestedAt }]->(c)
+      MERGE (f)-[r:HAS_CHUNK]->(c)
+      SET r.ingestedAt = $ingestedAt
       `,
-      (batch) => ({ items: batch, ingestedAt }),
+      (batch) => ({ items: batch, projectId, ingestedAt }),
       "Chunks"
     );
   }
 
   private async persistSymbolsBatch(
+    projectId: string,
     ingestedAt: string,
     codeFiles: CodeFileResult[]
   ): Promise<void> {
     const symbolItems: Array<{
+      fileKey: string;
       fileId: string;
+      symbolKey: string;
       symbolId: string;
       name: string;
       kind: string;
@@ -533,9 +654,12 @@ export class TemporalCodeGraph {
 
     for (const fileResult of codeFiles) {
       const fileId = this.computeFileId(fileResult.filePath);
+      const fileKey = this.computeFileKey(projectId, fileResult.filePath);
       for (const symbol of fileResult.symbols) {
         symbolItems.push({
+          fileKey,
           fileId,
+          symbolKey: this.computeSymbolKey(projectId, symbol.symbolId),
           symbolId: symbol.symbolId,
           name: symbol.name,
           kind: symbol.kind,
@@ -552,18 +676,22 @@ export class TemporalCodeGraph {
     await this.runBatched(symbolItems,
       `
       UNWIND $items AS item
-      MATCH (f:File { fileId: item.fileId })
+      MATCH (f:File { fileKey: item.fileKey })
       WITH f, item WHERE f IS NOT NULL
-      MERGE (s:Symbol { symbolId: item.symbolId })
+      MERGE (s:Symbol { symbolKey: item.symbolKey })
       SET s.name = item.name,
+          s.projectId = $projectId,
+          s.symbolKey = item.symbolKey,
+          s.symbolId = item.symbolId,
           s.kind = item.kind,
           s.startLine = item.startLine,
           s.endLine = item.endLine,
           s.signature = item.signature,
           s.lastIngestedAt = $ingestedAt
-      MERGE (f)-[:DEFINES_SYMBOL { ingestedAt: $ingestedAt }]->(s)
+      MERGE (f)-[r:DEFINES_SYMBOL]->(s)
+      SET r.ingestedAt = $ingestedAt
       `,
-      (batch) => ({ items: batch, ingestedAt }),
+      (batch) => ({ items: batch, projectId, ingestedAt }),
       "Symbols"
     );
 
@@ -571,12 +699,13 @@ export class TemporalCodeGraph {
     await this.runBatched(symbolItems,
       `
       UNWIND $items AS item
-      MATCH (s:Symbol { symbolId: item.symbolId })
-      MATCH (f:File { fileId: item.fileId })-[:HAS_CHUNK]->(c:Chunk)
+      MATCH (s:Symbol { symbolKey: item.symbolKey })
+      MATCH (f:File { fileKey: item.fileKey })-[:HAS_CHUNK]->(c:Chunk { projectId: $projectId })
       WHERE c.lineStart <= item.endLine AND c.lineEnd >= item.startLine
-      MERGE (c)-[:CONTAINS_SYMBOL { ingestedAt: $ingestedAt }]->(s)
+      MERGE (c)-[r:CONTAINS_SYMBOL]->(s)
+      SET r.ingestedAt = $ingestedAt
       `,
-      (batch) => ({ items: batch, ingestedAt }),
+      (batch) => ({ items: batch, projectId, ingestedAt }),
       "Symbol-Chunk links"
     );
   }
@@ -648,9 +777,11 @@ export class TemporalCodeGraph {
   }
 
   private async persistFileChangesBatch(
+    projectId: string,
     fileChanges: GitFileChange[]
   ): Promise<void> {
     const items = fileChanges.map((change) => ({
+      fileKey: this.computeFileKey(projectId, change.filePath),
       commitHash: change.commitHash,
       fileId: this.computeFileId(change.filePath),
       filePath: change.filePath,
@@ -661,19 +792,21 @@ export class TemporalCodeGraph {
       `
       UNWIND $items AS item
       MATCH (c:Commit { hash: item.commitHash })
-      MERGE (f:File { fileId: item.fileId })
-      ON CREATE SET f.path = item.filePath
+      MERGE (f:File { fileKey: item.fileKey })
+      ON CREATE SET f.path = item.filePath, f.fileId = item.fileId, f.fileKey = item.fileKey, f.projectId = $projectId
       MERGE (c)-[:MODIFIES { changeType: item.changeType }]->(f)
       `,
-      (batch) => ({ items: batch }),
+      (batch) => ({ items: batch, projectId }),
       "File changes"
     );
   }
 
   private async persistDiffHunksBatch(
+    projectId: string,
     hunks: GitDiffHunk[]
   ): Promise<void> {
     const items = hunks.map((hunk) => ({
+      fileKey: this.computeFileKey(projectId, hunk.filePath),
       commitHash: hunk.commitHash,
       fileId: this.computeFileId(hunk.filePath),
       hunkId: this.computeHunkId(hunk),
@@ -687,7 +820,7 @@ export class TemporalCodeGraph {
       `
       UNWIND $items AS item
       MATCH (c:Commit { hash: item.commitHash })
-      MATCH (f:File { fileId: item.fileId })-[:HAS_CHUNK]->(chunk:Chunk)
+      MATCH (f:File { fileKey: item.fileKey })-[:HAS_CHUNK]->(chunk:Chunk { projectId: $projectId })
       WHERE chunk.lineStart <= item.newStart AND chunk.lineEnd >= item.newStart
       MERGE (c)-[:CHANGES {
         hunkId: item.hunkId,
@@ -697,13 +830,25 @@ export class TemporalCodeGraph {
         newLines: item.newLines
       }]->(chunk)
       `,
-      (batch) => ({ items: batch }),
+      (batch) => ({ items: batch, projectId }),
       "Diff hunks"
     );
   }
 
   private computeFileId(filePath: string): string {
     return crypto.createHash("sha256").update(filePath).digest("hex");
+  }
+
+  private computeFileKey(projectId: string, filePath: string): string {
+    return createProjectScopedId(projectId, filePath);
+  }
+
+  private computeChunkKey(projectId: string, chunkId: string): string {
+    return createProjectScopedId(projectId, chunkId);
+  }
+
+  private computeSymbolKey(projectId: string, symbolId: string): string {
+    return createProjectScopedId(projectId, symbolId);
   }
 
   private computeHunkId(hunk: GitDiffHunk): string {
@@ -730,6 +875,8 @@ export class TemporalCodeGraph {
     if (edges.length === 0) return;
     const items = edges.map((e) => ({
       edgeId: e.edgeId, kind: e.kind,
+      sourceFileKey: this.computeFileKey(projectId, e.sourceFile),
+      targetFileKey: this.computeFileKey(projectId, e.targetFile),
       sourceFileId: this.computeFileId(e.sourceFile),
       targetFileId: this.computeFileId(e.targetFile),
       sourceFile: e.sourceFile, targetFile: e.targetFile,
@@ -737,9 +884,9 @@ export class TemporalCodeGraph {
     }));
     await this.runBatched(items,
       `UNWIND $items AS item
-       MATCH (src:File { fileId: item.sourceFileId })
-       MERGE (tgt:File { fileId: item.targetFileId })
-       ON CREATE SET tgt.path = item.targetFile, tgt.isExternal = item.isExternal
+       MATCH (src:File { fileKey: item.sourceFileKey })
+       MERGE (tgt:File { fileKey: item.targetFileKey })
+       ON CREATE SET tgt.path = item.targetFile, tgt.fileId = item.targetFileId, tgt.fileKey = item.targetFileKey, tgt.projectId = $projectId, tgt.isExternal = item.isExternal
        MERGE (src)-[r:STRUCTURAL_EDGE { edgeId: item.edgeId }]->(tgt)
        SET r.kind = item.kind, r.symbolName = item.symbolName, r.line = item.line,
            r.isExternal = item.isExternal, r.projectId = $projectId, r.ingestedAt = $ingestedAt`,
@@ -749,24 +896,27 @@ export class TemporalCodeGraph {
   }
 
   async deleteStructuralEdges(projectId: string): Promise<void> {
-    const session = this.neo4j.getSession();
-    try {
-      await session.run(
-        `MATCH ()-[r:STRUCTURAL_EDGE { projectId: $projectId }]->() DELETE r`,
-        { projectId }
-      );
-    } finally { await session.close(); }
+    await this.deleteInBatches(
+      `
+      MATCH ()-[r:STRUCTURAL_EDGE { projectId: $projectId }]->()
+      WITH r LIMIT $batchSize
+      DELETE r
+      RETURN count(r) AS deleted
+      `,
+      { projectId, batchSize: neo4j.int(TemporalCodeGraph.DELETE_BATCH_SIZE) },
+      "deleteStructuralEdges",
+    );
   }
 
   async queryImportsOf(projectId: string, filePath: string): Promise<Array<{ targetFile: string; symbolName: string; line: number; isExternal: boolean }>> {
     const session = this.neo4j.getSession();
     try {
-      const fileId = this.computeFileId(filePath);
+      const fileKey = this.computeFileKey(projectId, filePath);
       const result = await session.run(
-        `MATCH (src:File { fileId: $fileId })-[r:STRUCTURAL_EDGE { projectId: $projectId, kind: 'IMPORTS_FROM' }]->(tgt:File)
+        `MATCH (src:File { fileKey: $fileKey })-[r:STRUCTURAL_EDGE { projectId: $projectId, kind: 'IMPORTS_FROM' }]->(tgt:File)
          RETURN tgt.path AS targetFile, r.symbolName AS symbolName, r.line AS line, r.isExternal AS isExternal
          ORDER BY r.line`,
-        { fileId, projectId }
+        { fileKey, projectId }
       );
       return result.records.map((r) => ({
         targetFile: r.get("targetFile") as string, symbolName: r.get("symbolName") as string,
@@ -779,11 +929,11 @@ export class TemporalCodeGraph {
   async queryImportedBy(projectId: string, filePath: string): Promise<Array<{ sourceFile: string; symbolName: string; line: number }>> {
     const session = this.neo4j.getSession();
     try {
-      const fileId = this.computeFileId(filePath);
+      const fileKey = this.computeFileKey(projectId, filePath);
       const result = await session.run(
-        `MATCH (src:File)-[r:STRUCTURAL_EDGE { projectId: $projectId, kind: 'IMPORTS_FROM' }]->(tgt:File { fileId: $fileId })
+        `MATCH (src:File)-[r:STRUCTURAL_EDGE { projectId: $projectId, kind: 'IMPORTS_FROM' }]->(tgt:File { fileKey: $fileKey })
          RETURN src.path AS sourceFile, r.symbolName AS symbolName, r.line AS line ORDER BY src.path`,
-        { fileId, projectId }
+        { fileKey, projectId }
       );
       return result.records.map((r) => ({
         sourceFile: r.get("sourceFile") as string, symbolName: r.get("symbolName") as string,
@@ -792,20 +942,25 @@ export class TemporalCodeGraph {
     } finally { await session.close(); }
   }
 
-  async queryImpact(projectId: string, filePath: string, maxDepth: number = 5, limit: number = 500): Promise<Array<{ file: string; depth: number; via: string[] }>> {
+  async queryImpact(
+    projectId: string,
+    filePath: string,
+    maxDepth: number = 5,
+    limit: number = 500
+  ): Promise<{ results: Array<{ file: string; depth: number; via: string[] }>; truncated: boolean; limit: number }> {
     const session = this.neo4j.getSession();
     try {
-      const fileId = this.computeFileId(filePath);
+      const fileKey = this.computeFileKey(projectId, filePath);
       const d = Math.min(maxDepth, 10);
       const startTime = Date.now();
       const result = await session.run(
-        `MATCH path = (src:File)-[:STRUCTURAL_EDGE*1..${d}]->(tgt:File { fileId: $fileId })
+        `MATCH path = (tgt:File { fileKey: $fileKey })<-[:STRUCTURAL_EDGE*1..${d}]-(src:File)
          WHERE ALL(r IN relationships(path) WHERE r.projectId = $projectId AND r.kind = 'IMPORTS_FROM')
            AND src.path IS NOT NULL
          WITH src, length(path) AS depth, [n IN nodes(path) WHERE n.path IS NOT NULL | n.path] AS via
          RETURN DISTINCT src.path AS file, min(depth) AS depth, via ORDER BY depth, src.path
          LIMIT $limit`,
-        { fileId, projectId, limit: neo4j.int(limit) },
+        { fileKey, projectId, limit: neo4j.int(limit) },
         { timeout: 30000 }
       );
       const duration = Date.now() - startTime;
@@ -819,26 +974,32 @@ export class TemporalCodeGraph {
         depth: typeof r.get("depth") === "object" ? (r.get("depth") as { toNumber: () => number }).toNumber() : (r.get("depth") as number),
         via: (r.get("via") as string[]).filter(Boolean),
       }));
-      if (records.length === limit) {
+      const truncated = records.length === limit;
+      if (truncated) {
         log.warn("queryImpact hit limit — results may be incomplete", { filePath, limit });
       }
-      return records;
+      return { results: records, truncated, limit };
     } finally { await session.close(); }
   }
 
-  async queryBlastRadius(projectId: string, filePath: string, maxDepth: number = 5, limit: number = 500): Promise<Array<{ file: string; depth: number }>> {
+  async queryBlastRadius(
+    projectId: string,
+    filePath: string,
+    maxDepth: number = 5,
+    limit: number = 500
+  ): Promise<{ results: Array<{ file: string; depth: number }>; truncated: boolean; limit: number }> {
     const session = this.neo4j.getSession();
     try {
-      const fileId = this.computeFileId(filePath);
+      const fileKey = this.computeFileKey(projectId, filePath);
       const d = Math.min(maxDepth, 10);
       const startTime = Date.now();
       const result = await session.run(
-        `MATCH path = (src:File { fileId: $fileId })-[:STRUCTURAL_EDGE*1..${d}]->(tgt:File)
+        `MATCH path = (src:File { fileKey: $fileKey })-[:STRUCTURAL_EDGE*1..${d}]->(tgt:File)
          WHERE ALL(r IN relationships(path) WHERE r.projectId = $projectId AND r.kind = 'IMPORTS_FROM')
          WITH tgt, length(path) AS depth
          RETURN DISTINCT tgt.path AS file, min(depth) AS depth ORDER BY depth, tgt.path
          LIMIT $limit`,
-        { fileId, projectId, limit: neo4j.int(limit) },
+        { fileKey, projectId, limit: neo4j.int(limit) },
         { timeout: 30000 }
       );
       const duration = Date.now() - startTime;
@@ -851,10 +1012,11 @@ export class TemporalCodeGraph {
         file: r.get("file") as string,
         depth: typeof r.get("depth") === "object" ? (r.get("depth") as { toNumber: () => number }).toNumber() : (r.get("depth") as number),
       }));
-      if (records.length === limit) {
+      const truncated = records.length === limit;
+      if (truncated) {
         log.warn("queryBlastRadius hit limit — results may be incomplete", { filePath, limit });
       }
-      return records;
+      return { results: records, truncated, limit };
     } finally { await session.close(); }
   }
 
@@ -886,6 +1048,15 @@ export class TemporalCodeGraph {
       await session.run(
         "CREATE CONSTRAINT project_id_unique IF NOT EXISTS FOR (p:Project) REQUIRE p.projectId IS UNIQUE"
       );
+      await session.run(
+        "CREATE CONSTRAINT file_key_unique IF NOT EXISTS FOR (f:File) REQUIRE f.fileKey IS UNIQUE"
+      );
+      await session.run(
+        "CREATE CONSTRAINT chunk_key_unique IF NOT EXISTS FOR (c:Chunk) REQUIRE c.chunkKey IS UNIQUE"
+      );
+      await session.run(
+        "CREATE CONSTRAINT symbol_key_unique IF NOT EXISTS FOR (s:Symbol) REQUIRE s.symbolKey IS UNIQUE"
+      );
       log.info("Neo4j constraints ensured");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -894,5 +1065,50 @@ export class TemporalCodeGraph {
     } finally {
       await session.close();
     }
+  }
+
+  private async deleteInBatches(
+    cypher: string,
+    params: Record<string, unknown>,
+    label: string,
+  ): Promise<number> {
+    let totalDeleted = 0;
+
+    while (true) {
+      const session = this.neo4j.getSession();
+      try {
+        const result = await session.run(cypher, params);
+        const deleted = this.getCount(result.records[0], "deleted");
+        totalDeleted += deleted;
+
+        if (deleted === 0) {
+          break;
+        }
+
+        if (
+          totalDeleted % (TemporalCodeGraph.DELETE_BATCH_SIZE * 10) === 0 ||
+          deleted < TemporalCodeGraph.DELETE_BATCH_SIZE
+        ) {
+          log.info(`${label}: deleted ${totalDeleted}`);
+        }
+      } finally {
+        await session.close();
+      }
+    }
+
+    return totalDeleted;
+  }
+
+  private getCount(
+    record: { get: (key: string) => unknown } | undefined,
+    key: string,
+  ): number {
+    if (!record) return 0;
+    const value = record.get(key) as unknown;
+    if (typeof value === "number") return value;
+    if (typeof value === "object" && value !== null && "toNumber" in value) {
+      return (value as { toNumber: () => number }).toNumber();
+    }
+    return 0;
   }
 }

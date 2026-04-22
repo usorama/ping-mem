@@ -1,7 +1,11 @@
 /**
  * HTTP Server Main Entry Point
  *
- * Starts ping-mem HTTP server using either SSE or REST transport.
+ * Starts the unified ping-mem HTTP server.
+ *
+ * Runtime serves REST, MCP streamable HTTP, UI, admin, and app SSE endpoints
+ * from the same listener. `PING_MEM_TRANSPORT` is currently treated as a
+ * compatibility label, not as a switch that removes one surface or another.
  *
  * @module http/server
  * @version 1.0.0
@@ -31,8 +35,8 @@ const log = createLogger("HTTP Server");
 /**
  * Start ping-mem HTTP server
  *
- * Automatically detects transport type from environment variable
- * PING_MEM_TRANSPORT (sse, rest, or streamable-http).
+ * Reads the compatibility transport label from `PING_MEM_TRANSPORT`
+ * (sse, rest, or streamable-http) for configuration/logging.
  */
 export async function startHTTPServer(): Promise<void> {
   validateEnv();

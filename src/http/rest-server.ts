@@ -103,6 +103,7 @@ import { UserProfileStore } from "../profile/UserProfile.js";
 
 /** Maximum SARIF payload size in bytes (5 MB) */
 const MAX_SARIF_BYTES = 5 * 1024 * 1024;
+let rateLimitNamespaceCounter = 0;
 
 // ============================================================================
 // REST Server Class
@@ -192,6 +193,7 @@ export class RESTPingMemServer {
   private dreamingEngine: ReturnType<typeof createDreamingEngine> | null = null;
   private userProfileStore: UserProfileStore | null = null;
   private warmUpInProgress = false;
+  private readonly rateLimitNamespace: string;
 
   constructor(config: HTTPServerConfig & PingMemServerConfig) {
     this.config = {
@@ -200,6 +202,12 @@ export class RESTPingMemServer {
       vectorDimensions: 768,
       ...config,
     };
+    this.rateLimitNamespace = [
+      Date.now().toString(36),
+      (++rateLimitNamespaceCounter).toString(36),
+      Math.random().toString(36).slice(2, 10),
+      crypto.randomUUID().slice(0, 8),
+    ].join("-");
 
     // Initialize core components — use shared EventStore if provided (avoids dual SQLite connections)
     const injectedEventStore = this.config.eventStore;
@@ -249,7 +257,52 @@ export class RESTPingMemServer {
       this.neo4jClient = config.neo4jClient;
     }
     if (config.ingestionService) {
-      this.ingestionQueue = new IngestionQueue(config.ingestionService);
+      const ingestionService = config.ingestionService;
+      this.ingestionQueue = new IngestionQueue(ingestionService, {
+        onCompleted: async (options, result) => {
+          if (!this.config.adminStore) {
+            log.warn("Ingestion queue completed without adminStore configured", {
+              projectDir: options.projectDir,
+            });
+            return;
+          }
+
+          if (result) {
+            this.config.adminStore.upsertProject({
+              projectId: result.projectId,
+              projectDir: options.projectDir,
+              treeHash: result.treeHash,
+              lastIngestedAt: result.ingestedAt,
+            });
+            log.info("Ingestion queue reconciled admin store", {
+              projectId: result.projectId,
+              projectDir: options.projectDir,
+              ingestedAt: result.ingestedAt,
+              hadChanges: result.hadChanges,
+            });
+            return;
+          }
+
+          const verify = await ingestionService.verifyProject(options.projectDir);
+          if (verify.projectId) {
+            this.config.adminStore.upsertProject({
+              projectId: verify.projectId,
+              projectDir: options.projectDir,
+              treeHash: verify.currentTreeHash ?? undefined,
+              lastIngestedAt: new Date().toISOString(),
+            });
+            log.info("Ingestion queue reconciled admin store after no-change verify", {
+              projectId: verify.projectId,
+              projectDir: options.projectDir,
+              treeHash: verify.currentTreeHash ?? null,
+            });
+          } else {
+            log.warn("Ingestion queue could not reconcile admin store after no-change verify", {
+              projectDir: options.projectDir,
+            });
+          }
+        },
+      });
     }
 
     // Validate PING_MEM_STATIC_DIR at startup — catch misconfigurations early so
@@ -465,6 +518,7 @@ export class RESTPingMemServer {
     // Admin callers (hooks, doctor, dev scripts) get a bounded higher ceiling instead of
     // a full bypass — keeps the route protected if admin creds leak.
     this.app.use("/api/v1/observations/*", rateLimiter({
+      namespace: this.rateLimitNamespace,
       name: "observations",
       maxRequests: 300,
       windowMs: 60_000,
@@ -476,6 +530,7 @@ export class RESTPingMemServer {
     // Policy: every /api/v1/* caller faces SOME limit. Admin gets 10× headroom for
     // legitimate bursts (full memory re-sync, ingestion sweeps) but never unbounded.
     this.app.use("/api/v1/*", rateLimiter({
+      namespace: this.rateLimitNamespace,
       name: "api-v1",
       maxRequests: 60,
       windowMs: 60_000,
@@ -505,7 +560,7 @@ export class RESTPingMemServer {
       // Per-component status from HealthMonitor cached snapshot (zero inline latency).
       // If no snapshot yet (first 60s), fall back to passive object-existence check.
       const components: Record<string, string> = { sqlite: "ok" };
-      let degraded = false;
+      let effectiveStatus: "ok" | "degraded" | "unhealthy" = "ok";
 
       const monitorStatus = this.healthMonitor?.getStatus();
       const snapshot = monitorStatus?.lastSnapshot;
@@ -514,13 +569,7 @@ export class RESTPingMemServer {
         for (const [key, component] of Object.entries(snapshot.components)) {
           components[key] = typeof component === "string" ? component : (component as { status: string }).status;
         }
-        degraded = snapshot.status !== "ok";
-      }
-      // Surface critical alerts even when the fast-tick snapshot says "ok"
-      // (fast tick skips expensive checks like PRAGMA quick_check)
-      if (!degraded && monitorStatus?.activeAlerts) {
-        const hasCritical = monitorStatus.activeAlerts.some((a: { severity: string }) => a.severity === "critical");
-        if (hasCritical) degraded = true;
+        effectiveStatus = this.getEffectiveHealthStatus(snapshot.status, monitorStatus?.activeAlerts);
       }
       if (!snapshot) {
         // No snapshot yet (initializing): passive fallback with "initializing" status
@@ -528,13 +577,13 @@ export class RESTPingMemServer {
           components["neo4j"] = "initializing";
         } else if (process.env["NEO4J_URI"]) {
           components["neo4j"] = "not_connected";
-          degraded = true;
+          effectiveStatus = "degraded";
         }
         if (this.qdrantClient) {
           components["qdrant"] = "initializing";
         } else if (process.env["QDRANT_URL"]) {
           components["qdrant"] = "not_connected";
-          degraded = true;
+          effectiveStatus = "degraded";
         }
       }
 
@@ -544,7 +593,7 @@ export class RESTPingMemServer {
       }
 
       return c.json({
-        status: degraded ? "degraded" : "ok",
+        status: effectiveStatus,
         timestamp: new Date().toISOString(),
         components,
         embeddingProvider: this.config.embeddingService?.providerName ?? "none (keyword-only)",
@@ -567,8 +616,14 @@ export class RESTPingMemServer {
         // Re-running sanitizeHealthError() here would double-sanitize: "connection refused"
         // (already a safe friendly string) matches no keywords and becomes "service unavailable".
         // Apply only a control-character strip as defense-in-depth.
+        const effectiveHealthStatus = this.getEffectiveHealthStatus(
+          snapshot.status,
+          monitorStatus?.activeAlerts,
+        );
+
         const sanitizedSnapshot = {
           ...snapshot,
+          status: effectiveHealthStatus,
           components: Object.fromEntries(
             Object.entries(snapshot.components).map(([key, comp]: [string, HealthComponent]) => [
               key,
@@ -1086,9 +1141,23 @@ export class RESTPingMemServer {
             return c.json<RESTErrorResponse>({ error: "Bad Request", message: "SARIF payload too large (max 5 MB)" }, 400);
           }
         } else if (Array.isArray(body.findings)) {
-          // The Zod findingSchema validates structure; cast to the internal
-          // FindingInput type which normalizeFindings() expects (flat fields).
-          findings = body.findings as unknown as FindingInput[];
+          // REST accepts the documented nested `location` shape; normalize it
+          // into the flat internal FindingInput structure before ingestion.
+          findings = body.findings.map((finding) => ({
+            ruleId: finding.ruleId ?? "unknown",
+            message: finding.message,
+            severity: finding.severity,
+            filePath: finding.location?.filePath ?? "unknown",
+            startLine: finding.location?.startLine,
+            endLine: finding.location?.endLine,
+            startColumn: finding.location?.startColumn,
+            endColumn: finding.location?.endColumn,
+            properties: {
+              ...(finding.category !== undefined ? { category: finding.category } : {}),
+              ...(finding.code !== undefined ? { code: finding.code } : {}),
+              ...(finding.fixes !== undefined ? { fixes: finding.fixes } : {}),
+            },
+          })) as FindingInput[];
         } else {
           return c.json<RESTErrorResponse>(
             {
@@ -1190,14 +1259,24 @@ export class RESTPingMemServer {
         }
 
         const forceReingest = parseResult.data.forceReingest;
+        const ingestOptions: import("../ingest/IngestionService.js").IngestProjectOptions = {
+          projectDir,
+          forceReingest,
+          ...(parseResult.data.maxCommits !== undefined
+            ? { maxCommits: parseResult.data.maxCommits }
+            : {}),
+          ...(parseResult.data.maxCommitAgeDays !== undefined
+            ? { maxCommitAgeDays: parseResult.data.maxCommitAgeDays }
+            : {}),
+        };
 
         // Route through IngestionQueue to prevent concurrent Neo4j writes (deadlock).
         // Ingestion keeps running in the background after timeout — callers should
         // treat timeout as "still running" and NOT retry, or they'll double-write.
         const INGEST_TIMEOUT_MS = 300_000; // 5 min
         const ingestPromise = this.ingestionQueue
-          ? this.ingestionQueue.enqueueAndWait({ projectDir, forceReingest })
-          : this.config.ingestionService.ingestProject({ projectDir, forceReingest });
+          ? this.ingestionQueue.enqueueAndWait(ingestOptions)
+          : this.config.ingestionService.ingestProject(ingestOptions);
         // retrySafe=false — ingestion is state-changing; a retry would cause
         // double-writes to Neo4j + Qdrant. Client should poll run status instead.
         const result = await withTimeout(
@@ -1505,12 +1584,22 @@ export class RESTPingMemServer {
         const projectId = c.req.query("projectId");
         const filePath = c.req.query("filePath");
         const maxDepthStr = c.req.query("maxDepth");
+        const maxResultsStr = c.req.query("maxResults");
         if (!projectId || !filePath) {
           return c.json({ error: "BadRequest", message: "projectId and filePath query parameters are required" }, 400);
         }
         const maxDepth = maxDepthStr ? Math.max(1, Math.min(parseInt(maxDepthStr, 10) || 5, 10)) : 5;
-        const results = await this.config.ingestionService.queryImpact(projectId, filePath, maxDepth);
-        return c.json({ projectId, filePath, maxDepth, affectedFiles: results.length, results });
+        const maxResults = maxResultsStr ? Math.max(1, Math.min(parseInt(maxResultsStr, 10) || 500, 2000)) : 500;
+        const outcome = await this.config.ingestionService.queryImpact(projectId, filePath, maxDepth, maxResults);
+        return c.json({
+          projectId,
+          filePath,
+          maxDepth,
+          maxResults: outcome.limit,
+          truncated: outcome.truncated,
+          affectedFiles: outcome.results.length,
+          results: outcome.results,
+        });
       } catch (error) { return this.handleError(c, error); }
     });
 
@@ -1522,12 +1611,22 @@ export class RESTPingMemServer {
         const projectId = c.req.query("projectId");
         const filePath = c.req.query("filePath");
         const maxDepthStr = c.req.query("maxDepth");
+        const maxResultsStr = c.req.query("maxResults");
         if (!projectId || !filePath) {
           return c.json({ error: "BadRequest", message: "projectId and filePath query parameters are required" }, 400);
         }
         const maxDepth = maxDepthStr ? Math.max(1, Math.min(parseInt(maxDepthStr, 10) || 5, 10)) : 5;
-        const results = await this.config.ingestionService.queryBlastRadius(projectId, filePath, maxDepth);
-        return c.json({ projectId, filePath, maxDepth, dependencyCount: results.length, results });
+        const maxResults = maxResultsStr ? Math.max(1, Math.min(parseInt(maxResultsStr, 10) || 500, 2000)) : 500;
+        const outcome = await this.config.ingestionService.queryBlastRadius(projectId, filePath, maxDepth, maxResults);
+        return c.json({
+          projectId,
+          filePath,
+          maxDepth,
+          maxResults: outcome.limit,
+          truncated: outcome.truncated,
+          dependencyCount: outcome.results.length,
+          results: outcome.results,
+        });
       } catch (error) { return this.handleError(c, error); }
     });
 
@@ -2125,7 +2224,15 @@ export class RESTPingMemServer {
           // Fire-and-forget RECALL_MISS event for observability
           void this.eventStore.createEvent(sessionId, "RECALL_MISS", { query: queryText, timestamp: Date.now() })
             .catch((err) => { log.warn("Failed to emit RECALL_MISS event", { error: err instanceof Error ? err.message : String(err) }); });
-          return c.json({ data: { recalled: false, context: "", count: 0 } });
+          return c.json({
+            data: {
+              recalled: false,
+              context: "",
+              count: 0,
+              hint: `No memories matched "${queryText}". Consider saving the missing context or broadening the query.`,
+              suggestedActions: ["context_save", "context_search"],
+            },
+          });
         }
 
         const lines = filtered.map((r, i) => {
@@ -2959,7 +3066,7 @@ export class RESTPingMemServer {
         }
 
         const args = parseResult.data;
-        const sessionId = (args.sessionId ?? this.currentSessionId) as SessionId | null;
+        const sessionId = this.getSessionIdFromRequest(c, args.sessionId);
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: "No active session. Start a session first or provide sessionId in body." },
@@ -3261,7 +3368,8 @@ export class RESTPingMemServer {
 
     this.app.get("/api/v1/worklog", async (c) => {
       try {
-        const sessionId = (c.req.query("sessionId") ?? this.currentSessionId) as SessionId | null;
+        const querySessionId = c.req.query("sessionId");
+        const sessionId = this.getSessionIdFromRequest(c, querySessionId ?? undefined);
         if (!sessionId) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: "No active session. Start a session first or provide sessionId query param." },
@@ -3471,8 +3579,10 @@ export class RESTPingMemServer {
         const VALID_SORT = new Set(["lastIngestedAt", "filesCount", "rootPath"]);
         const sortByRaw = c.req.query("sortBy") ?? "lastIngestedAt";
         const sortBy = VALID_SORT.has(sortByRaw) ? sortByRaw as "lastIngestedAt" | "filesCount" | "rootPath" : "lastIngestedAt";
+        const scopeRaw = c.req.query("scope") ?? "registered";
+        const scope = scopeRaw === "all" ? "all" : "registered";
 
-        const options: { limit: number; sortBy: "lastIngestedAt" | "filesCount" | "rootPath"; projectId?: string } = { limit, sortBy };
+        const options: { limit: number; sortBy: "lastIngestedAt" | "filesCount" | "rootPath"; scope: "registered" | "all"; projectId?: string } = { limit, sortBy, scope };
         if (projectId !== undefined) options.projectId = projectId;
 
         const projects = await this.config.ingestionService.listProjects(options);
@@ -3481,6 +3591,7 @@ export class RESTPingMemServer {
           data: {
             count: projects.length,
             sortBy,
+            scope,
             projects: projects.map((p) => ({
               projectId: p.projectId, rootPath: p.rootPath, treeHash: p.treeHash,
               filesCount: p.filesCount, chunksCount: p.chunksCount, commitsCount: p.commitsCount,
@@ -3532,10 +3643,34 @@ export class RESTPingMemServer {
           );
         }
 
+        const adminProjectRecord = this.config.adminStore?.findProjectById(projectId) ?? null;
+
         await this.config.ingestionService.deleteProject(projectId);
 
         // Clean up diagnostics
         this.diagnosticsStore.deleteProject(projectId);
+
+        if (adminProjectRecord && this.config.adminStore) {
+          const manifestPath = path.join(adminProjectRecord.projectDir, ".ping-mem", "manifest.json");
+          try {
+            if (fs.existsSync(manifestPath)) {
+              fs.unlinkSync(manifestPath);
+            }
+            const manifestDir = path.join(adminProjectRecord.projectDir, ".ping-mem");
+            if (fs.existsSync(manifestDir) && fs.readdirSync(manifestDir).length === 0) {
+              fs.rmdirSync(manifestDir);
+            }
+          } catch (error) {
+            log.warn("Codebase delete: manifest cleanup failed", {
+              projectId,
+              projectDir: adminProjectRecord.projectDir,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+
+          this.config.adminStore.deleteProject(projectId);
+          this.config.adminStore.deleteProjectsByDir(adminProjectRecord.projectDir);
+        }
 
         return c.json({
           data: { success: true, projectId },
@@ -3864,7 +3999,7 @@ export class RESTPingMemServer {
     // ============================================================================
     registerShellRoutes(this.app, {
       eventStore: this.eventStore,
-      getCurrentSessionId: () => this.currentSessionId,
+      resolveSessionId: (c, hintedSessionId) => this.getSessionIdFromRequest(c, hintedSessionId),
     });
 
     // ============================================================================
@@ -4011,6 +4146,26 @@ export class RESTPingMemServer {
       );
     }
     return this.currentSessionId;
+  }
+
+  /**
+   * Compute the effective externally-visible health status.
+   *
+   * The monitor can carry critical alerts that should degrade `/health` even when the
+   * fast-tick component snapshot is otherwise "ok". This keeps `/health` and
+   * `/api/v1/observability/status` aligned on operator-facing truth.
+   */
+  private getEffectiveHealthStatus(
+    snapshotStatus: "ok" | "degraded" | "unhealthy",
+    activeAlerts?: Array<{ severity: string }>
+  ): "ok" | "degraded" | "unhealthy" {
+    if (snapshotStatus !== "ok") {
+      return snapshotStatus;
+    }
+    if (activeAlerts?.some((a) => a.severity === "critical")) {
+      return "degraded";
+    }
+    return "ok";
   }
 
   /**

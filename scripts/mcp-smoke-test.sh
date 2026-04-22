@@ -33,9 +33,17 @@ check() {
   local expect_field="${5:-}"
   local headers="${6:-}"
 
-  local curl_args=(-s --max-time 15 -w "\n%{http_code}")
+  local max_time=15
+  if [ "$name" = "codebase_ingest" ]; then
+    max_time=60
+  fi
+  local curl_args=(-s --max-time "$max_time" -w "\n%{http_code}")
   if [ -n "$headers" ]; then
-    curl_args+=(-H "$headers")
+    local header
+    while IFS= read -r header; do
+      [ -n "$header" ] || continue
+      curl_args+=(-H "$header")
+    done < <(printf '%s\n' "$headers" | tr '|' '\n')
   fi
 
   if [ "$method" = "POST" ]; then
@@ -45,18 +53,24 @@ check() {
     fi
   elif [ "$method" = "DELETE" ]; then
     curl_args+=(-X DELETE)
-    if [ -n "$headers" ]; then
-      curl_args+=(-H "$headers")
-    fi
   fi
 
-  local response
-  response=$(curl "${curl_args[@]}" "${URL}${path}" 2>/dev/null) || {
+  local response=""
+  local attempt
+  for attempt in 1 2 3; do
+    if response=$(curl "${curl_args[@]}" "${URL}${path}" 2>/dev/null); then
+      break
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      sleep 1
+    fi
+  done
+  if [ -z "$response" ]; then
     FAIL=$((FAIL + 1))
     ERRORS+=("$name: curl failed (connection error)")
     printf "${RED}FAIL${NC} %s — connection error\n" "$name"
     return
-  }
+  fi
 
   local http_code
   http_code=$(echo "$response" | tail -1)
@@ -166,7 +180,8 @@ check "memory_consolidate" POST "/api/v1/memory/consolidate" '{}' "" "x-session-
 check "memory_compress" POST "/api/v1/memory/compress" '{}' "" "x-session-id: $SID"
 check "memory_maintain" POST "/api/v1/tools/memory_maintain/invoke" '{"args":{}}' "result" "Authorization: Basic $ADMIN_AUTH"
 check "memory_conflicts" POST "/api/v1/tools/memory_conflicts/invoke" '{"args":{}}' "data" "Authorization: Basic $ADMIN_AUTH"
-check "memory_subscribe" POST "/api/v1/memory/subscribe" '{"pattern":"*"}' "" "x-session-id: $SID"
+check "memory_subscribe" POST "/api/v1/tools/memory_subscribe/invoke" \
+  '{"args":{}}' "" "Authorization: Basic $ADMIN_AUTH"
 
 # Search (2 tools)
 echo ""
@@ -183,7 +198,7 @@ echo "--- Graph (4 tools) ---"
 check "context_query_relationships" GET "/api/v1/graph/relationships?entityId=test-entity" "" ""
 check "context_get_lineage" GET "/api/v1/graph/lineage/test-entity" "" ""
 check "context_query_evolution" GET "/api/v1/graph/evolution?entityId=test-entity" "" ""
-check "context_health_graph" GET "/api/v1/graph/health" "" "data"
+check "context_health" GET "/api/v1/graph/health" "" "data"
 
 # Causal (4 tools)
 echo ""
@@ -197,6 +212,9 @@ check "trigger_causal_discovery" POST "/api/v1/tools/trigger_causal_discovery/in
 # Codebase (7 tools)
 echo ""
 echo "--- Codebase (7 tools) ---"
+check "codebase_ingest" POST "/api/v1/codebase/ingest" \
+  "{\"projectDir\":\"/projects/ping-mem\",\"maxCommits\":1,\"maxCommitAgeDays\":1}" \
+  "data" ""
 check "codebase_list_projects" GET "/api/v1/codebase/projects" "" "data"
 check "codebase_search" GET "/api/v1/codebase/search?query=MemoryManager&limit=3" "" "data"
 check "codebase_verify" POST "/api/v1/codebase/verify" \
@@ -210,6 +228,9 @@ check "codebase_dependency_map" GET "/api/v1/codebase/dependency-map?projectId=1
 # Diagnostics (7 tools)
 echo ""
 echo "--- Diagnostics (7 tools) ---"
+check "diagnostics_ingest" POST "/api/v1/diagnostics/ingest" \
+  '{"projectId":"smoke-diag-project","treeHash":"1111111111111111111111111111111111111111111111111111111111111111","configHash":"2222222222222222222222222222222222222222222222222222222222222222","toolName":"smoke","toolVersion":"1.0.0","status":"failed","findings":[{"ruleId":"SMOKE1","message":"Smoke diagnostics ingest fixture","severity":"warning","location":{"filePath":"src/smoke.ts","startLine":1}}]}' \
+  "data" ""
 check "diagnostics_latest" GET "/api/v1/diagnostics/latest?projectId=test" "" ""
 check "diagnostics_list" GET "/api/v1/diagnostics/latest?projectId=test" "" ""
 check "diagnostics_diff" POST "/api/v1/diagnostics/diff" \
@@ -250,10 +271,13 @@ check "worklog_list" GET "/api/v1/worklog?sessionId=$SID" "" "data"
 echo ""
 echo "--- Mining & Dreaming (3 tools) ---"
 check "insights_list" GET "/api/v1/insights" "" ""
-check "mining_status" GET "/api/v1/mining/status" "" ""
-# transcript_mine and dreaming_run are long-running, test endpoint existence only
-check "transcript_mine_endpoint" POST "/api/v1/mining/start" \
-  "{\"projectDir\":\"/projects/ping-mem\",\"maxSessions\":0}" "" "x-session-id: $SID"
+check "mining_status" GET "/api/v1/mining/status" "" "" "Authorization: Basic $ADMIN_AUTH"
+check "transcript_mine" POST "/api/v1/tools/transcript_mine/invoke" \
+  '{"args":{"limit":1,"project":"ping-mem"}}' \
+  "data" "Authorization: Basic $ADMIN_AUTH|x-session-id: $SID"
+check "dreaming_run" POST "/api/v1/tools/dreaming_run/invoke" \
+  '{"args":{"dream":true}}' \
+  "data" "Authorization: Basic $ADMIN_AUTH|x-session-id: $SID"
 
 # Project management (1 tool)
 echo ""
@@ -264,6 +288,9 @@ check "project_delete" DELETE "/api/v1/codebase/projects/nonexistent-project-id"
 # End session
 echo ""
 echo "--- Session End ---"
+check "memory_unsubscribe" POST "/api/v1/tools/memory_unsubscribe/invoke" \
+  '{"args":{"subscriptionId":"smoke-test-subscription"}}' \
+  "data" "Authorization: Basic $ADMIN_AUTH"
 check "context_session_end" POST "/api/v1/session/end" '{}' "" "x-session-id: $SID"
 
 # Observability extras

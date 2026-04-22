@@ -6,6 +6,7 @@
  */
 
 import type { Hono } from "hono";
+import type { Context } from "hono";
 import type { AppEnv } from "../rest-server.js";
 import type { RESTErrorResponse, RESTSuccessResponse } from "../types.js";
 import type { EventStore } from "../../storage/EventStore.js";
@@ -13,7 +14,7 @@ import type { SessionId } from "../../types/index.js";
 
 export interface ShellRoutesDeps {
   eventStore: EventStore;
-  getCurrentSessionId: () => SessionId | null;
+  resolveSessionId: (c: Context<AppEnv>, hintedSessionId?: string) => SessionId | null;
 }
 
 interface ShellEventBody {
@@ -51,8 +52,7 @@ export function registerShellRoutes(app: Hono<AppEnv>, deps: ShellRoutesDeps): v
         );
       }
 
-      const sessionId: string | null =
-        c.req.header("x-session-id") ?? deps.getCurrentSessionId();
+      const sessionId = deps.resolveSessionId(c);
 
       if (!sessionId) {
         return c.json<RESTErrorResponse>(
@@ -116,8 +116,7 @@ export function registerShellRoutes(app: Hono<AppEnv>, deps: ShellRoutesDeps): v
   // GET /api/v1/shell/latest — retrieve the latest shell directory
   app.get("/api/v1/shell/latest", async (c) => {
     try {
-      const sessionId: string | null =
-        c.req.query("sessionId") ?? c.req.header("x-session-id") ?? deps.getCurrentSessionId();
+      const sessionId = deps.resolveSessionId(c, c.req.query("sessionId") ?? undefined);
 
       if (!sessionId) {
         return c.json<RESTErrorResponse>(

@@ -7,10 +7,19 @@
 set -euo pipefail
 
 BASE="http://localhost:3003"
+PROJECT_DIR="${TARGET_PROJECT_DIR:-/projects/ping-mem}"
+ADMIN_USER="${PING_MEM_ADMIN_USER:-admin}"
+ADMIN_PASS="${PING_MEM_ADMIN_PASS:-ping-mem-dev-local}"
+AUTH_HEADER="Authorization: Basic $(printf '%s:%s' "$ADMIN_USER" "$ADMIN_PASS" | base64 | tr -d '\n')"
 PASS=0
 FAIL=0
 SKIP=0
 SESSION_ID=""
+PROJECT_ID=""
+TREE_HASH=""
+DIAG_PROJECT_ID="diag-capability-project"
+DIAG_TREE_HASH="1111111111111111111111111111111111111111111111111111111111111111"
+DIAG_CONFIG_HASH="2222222222222222222222222222222222222222222222222222222222222222"
 RESULTS=()
 
 # Colors
@@ -27,8 +36,10 @@ test_endpoint() {
   local body="${4:-}"
   local expect_code="${5:-200}"
 
-  local args=(-sf -o /tmp/pm-test-body -w "%{http_code}" -X "$method")
+  : > /tmp/pm-test-body
+  local args=(-sS -o /tmp/pm-test-body -w "%{http_code}" -X "$method")
   args+=(-H "Content-Type: application/json")
+  args+=(-H "$AUTH_HEADER")
   if [[ -n "$SESSION_ID" ]]; then
     args+=(-H "X-Session-ID: $SESSION_ID")
   fi
@@ -81,9 +92,10 @@ test_endpoint "tool_get_specific" GET "/api/v1/tools/context_save"
 printf "\n${CYAN}--- Session Management ---${NC}\n"
 
 # Start session
-code=$(curl -sf -o /tmp/pm-test-body -w "%{http_code}" -X POST "${BASE}/api/v1/session/start" \
+code=$(curl -sS -o /tmp/pm-test-body -w "%{http_code}" -X POST "${BASE}/api/v1/session/start" \
   -H "Content-Type: application/json" \
-  -d '{"name":"capability-test-session","projectDir":"/Users/umasankr/Projects/ping-mem"}')
+  -H "$AUTH_HEADER" \
+  -d "{\"name\":\"capability-test-session\",\"projectDir\":\"${PROJECT_DIR}\"}")
 SESSION_ID=$(python3 -c "import json; d=json.load(open('/tmp/pm-test-body')); print(d.get('data',{}).get('sessionId',''))" 2>/dev/null || echo "")
 if [[ "$code" == "200" && -n "$SESSION_ID" ]]; then
   printf "${GREEN}  PASS${NC} %-45s [%s] sid=%s\n" "context_session_start" "$code" "${SESSION_ID:0:12}..."
@@ -122,10 +134,10 @@ test_endpoint "context_checkpoint" POST "/api/v1/checkpoint" '{"name":"test-chec
 printf "\n${CYAN}--- Knowledge Base ---${NC}\n"
 
 test_endpoint "knowledge_ingest" POST "/api/v1/knowledge/ingest" \
-  '{"projectId":"test-project-001","title":"Docker Volume Persistence","solution":"Use named volumes in docker-compose.yml to persist data across container restarts","symptoms":["data loss","container restart"],"tags":["docker","persistence","devops"]}'
+  '{"projectId":"test-project-001","title":"Docker Volume Persistence","solution":"Use named volumes in docker-compose.yml to persist data across container restarts","symptoms":"data loss; container restart","tags":["docker","persistence","devops"]}'
 
 test_endpoint "knowledge_ingest_2" POST "/api/v1/knowledge/ingest" \
-  '{"projectId":"test-project-001","title":"FTS5 Multi-Word Search","solution":"Tokenize multi-word queries with OR joins: foo bar -> foo OR bar","symptoms":["empty results","search returns 0"],"tags":["sqlite","fts5","search"]}'
+  '{"projectId":"test-project-001","title":"FTS5 Multi-Word Search","solution":"Tokenize multi-word queries with OR joins: foo bar -> foo OR bar","symptoms":"empty results; search returns 0","tags":["sqlite","fts5","search"]}'
 
 test_endpoint "knowledge_search_single" POST "/api/v1/knowledge/search" \
   '{"query":"Docker"}'
@@ -141,18 +153,41 @@ test_endpoint "knowledge_search_cross" POST "/api/v1/knowledge/search" \
 # =============================================================================
 printf "\n${CYAN}--- Codebase Intelligence ---${NC}\n"
 
+code=$(curl -sS -o /tmp/pm-test-body -w "%{http_code}" -X POST "${BASE}/api/v1/codebase/verify" \
+  -H "Content-Type: application/json" \
+  -H "$AUTH_HEADER" \
+  -d "{\"projectDir\":\"${PROJECT_DIR}\"}")
+if [[ "$code" == "200" ]]; then
+  PROJECT_ID=$(python3 -c "import json; d=json.load(open('/tmp/pm-test-body')); print(d.get('data',{}).get('projectId',''))" 2>/dev/null || echo "")
+  TREE_HASH=$(python3 -c "import json; d=json.load(open('/tmp/pm-test-body')); print(d.get('data',{}).get('currentTreeHash','') or d.get('data',{}).get('manifestTreeHash',''))" 2>/dev/null || echo "")
+fi
+
 test_endpoint "codebase_search" GET "/api/v1/codebase/search?query=MemoryManager&limit=3"
 test_endpoint "codebase_list_projects" GET "/api/v1/codebase/projects"
 test_endpoint "codebase_verify" POST "/api/v1/codebase/verify" \
-  '{"projectDir":"/projects/ping-mem"}'
+  "{\"projectDir\":\"${PROJECT_DIR}\"}"
 
 # Structural intelligence (from #29)
-test_endpoint "codebase_impact" GET "/api/v1/codebase/impact?filePath=src/memory/MemoryManager.ts"
-test_endpoint "codebase_blast_radius" GET "/api/v1/codebase/blast-radius?filePath=src/memory/MemoryManager.ts"
-test_endpoint "codebase_dependency_map" GET "/api/v1/codebase/dependency-map"
+if [[ -n "$PROJECT_ID" ]]; then
+  test_endpoint "codebase_impact" GET "/api/v1/codebase/impact?projectId=${PROJECT_ID}&filePath=src/memory/MemoryManager.ts"
+  test_endpoint "codebase_blast_radius" GET "/api/v1/codebase/blast-radius?projectId=${PROJECT_ID}&filePath=src/memory/MemoryManager.ts"
+  test_endpoint "codebase_dependency_map" GET "/api/v1/codebase/dependency-map?projectId=${PROJECT_ID}"
+else
+  printf "${YELLOW}  SKIP${NC} %-45s [%s]\n" "codebase_impact" "no-project-id"
+  printf "${YELLOW}  SKIP${NC} %-45s [%s]\n" "codebase_blast_radius" "no-project-id"
+  printf "${YELLOW}  SKIP${NC} %-45s [%s]\n" "codebase_dependency_map" "no-project-id"
+  SKIP=$((SKIP + 3))
+  RESULTS+=("SKIP|codebase_impact|no-project-id" "SKIP|codebase_blast_radius|no-project-id" "SKIP|codebase_dependency_map|no-project-id")
+fi
 
 # Timeline
-test_endpoint "codebase_timeline" GET "/api/v1/codebase/timeline?limit=5"
+if [[ -n "$PROJECT_ID" ]]; then
+  test_endpoint "codebase_timeline" GET "/api/v1/codebase/timeline?projectId=${PROJECT_ID}&limit=5"
+else
+  printf "${YELLOW}  SKIP${NC} %-45s [%s]\n" "codebase_timeline" "no-project-id"
+  SKIP=$((SKIP + 1))
+  RESULTS+=("SKIP|codebase_timeline|no-project-id")
+fi
 
 # =============================================================================
 # 5. AGENT MANAGEMENT (agent_*)
@@ -170,12 +205,12 @@ test_endpoint "agent_quota_status" GET "/api/v1/agents/quotas?agentId=test-agent
 printf "\n${CYAN}--- Worklog ---${NC}\n"
 
 test_endpoint "worklog_record" POST "/api/v1/worklog" \
-  '{"kind":"tool","title":"Capability test run","status":"success","toolName":"test-suite","durationMs":1234}'
+  "{\"sessionId\":\"${SESSION_ID}\",\"kind\":\"tool\",\"title\":\"Capability test run\",\"status\":\"success\",\"toolName\":\"test-suite\",\"durationMs\":1234}"
 
 test_endpoint "worklog_record_diagnostics" POST "/api/v1/worklog" \
-  '{"kind":"diagnostics","title":"TypeScript type check","status":"success","toolName":"tsc","durationMs":2500}'
+  "{\"sessionId\":\"${SESSION_ID}\",\"kind\":\"diagnostics\",\"title\":\"TypeScript type check\",\"status\":\"success\",\"toolName\":\"tsc\",\"durationMs\":2500}"
 
-test_endpoint "worklog_list" GET "/api/v1/worklog?limit=10"
+test_endpoint "worklog_list" GET "/api/v1/worklog?sessionId=${SESSION_ID}&limit=10"
 
 # =============================================================================
 # 7. MEMORY MANAGEMENT (memory_*)
@@ -191,8 +226,14 @@ test_endpoint "memory_compress" POST "/api/v1/memory/compress" '{"strategy":"heu
 # =============================================================================
 printf "\n${CYAN}--- Diagnostics ---${NC}\n"
 
-test_endpoint "diagnostics_latest" GET "/api/v1/diagnostics/latest?toolName=tsc"
-test_endpoint "diagnostics_compare_tools" GET "/api/v1/diagnostics/compare?toolNames=tsc,eslint"
+test_endpoint "diagnostics_ingest_tsc" POST "/api/v1/diagnostics/ingest" \
+  "{\"projectId\":\"${DIAG_PROJECT_ID}\",\"treeHash\":\"${DIAG_TREE_HASH}\",\"configHash\":\"${DIAG_CONFIG_HASH}\",\"toolName\":\"tsc\",\"toolVersion\":\"5.9.3\",\"status\":\"failed\",\"findings\":[{\"ruleId\":\"TS1001\",\"message\":\"Type capability fixture\",\"severity\":\"error\",\"location\":{\"filePath\":\"src/example.ts\",\"startLine\":1}}]}"
+
+test_endpoint "diagnostics_ingest_eslint" POST "/api/v1/diagnostics/ingest" \
+  "{\"projectId\":\"${DIAG_PROJECT_ID}\",\"treeHash\":\"${DIAG_TREE_HASH}\",\"configHash\":\"${DIAG_CONFIG_HASH}\",\"toolName\":\"eslint\",\"toolVersion\":\"9.0.0\",\"status\":\"failed\",\"findings\":[{\"ruleId\":\"no-unused-vars\",\"message\":\"ESLint capability fixture\",\"severity\":\"warning\",\"location\":{\"filePath\":\"src/example.ts\",\"startLine\":2}}]}"
+
+test_endpoint "diagnostics_latest" GET "/api/v1/diagnostics/latest?projectId=${DIAG_PROJECT_ID}&toolName=tsc&treeHash=${DIAG_TREE_HASH}"
+test_endpoint "diagnostics_compare_tools" GET "/api/v1/diagnostics/compare?projectId=${DIAG_PROJECT_ID}&treeHash=${DIAG_TREE_HASH}&toolNames=tsc,eslint"
 
 # =============================================================================
 # 9. GRAPH / RELATIONSHIPS (context_query_relationships, lineage, evolution, health)
@@ -211,10 +252,10 @@ test_endpoint "context_query_evolution" GET "/api/v1/graph/evolution?entityId=te
 # =============================================================================
 printf "\n${CYAN}--- Causal Inference ---${NC}\n"
 
-test_endpoint "search_causes" GET "/api/v1/causal/causes?entity=test-capability-1&limit=5"
-test_endpoint "search_effects" GET "/api/v1/causal/effects?entity=test-capability-1&limit=5"
-test_endpoint "get_causal_chain" GET "/api/v1/causal/chain?startEntity=test-capability-1&endEntity=test-decision-1"
-test_endpoint "trigger_causal_discovery" POST "/api/v1/causal/discover" '{}'
+test_endpoint "search_causes" GET "/api/v1/causal/causes?entityId=test-capability-1&limit=5"
+test_endpoint "search_effects" GET "/api/v1/causal/effects?entityId=test-capability-1&limit=5"
+test_endpoint "get_causal_chain" GET "/api/v1/causal/chain?startEntityId=test-capability-1&endEntityId=test-decision-1"
+test_endpoint "trigger_causal_discovery" POST "/api/v1/causal/discover" '{"text":"Because the database pool was exhausted, API latency increased and users saw timeouts.","persist":false}'
 
 # =============================================================================
 # 11. SHELL INTEGRATION

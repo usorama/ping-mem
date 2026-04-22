@@ -1,7 +1,7 @@
 #!/bin/bash
 # Phase 2 remediation (2026-04-18): Force full re-ingest of the 5 active
-# projects with maxCommits=10000 + maxCommitAgeDays=365 so that ping-mem
-# coverage hits ≥95% commits AND files per project.
+# projects with unbounded commit history so that ping-mem
+# coverage hits complete commit/file coverage per project.
 #
 # Uses admin credentials (rate-limit bypass is live after PR phase 1).
 # Host path ~/Projects/<name> maps to container /projects/<name>.
@@ -51,7 +51,7 @@ for P in $PROJECTS; do
   RESPONSE=$(curl -sf --max-time 10 -u "${ADMIN_USER}:${ADMIN_PASS}" \
     -X POST "${PING_MEM_URL}/api/v1/ingestion/enqueue" \
     -H 'Content-Type: application/json' \
-    -d "{\"projectDir\":\"${CONTAINER_DIR}\",\"forceReingest\":true,\"maxCommits\":10000,\"maxCommitAgeDays\":365}" 2>&1) \
+    -d "{\"projectDir\":\"${CONTAINER_DIR}\",\"forceReingest\":true,\"maxCommits\":0,\"maxCommitAgeDays\":0}" 2>&1) \
     && CURL_OK=1 || CURL_OK=0
 
   if [ "$CURL_OK" -ne 1 ]; then

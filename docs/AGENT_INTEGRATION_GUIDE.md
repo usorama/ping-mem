@@ -20,7 +20,7 @@
 - **Diagnostics tracking** (SARIF 2.1.0 ingestion, multi-tool comparison, LLM summaries)
 - **Worklog events** for full session provenance
 
-Agents connect via **MCP (stdio)**, **REST API**, or **TypeScript Client SDK**.
+Agents connect via **MCP (stdio or streamable HTTP)**, **REST API**, or **TypeScript Client SDK**.
 
 ---
 
@@ -34,7 +34,7 @@ docker compose -f ~/Projects/ping-mem/docker-compose.yml up -d
 
 Verify:
 ```bash
-curl http://localhost:3003/health        # SSE/MCP server
+curl http://localhost:3003/health        # unified ping-mem server
 curl http://localhost:6333/collections   # Qdrant
 docker exec ping-mem-neo4j cypher-shell -u neo4j -p neo4j_password "RETURN 1"  # Neo4j
 ```
@@ -66,7 +66,12 @@ docker exec ping-mem-neo4j cypher-shell -u neo4j -p neo4j_password "RETURN 1"  #
 
 ## 3. Connection Methods
 
-### 3.1 MCP (stdio) — Claude Code
+### 3.1 MCP — Claude Code
+
+Proxy mode is the recommended local setup when ping-mem is already running in
+Docker or OrbStack. It keeps Claude Code on the same live server state as the
+REST API, UI, and admin routes and avoids direct SQLite access from the MCP
+subprocess.
 
 Add to `~/.claude/mcp.json`:
 
@@ -75,28 +80,28 @@ Add to `~/.claude/mcp.json`:
   "mcpServers": {
     "ping-mem": {
       "command": "bun",
-      "args": ["run", "/Users/umasankr/Projects/ping-mem/dist/mcp/cli.js"],
+      "args": ["run", "/Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js"],
       "env": {
-        "PING_MEM_DB_PATH": "~/.claude/ping-mem.db",
-        "NEO4J_URI": "bolt://localhost:7687",
-        "NEO4J_USERNAME": "neo4j",
-        "NEO4J_PASSWORD": "neo4j_password",
-        "QDRANT_URL": "http://localhost:6333",
-        "QDRANT_COLLECTION_NAME": "ping-mem-vectors",
-        "QDRANT_VECTOR_DIMENSIONS": "768"
+        "PING_MEM_REST_URL": "http://localhost:3003",
+        "PING_MEM_ADMIN_USER": "admin",
+        "PING_MEM_ADMIN_PASS": "ping-mem-dev-local"
       }
     }
   }
 }
 ```
 
+Use `dist/mcp/cli.js` only when you intentionally want a direct stdio process
+opening its own local database for isolated development.
+
 Tools are available as `context_*`, `codebase_*`, `diagnostics_*`, `worklog_*`.
 
 ### 3.2 REST API
 
 Base URLs:
-- **SSE server**: `http://localhost:3003` (primary, supports SSE streaming)
-- **REST server**: `http://localhost:3003` (Docker, set `PING_MEM_TRANSPORT=rest`)
+- **Unified server**: `http://localhost:3003`
+- **MCP over HTTP**: `http://localhost:3003/mcp`
+- **App SSE stream**: `http://localhost:3003/api/v1/events/stream`
 
 Headers:
 ```
@@ -122,8 +127,8 @@ await client.close();
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PING_MEM_DB_PATH` | No | `:memory:` | SQLite database path |
-| `PING_MEM_PORT` | No | `3000` | HTTP server port |
-| `PING_MEM_TRANSPORT` | No | `rest` | Transport mode (`rest`, `sse`, `streamable-http`) |
+| `PING_MEM_PORT` | No | `3003` | Unified HTTP server port |
+| `PING_MEM_TRANSPORT` | No | `streamable-http` | Compatibility transport label; runtime still exposes REST and `/mcp` on the same listener |
 | `NEO4J_URI` | For ingestion | — | Neo4j Bolt URI (`bolt://localhost:7687`) |
 | `NEO4J_USERNAME` | For ingestion | `neo4j` | Neo4j username |
 | `NEO4J_PASSWORD` | For ingestion | — | Neo4j password |
@@ -269,7 +274,7 @@ Priorities: `high`, `normal`, `low`
 | `codebase_verify` | Verify manifest matches on-disk project state | `projectDir` |
 | `codebase_search` | Semantic code search with provenance | `query` |
 | `codebase_timeline` | Query commit timeline with explicit "why" | `projectId` |
-| `codebase_list_projects` | List all ingested projects with metadata | — |
+| `codebase_list_projects` | List registered/canonical projects by default; pass `scope: "all"` to include every ingested row | — |
 
 ### Diagnostics Tools (7 tools)
 
@@ -447,7 +452,7 @@ Because projectId uses `SHA-256(gitRemoteUrl + "::" + relativeToGitRoot)`, the s
 | Neo4j Bolt | `ping-mem-neo4j` | 7687 | Bolt |
 | Qdrant HTTP | `ping-mem-qdrant` | 6333 | HTTP |
 | Qdrant gRPC | `ping-mem-qdrant` | 6334 | gRPC |
-| ping-mem | `ping-mem` | 3000 | HTTP (transport via `PING_MEM_TRANSPORT`) |
+| ping-mem | `ping-mem` | 3003 | Unified HTTP: REST, `/mcp`, UI/admin, and app SSE |
 
 ### Symlink Handling (macOS)
 
@@ -549,7 +554,8 @@ rm /path/to/project/.ping-mem/manifest.json
 
 **Cause 3**: Wrong projectId filter.
 ```json
-// Use codebase_list_projects to find the correct projectId
+// Use codebase_list_projects to find the correct projectId.
+// Defaults to the registered/canonical set; pass scope:"all" when you need every ingested row.
 { "tool": "codebase_list_projects", "arguments": {} }
 ```
 

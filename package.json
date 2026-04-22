@@ -49,7 +49,7 @@
     "smoke-test": "bash scripts/smoke-test.sh",
     "doctor": "bun run dist/cli/index.js doctor",
     "health": "bun run dist/cli/index.js doctor --json --quiet",
-    "health:shallow": "curl -sf http://localhost:6333/health && curl -sf http://localhost:7474 && curl -sf http://localhost:3003/health && echo 'All services healthy'",
+    "health:shallow": "curl -sf http://localhost:6333/readyz >/dev/null && curl -sf http://localhost:7474 >/dev/null && curl -sf http://localhost:3003/health | grep -q '\"status\":\"ok\"' && echo 'All services healthy'",
     "diagnostics:collect": "bun run src/cli.ts collect",
     "sdk:extract-openapi": "bun run scripts/extract-openapi.ts",
     "sdk:build": "cd sdk/typescript && bun run build"

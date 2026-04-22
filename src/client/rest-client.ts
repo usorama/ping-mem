@@ -125,12 +125,16 @@ export class RESTPingMemClient implements PingMemClient {
   async search(query: MemoryQuery): Promise<MemoryQueryResult[]> {
     const params = new URLSearchParams();
 
+    if (query.key) params.append("key", query.key);
+    if (query.keyPattern) params.append("keyPattern", query.keyPattern);
     if (query.query) params.append("query", query.query);
     if (query.category) params.append("category", query.category);
     if (query.channel) params.append("channel", query.channel);
     if (query.priority) params.append("priority", query.priority);
-    if (query.limit) params.append("limit", query.limit.toString());
-    if (query.offset) params.append("offset", query.offset.toString());
+    if (query.sessionId) params.append("sessionId", query.sessionId);
+    if (query.minSimilarity !== undefined) params.append("minSimilarity", query.minSimilarity.toString());
+    if (query.limit !== undefined) params.append("limit", query.limit.toString());
+    if (query.offset !== undefined) params.append("offset", query.offset.toString());
     if (query.sort) params.append("sort", query.sort);
 
     const response = await this.fetchJSON<RESTSuccessResponse<MemoryQueryResult[]>>(

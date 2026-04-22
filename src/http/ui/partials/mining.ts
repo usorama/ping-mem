@@ -8,7 +8,7 @@
 
 import type { Context } from "hono";
 import { escapeHtml, formatDate } from "../layout.js";
-import { statCard, badge, emptyState } from "../components.js";
+import { statCard, badge, emptyState, card } from "../components.js";
 import type { UIDependencies } from "../routes.js";
 import { createLogger } from "../../../util/logger.js";
 
@@ -36,6 +36,13 @@ interface MiningProgressRow {
   started_at: string | null;
   completed_at: string | null;
   error: string | null;
+}
+
+interface MinedTranscriptRow {
+  timestamp: string;
+  session_file: string | null;
+  project: string | null;
+  facts_extracted: number;
 }
 
 // ============================================================================
@@ -81,6 +88,27 @@ function queryRecentProgress(db: import("bun:sqlite").Database, limit = 50): Min
       ORDER BY COALESCE(completed_at, started_at, created_at) DESC
       LIMIT ?
     `).all(limit) as MiningProgressRow[];
+  } catch {
+    return [];
+  }
+}
+
+function queryRecentMinedTranscripts(
+  db: import("bun:sqlite").Database,
+  limit = 5
+): MinedTranscriptRow[] {
+  try {
+    return db.prepare(`
+      SELECT
+        timestamp,
+        json_extract(payload, '$.sessionFile') as session_file,
+        json_extract(payload, '$.project') as project,
+        COALESCE(CAST(json_extract(payload, '$.factsExtracted') AS INTEGER), 0) as facts_extracted
+      FROM events
+      WHERE event_type = 'TRANSCRIPT_MINED'
+      ORDER BY timestamp DESC
+      LIMIT ?
+    `).all(limit) as MinedTranscriptRow[];
   } catch {
     return [];
   }
@@ -143,6 +171,39 @@ function renderProgressTable(rows: MiningProgressRow[]): string {
   <div style="margin-top:12px;color:var(--text-secondary);font-size:12px">${rows.length} recent session(s)</div>`;
 }
 
+function renderRecentMinedTranscripts(rows: MinedTranscriptRow[]): string {
+  if (rows.length === 0) {
+    return card(
+      "Recent Mined Transcripts",
+      `<div style="padding:4px 0">${emptyState("No transcript mining events recorded yet.")}</div>`
+    );
+  }
+
+  const items = rows.map((row) => {
+    const filename = row.session_file?.split("/").pop() ?? row.session_file ?? "unknown session";
+    const minedAt = formatDate(row.timestamp);
+
+    return `<div style="display:flex;justify-content:space-between;gap:16px;padding:12px 0;border-top:1px solid var(--border)">
+      <div style="min-width:0">
+        <div class="mono truncate" style="font-size:13px" title="${escapeHtml(row.session_file ?? "")}">${escapeHtml(filename)}</div>
+        <div style="margin-top:4px;color:var(--text-secondary);font-size:12px">
+          ${escapeHtml(row.project ?? "unknown project")} · ${escapeHtml(minedAt)}
+        </div>
+      </div>
+      <div style="flex-shrink:0;text-align:right">
+        <div style="font-weight:600">${escapeHtml(String(row.facts_extracted))}</div>
+        <div style="color:var(--text-secondary);font-size:12px">facts extracted</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  return card(
+    "Recent Mined Transcripts",
+    `<div style="padding:0 4px">${items}</div>`,
+    `<span style="color:var(--text-secondary);font-size:12px">${rows.length} recent event(s)</span>`
+  );
+}
+
 /**
  * Render the complete mining dashboard: stats grid + progress table.
  * Used by both the full page view and the HTMX partial (refresh).
@@ -158,10 +219,11 @@ export async function renderMiningTable(deps: UIDependencies): Promise<{ statsHt
 
   const stats = queryStats(db);
   const rows = queryRecentProgress(db);
+  const minedRows = queryRecentMinedTranscripts(db);
 
   return {
     statsHtml: renderStatsGrid(stats),
-    tableHtml: renderProgressTable(rows),
+    tableHtml: `${renderRecentMinedTranscripts(minedRows)}<div style="margin-top:24px">${renderProgressTable(rows)}</div>`,
   };
 }
 

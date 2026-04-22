@@ -15,7 +15,9 @@ import type { DoctorGate } from "../gates.js";
 const LOG_DIR = path.join(os.homedir(), "Library/Logs/ping-guard");
 const LOG_FILE_MAX_MB = 10;
 const ROTATION_MAX_AGE_H = 48;
+const ROTATION_RUN_MAX_AGE_H = 24;
 const SUPERVISOR_LOG = path.join(LOG_DIR, "supervisor.log");
+const ROTATION_RUN_LOG = path.join(LOG_DIR, "log-rotate.log");
 
 function fileMb(p: string): number {
   try {
@@ -50,7 +52,7 @@ export const logHygieneGates: DoctorGate[] = [
   {
     id: "loghyg.rotation-recent",
     group: "loghygiene",
-    description: `At least one archive (*.gz) written within ${ROTATION_MAX_AGE_H}h`,
+    description: `At least one archive (*.gz) written within ${ROTATION_MAX_AGE_H}h, or the rotation runner executed within ${ROTATION_RUN_MAX_AGE_H}h`,
     async run() {
       if (!fs.existsSync(LOG_DIR)) return { status: "skip", detail: "log dir missing" };
       const archives = fs
@@ -61,11 +63,39 @@ export const logHygieneGates: DoctorGate[] = [
           return { name: f, mtimeMs: fs.statSync(p).mtimeMs };
         });
       if (archives.length === 0) {
-        return { status: "fail", detail: "no rotated archives found" };
+        if (!fs.existsSync(ROTATION_RUN_LOG)) {
+          return { status: "fail", detail: "no rotated archives or rotation runner log found" };
+        }
+        const runnerAgeH = (Date.now() - fs.statSync(ROTATION_RUN_LOG).mtimeMs) / 3_600_000;
+        const runnerPass = runnerAgeH <= ROTATION_RUN_MAX_AGE_H;
+        return {
+          status: runnerPass ? "pass" : "fail",
+          detail: runnerPass
+            ? `no fresh archive yet, but log-rotate.log ran ${runnerAgeH.toFixed(1)}h ago`
+            : `no rotated archives found; log-rotate.log ${runnerAgeH.toFixed(1)}h old`,
+          metrics: { runnerAgeH: Number(runnerAgeH.toFixed(2)), maxRunnerH: ROTATION_RUN_MAX_AGE_H, archives: 0 },
+        };
       }
       const newest = archives.reduce((a, b) => (a.mtimeMs > b.mtimeMs ? a : b));
       const ageH = (Date.now() - newest.mtimeMs) / 3_600_000;
       const pass = ageH <= ROTATION_MAX_AGE_H;
+      if (!pass && fs.existsSync(ROTATION_RUN_LOG)) {
+        const runnerAgeH = (Date.now() - fs.statSync(ROTATION_RUN_LOG).mtimeMs) / 3_600_000;
+        const runnerPass = runnerAgeH <= ROTATION_RUN_MAX_AGE_H;
+        if (runnerPass) {
+          return {
+            status: "pass",
+            detail: `newest archive ${newest.name} ${ageH.toFixed(1)}h old; log-rotate.log ran ${runnerAgeH.toFixed(1)}h ago`,
+            metrics: {
+              ageH: Number(ageH.toFixed(2)),
+              maxH: ROTATION_MAX_AGE_H,
+              runnerAgeH: Number(runnerAgeH.toFixed(2)),
+              maxRunnerH: ROTATION_RUN_MAX_AGE_H,
+              archives: archives.length,
+            },
+          };
+        }
+      }
       return {
         status: pass ? "pass" : "fail",
         detail: `newest archive ${newest.name} ${ageH.toFixed(1)}h old`,
