@@ -103,6 +103,7 @@ import { UserProfileStore } from "../profile/UserProfile.js";
 
 /** Maximum SARIF payload size in bytes (5 MB) */
 const MAX_SARIF_BYTES = 5 * 1024 * 1024;
+let rateLimitNamespaceCounter = 0;
 
 // ============================================================================
 // REST Server Class
@@ -201,7 +202,12 @@ export class RESTPingMemServer {
       vectorDimensions: 768,
       ...config,
     };
-    this.rateLimitNamespace = crypto.randomUUID();
+    this.rateLimitNamespace = [
+      Date.now().toString(36),
+      (++rateLimitNamespaceCounter).toString(36),
+      Math.random().toString(36).slice(2, 10),
+      crypto.randomUUID().slice(0, 8),
+    ].join("-");
 
     // Initialize core components — use shared EventStore if provided (avoids dual SQLite connections)
     const injectedEventStore = this.config.eventStore;
