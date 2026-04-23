@@ -41,6 +41,8 @@ export interface IngestionServiceOptions {
   healthMonitor?: HealthMonitor;
   /** BM25Scorer instance for primary ranking. Passed to CodeIndexer. */
   bm25Scorer?: import("../search/BM25Scorer.js").BM25Scorer;
+  /** Optional SQLite FTS code chunk store for file-scoped lexical retrieval. */
+  codeChunkStore?: import("../search/CodeChunkStore.js").CodeChunkStore;
 }
 
 export interface IngestProjectOptions {
@@ -110,6 +112,7 @@ export class IngestionService {
     this.codeIndexer = new CodeIndexer({
       qdrantClient: options.qdrantClient,
       ...(options.bm25Scorer ? { bm25Scorer: options.bm25Scorer } : {}),
+      ...(options.codeChunkStore ? { codeChunkStore: options.codeChunkStore } : {}),
     });
     this.eventStore = options.eventStore ?? null;
     this.healthMonitor = options.healthMonitor ?? null;

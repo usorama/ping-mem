@@ -13,6 +13,7 @@
  */
 
 import * as crypto from "crypto";
+import ts from "typescript";
 import { SymbolExtractor, type ExtractedSymbol } from "./SymbolExtractor.js";
 
 export interface SemanticChunk {
@@ -56,12 +57,15 @@ export class SemanticChunker {
     const lines = content.split("\n");
     const symbols = this.symbolExtractor.extractFromFile(filePath, content);
 
-    if (symbols.length === 0) {
-      // No symbols found — produce a single file-level chunk
-      return this.createFileLevelChunks(filePath, content, lines);
-    }
-
     const chunks: SemanticChunk[] = [];
+
+    const routeChunks = this.createRouteChunks(filePath, content, lines);
+    chunks.push(...routeChunks);
+
+    if (symbols.length === 0) {
+      chunks.push(...this.createFileLevelChunks(filePath, content, lines));
+      return chunks;
+    }
 
     // Level 2: Class-level chunks (need these first for parentChunkId)
     const classChunks = this.createClassChunks(filePath, lines, symbols);
@@ -87,6 +91,96 @@ export class SemanticChunker {
     chunks.push(...fileChunks);
 
     return chunks;
+  }
+
+  private createRouteChunks(
+    filePath: string,
+    content: string,
+    lines: string[],
+  ): SemanticChunk[] {
+    if (!/\.(ts|tsx|js|jsx)$/.test(filePath)) {
+      return [];
+    }
+
+    const sourceFile = ts.createSourceFile(
+      filePath,
+      content,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+
+    const routeChunks: SemanticChunk[] = [];
+    const seen = new Set<string>();
+
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node)) {
+        const route = this.extractRouteCall(sourceFile, node, filePath, lines);
+        if (route && !seen.has(route.chunkId)) {
+          seen.add(route.chunkId);
+          routeChunks.push(route);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+
+    visit(sourceFile);
+    return routeChunks;
+  }
+
+  private extractRouteCall(
+    sourceFile: ts.SourceFile,
+    node: ts.CallExpression,
+    filePath: string,
+    lines: string[],
+  ): SemanticChunk | null {
+    if (!ts.isPropertyAccessExpression(node.expression)) {
+      return null;
+    }
+
+    const methodName = node.expression.name.text;
+    if (!["get", "post", "put", "delete", "patch", "head", "options"].includes(methodName)) {
+      return null;
+    }
+
+    const calleeText = node.expression.expression.getText(sourceFile);
+    if (calleeText !== "this.app" && calleeText !== "app") {
+      return null;
+    }
+
+    const routeArg = node.arguments[0];
+    const handlerArg = node.arguments[1];
+    const routePath = this.readRouteLiteral(routeArg);
+    if (!routePath || !handlerArg || (!ts.isArrowFunction(handlerArg) && !ts.isFunctionExpression(handlerArg))) {
+      return null;
+    }
+
+    const { line: startLineRaw } = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart(sourceFile));
+    const { line: endLineRaw } = ts.getLineAndCharacterOfPosition(sourceFile, node.end);
+    const startLine = startLineRaw + 1;
+    const endLine = endLineRaw + 1;
+    const chunkContent = lines.slice(startLine - 1, endLine).join("\n");
+    const chunkId = this.computeChunkId(filePath, "block", startLine, endLine, chunkContent);
+
+    return {
+      chunkId,
+      filePath,
+      content: chunkContent,
+      startLine,
+      endLine,
+      chunkType: "block",
+      name: `${methodName.toUpperCase()} ${routePath}`,
+      overlapLines: 0,
+    };
+  }
+
+  private readRouteLiteral(node: ts.Expression | undefined): string | null {
+    if (!node) {
+      return null;
+    }
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      return node.text.startsWith("/") ? node.text : null;
+    }
+    return null;
   }
 
   private createFunctionChunks(

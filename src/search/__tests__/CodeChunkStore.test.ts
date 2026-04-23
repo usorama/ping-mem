@@ -202,6 +202,36 @@ describe("CodeChunkStore", () => {
       expect(() => store.search("^test {near}")).not.toThrow();
     });
 
+    it("should match path-like queries by splitting punctuation into searchable terms", () => {
+      store.addChunk(makeChunk({
+        chunkId: "route-chunk",
+        filePath: "src/http/rest-server.ts",
+        content: "this.app.get(\"/api/v1/codebase/projects\", async (c) => {",
+      }));
+
+      const results = store.search("/api/v1/codebase/projects");
+      expect(results).toHaveLength(1);
+      expect(results[0]?.chunkId).toBe("route-chunk");
+    });
+
+    it("should reject weak single-token matches for multi-term path queries", () => {
+      store.addChunk(makeChunk({
+        chunkId: "route-chunk",
+        filePath: "src/http/rest-server.ts",
+        content: "this.app.get(\"/api/v1/codebase/projects\", async (c) => {",
+      }));
+      store.addChunk(makeChunk({
+        chunkId: "noise-chunk",
+        filePath: "src/http/rest-server.ts",
+        content: "private validateApiKey(input: string): boolean { return true; }",
+      }));
+
+      const results = store.search("/api/v1/codebase/projects");
+      const ids = results.map((r) => r.chunkId);
+      expect(ids).toContain("route-chunk");
+      expect(ids).not.toContain("noise-chunk");
+    });
+
     it("should use porter stemming for matching", () => {
       store.addChunk(makeChunk({
         chunkId: "c1",
@@ -233,6 +263,36 @@ describe("CodeChunkStore", () => {
 
       store.removeChunk("c1");
       expect(store.getChunkCount()).toBe(1);
+    });
+  });
+
+  describe("getChunksForFile", () => {
+    it("returns chunks in file order for a specific project and file", () => {
+      store.addChunk({
+        chunkId: "c-2",
+        projectId: "project-a",
+        filePath: "src/http/rest-server.ts",
+        content: "second",
+        startLine: 20,
+        endLine: 30,
+        chunkType: "block",
+        language: "typescript",
+      });
+      store.addChunk({
+        chunkId: "c-1",
+        projectId: "project-a",
+        filePath: "src/http/rest-server.ts",
+        content: "first",
+        startLine: 5,
+        endLine: 10,
+        chunkType: "block",
+        language: "typescript",
+      });
+
+      const chunks = store.getChunksForFile("project-a", "src/http/rest-server.ts");
+      expect(chunks).toHaveLength(2);
+      expect(chunks[0]?.chunkId).toBe("c-1");
+      expect(chunks[1]?.chunkId).toBe("c-2");
     });
   });
 

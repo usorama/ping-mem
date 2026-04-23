@@ -46,10 +46,12 @@ export async function startHTTPServer(): Promise<void> {
 
   // Create BM25Scorer for deterministic search ranking
   const { BM25Scorer } = await import("../search/BM25Scorer.js");
+  const { CodeChunkStore } = await import("../search/CodeChunkStore.js");
   const { Database: BM25Database } = await import("bun:sqlite");
   const bm25DbPath = runtimeConfig.pingMem.dbPath === ":memory:" ? ":memory:" : runtimeConfig.pingMem.dbPath.replace(/\.db$/, "-bm25.db");
   const bm25Db = new BM25Database(bm25DbPath);
   const bm25Scorer = new BM25Scorer(bm25Db);
+  const codeChunkStore = new CodeChunkStore(bm25Db);
 
   // Create IngestionService only when both Neo4j and Qdrant are available
   let ingestionService: IngestionService | undefined;
@@ -58,6 +60,7 @@ export async function startHTTPServer(): Promise<void> {
       neo4jClient: services.neo4jClient,
       qdrantClient: services.qdrantClient,
       bm25Scorer,
+      codeChunkStore,
     });
     // Ensure Neo4j uniqueness constraints exist before accepting any ingest requests.
     // MCP path calls this after construction; HTTP path must mirror that behaviour.

@@ -36,6 +36,17 @@ export interface CodeChunkSearchResult {
   score: number;
 }
 
+export interface CodeChunkRow {
+  chunkId: string;
+  projectId: string;
+  filePath: string;
+  content: string;
+  startLine: number;
+  endLine: number;
+  chunkType: ChunkType;
+  language: string;
+}
+
 export class CodeChunkStore {
   private readonly db: Database;
   private readonly insertChunkStmt: ReturnType<Database["prepare"]>;
@@ -148,8 +159,9 @@ export class CodeChunkStore {
   search(query: string, projectId?: string, limit = 10): CodeChunkSearchResult[] {
     if (!query.trim()) return [];
 
-    const safeQuery = sanitizeFts5Query(query);
-    if (!safeQuery) return [];
+    const queryTerms = tokenizeFts5Terms(query);
+    if (queryTerms.length === 0) return [];
+    const safeQuery = buildFts5Query(queryTerms);
 
     const clampedLimit = Math.max(1, Math.min(Math.floor(limit), 1000));
 
@@ -209,7 +221,7 @@ export class CodeChunkStore {
       score: number;
     }>;
 
-    return rows.map((row) => ({
+    const results = rows.map((row) => ({
       chunkId: row.chunk_id,
       projectId: row.project_id,
       filePath: row.file_path,
@@ -220,11 +232,63 @@ export class CodeChunkStore {
       language: row.language ?? "",
       score: row.score,
     }));
+
+    // Enforce lexical evidence: avoid returning chunks that match only weakly
+    // on a single common token (for example "api") when the query has multiple
+    // distinctive terms.
+    const normalizedTerms = queryTerms.map((t) => t.toLowerCase());
+    const minOverlap = normalizedTerms.length >= 2 ? 2 : 1;
+    return results.filter((result) => {
+      const haystack = `${result.filePath}\n${result.content}`.toLowerCase();
+      let overlap = 0;
+      for (const term of normalizedTerms) {
+        if (haystack.includes(term)) overlap += 1;
+      }
+      return overlap >= Math.min(minOverlap, normalizedTerms.length);
+    });
   }
 
   getChunkCount(): number {
     const row = this.countStmt.get() as { cnt: number } | undefined;
     return row?.cnt ?? 0;
+  }
+
+  getChunksForFile(projectId: string, filePath: string): CodeChunkRow[] {
+    const rows = this.db.prepare(
+      `SELECT
+         chunk_id,
+         project_id,
+         file_path,
+         content,
+         start_line,
+         end_line,
+         chunk_type,
+         language
+       FROM code_chunks
+       WHERE project_id = ?
+         AND file_path = ?
+       ORDER BY start_line ASC`
+    ).all(projectId, filePath) as Array<{
+      chunk_id: string;
+      project_id: string;
+      file_path: string;
+      content: string;
+      start_line: number;
+      end_line: number;
+      chunk_type: string;
+      language: string | null;
+    }>;
+
+    return rows.map((row) => ({
+      chunkId: row.chunk_id,
+      projectId: row.project_id,
+      filePath: row.file_path,
+      content: row.content,
+      startLine: row.start_line,
+      endLine: row.end_line,
+      chunkType: row.chunk_type as ChunkType,
+      language: row.language ?? "",
+    }));
   }
 }
 
@@ -233,14 +297,18 @@ export class CodeChunkStore {
  * Strips special FTS5 operators and wraps each token in double quotes
  * to prevent injection of FTS5 syntax.
  */
-function sanitizeFts5Query(query: string): string {
-  const tokens = query
+function tokenizeFts5Terms(query: string): string[] {
+  return query
     .replace(/[(){}*^"]/g, " ")
+    // Path-like and symbol-heavy queries are common for code lookups.
+    // Split on non-word separators so "/api/v1/codebase/projects" becomes
+    // searchable terms instead of one punctuation-heavy token.
+    .replace(/[^A-Za-z0-9_]+/g, " ")
     .split(/\s+/)
     .filter((t) => t.length > 0)
     .filter((t) => !["AND", "OR", "NOT", "NEAR"].includes(t.toUpperCase()));
+}
 
-  if (tokens.length === 0) return "";
-
+function buildFts5Query(tokens: string[]): string {
   return tokens.map((t) => `"${t}"`).join(" ");
 }

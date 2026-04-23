@@ -163,10 +163,79 @@ export class CodeIndexer {
       limit?: number;
     } = {}
   ): Promise<ChunkSearchResult[]> {
+    const clampedLimit = Math.max(1, Math.min(Math.floor(options.limit ?? 10), 1000));
+    const queryTerms = this.extractQueryTerms(query);
+
     // Strategy 1: BM25Scorer is the primary ranker
     if (this.bm25Scorer) {
+      // Deterministic file-scoped fast path for verifiable lookups.
+      // When callers provide filePath, prefer SQLite FTS over global BM25 scorer
+      // so we rank only chunks in that file first.
+      if (options.filePath && this.codeChunkStore) {
+        if (options.projectId) {
+          const directFileMatches = this.codeChunkStore
+            .getChunksForFile(options.projectId, options.filePath)
+            .map((chunk) => {
+              const score = this.lexicalEvidenceScore(
+                { filePath: chunk.filePath, content: chunk.content },
+                queryTerms,
+                query
+              );
+              const matchIndex = this.exactMatchIndex(
+                { filePath: chunk.filePath, content: chunk.content },
+                query,
+              );
+              return { chunk, score, matchIndex };
+            })
+            .filter(({ score }) => score > 0)
+            .sort((a, b) => {
+              const scoreDelta = b.score - a.score;
+              if (scoreDelta !== 0) return scoreDelta;
+              if (a.matchIndex !== b.matchIndex) return a.matchIndex - b.matchIndex;
+              const aSpan = a.chunk.endLine - a.chunk.startLine;
+              const bSpan = b.chunk.endLine - b.chunk.startLine;
+              if (aSpan !== bSpan) return aSpan - bSpan;
+              return a.chunk.startLine - b.chunk.startLine;
+            })
+            .slice(0, clampedLimit)
+            .map(({ chunk, score }) => ({
+              chunkId: chunk.chunkId,
+              projectId: chunk.projectId,
+              filePath: chunk.filePath,
+              type: "code" as const,
+              content: chunk.content,
+              lineStart: chunk.startLine,
+              lineEnd: chunk.endLine,
+              score,
+            }));
+          if (directFileMatches.length > 0) {
+            return directFileMatches;
+          }
+        }
+
+        const fileScoped = this.codeChunkStore
+          .search(query, options.projectId, Math.min(clampedLimit * 5, 1000))
+          .filter((chunk) => {
+            if (chunk.filePath !== options.filePath) return false;
+            if (!this.hasLexicalEvidence({ filePath: chunk.filePath, content: chunk.content }, queryTerms, query)) return false;
+            return true;
+          })
+          .map((chunk) => ({
+            chunkId: chunk.chunkId,
+            projectId: chunk.projectId,
+            filePath: chunk.filePath,
+            type: "code" as const,
+            content: chunk.content,
+            lineStart: chunk.startLine,
+            lineEnd: chunk.endLine,
+            score: chunk.score,
+          }));
+        if (fileScoped.length > 0) {
+          return fileScoped.slice(0, clampedLimit);
+        }
+      }
+
       // BM25-only search (metadata from CodeChunkStore or Qdrant)
-      const clampedLimit = Math.max(1, Math.min(Math.floor(options.limit ?? 10), 1000));
       const fetchLimit = Math.min(clampedLimit * 3, 300);
       const bm25Results = this.bm25Scorer.search(query, fetchLimit);
       let qdrantResults: ChunkSearchResult[] = [];
@@ -189,7 +258,7 @@ export class CodeIndexer {
         const scored: Array<{ chunkId: string; score: number }> = [];
         for (const id of allIds) {
           const m = metaLookup.get(id); if (!m) continue;
-          if (options.projectId && m.projectId !== options.projectId) continue;
+          if (!this.matchesSearchOptions(m, options, queryTerms, query)) continue;
           // When range is 0, all candidates tied — give full credit rather than collapsing to 0
           const bn = bm25S.has(id) ? (bRngRaw === 0 ? 1 : (bm25S.get(id)! - bMin) / bRng) : 0;
           const dn = denseS.has(id) ? (dRngRaw === 0 ? 1 : (denseS.get(id)! - dMin) / dRng) : 0;
@@ -201,7 +270,7 @@ export class CodeIndexer {
       const results: ChunkSearchResult[] = [];
       for (const bm25 of bm25Results) {
         const meta = metaLookup.get(bm25.chunkId); if (!meta) continue;
-        if (options.projectId && meta.projectId !== options.projectId) continue;
+        if (!this.matchesSearchOptions(meta, options, queryTerms, query)) continue;
         results.push({ ...meta, score: bm25.score });
         if (results.length >= clampedLimit) break;
       }
@@ -210,7 +279,7 @@ export class CodeIndexer {
 
     // Strategy 2: CodeChunkStore FTS5 + Qdrant RRF (legacy)
     if (this.codeChunkStore) {
-      return this.searchWithRRF(query, options);
+      return this.searchWithRRF(query, options, queryTerms);
     }
 
     // Strategy 3: Qdrant only (legacy fallback)
@@ -225,6 +294,7 @@ export class CodeIndexer {
       type?: "code" | "comment" | "docstring";
       limit?: number;
     },
+    queryTerms: string[],
   ): Promise<ChunkSearchResult[]> {
     const clampedLimit = Math.max(1, Math.min(Math.floor(options.limit ?? 10), 1000));
     // Fetch more candidates from each source for better fusion
@@ -276,6 +346,10 @@ export class CodeIndexer {
     // RRF scoring
     const rrfScores: Array<{ chunkId: string; score: number }> = [];
     for (const chunkId of allChunkIds) {
+      const candidate = resultLookup.get(chunkId);
+      if (!candidate) continue;
+      if (!this.matchesSearchOptions(candidate, options, queryTerms, query)) continue;
+
       const bm25Rank = bm25Ranks.get(chunkId);
       const qdrantRank = qdrantRanks.get(chunkId);
 
@@ -297,6 +371,126 @@ export class CodeIndexer {
       const r = resultLookup.get(s.chunkId)!;
       return { ...r, score: s.score };
     });
+  }
+
+  private matchesSearchOptions(
+    candidate: ChunkSearchResult,
+    options: {
+      projectId?: string;
+      filePath?: string;
+      type?: "code" | "comment" | "docstring";
+      limit?: number;
+    },
+    queryTerms: string[],
+    rawQuery: string,
+  ): boolean {
+    if (options.projectId && candidate.projectId !== options.projectId) {
+      return false;
+    }
+    if (options.filePath && candidate.filePath !== options.filePath) {
+      return false;
+    }
+    if (options.type && candidate.type !== options.type) {
+      return false;
+    }
+    if (options.filePath && !this.hasLexicalEvidence(candidate, queryTerms, rawQuery)) {
+      return false;
+    }
+    return true;
+  }
+
+  private extractQueryTerms(query: string): string[] {
+    return query
+      .replace(/[(){}*^"]/g, " ")
+      .replace(/[^A-Za-z0-9_]+/g, " ")
+      .split(/\s+/)
+      .map((term) => term.toLowerCase())
+      .filter((term) => term.length > 0)
+      .filter((term) => !["and", "or", "not", "near"].includes(term));
+  }
+
+  private hasLexicalEvidence(
+    candidate: Pick<ChunkSearchResult, "filePath" | "content">,
+    queryTerms: string[],
+    rawQuery?: string,
+  ): boolean {
+    return this.lexicalEvidenceScore(candidate, queryTerms, rawQuery) > 0;
+  }
+
+  private lexicalEvidenceScore(
+    candidate: Pick<ChunkSearchResult, "filePath" | "content">,
+    queryTerms: string[],
+    rawQuery?: string,
+  ): number {
+    if (queryTerms.length === 0) {
+      return 1;
+    }
+    const haystack = `${candidate.filePath}\n${candidate.content}`.toLowerCase();
+    const routeLiterals = rawQuery ? this.extractRouteLiterals(rawQuery) : [];
+    if (routeLiterals.length > 0) {
+      const hasRouteLiteral = routeLiterals.some((route) => haystack.includes(route));
+      if (!hasRouteLiteral) {
+        return 0;
+      }
+    }
+    const overlap = queryTerms.reduce((count, term) => (haystack.includes(term) ? count + 1 : count), 0);
+    const minOverlap = queryTerms.length >= 4 ? 3 : queryTerms.length >= 2 ? 2 : 1;
+    let score = overlap >= Math.min(minOverlap, queryTerms.length) ? overlap : 0;
+    if (rawQuery) {
+      const normalizedRaw = rawQuery.trim().toLowerCase();
+      if (normalizedRaw.length > 0 && haystack.includes(normalizedRaw)) {
+        score += 5;
+        const firstIndex = haystack.indexOf(normalizedRaw);
+        score += this.positionBonus(firstIndex);
+      } else {
+        const unquoted = normalizedRaw.replace(/["'`]/g, "");
+        if (unquoted.length > 0 && haystack.includes(unquoted)) {
+          score += 3;
+          const firstIndex = haystack.indexOf(unquoted);
+          score += this.positionBonus(firstIndex);
+        }
+      }
+    }
+    return score;
+  }
+
+  private exactMatchIndex(
+    candidate: Pick<ChunkSearchResult, "filePath" | "content">,
+    rawQuery: string,
+  ): number {
+    const haystack = `${candidate.filePath}\n${candidate.content}`.toLowerCase();
+    const normalizedRaw = rawQuery.trim().toLowerCase();
+    if (normalizedRaw.length > 0) {
+      const directIndex = haystack.indexOf(normalizedRaw);
+      if (directIndex >= 0) return directIndex;
+      const unquoted = normalizedRaw.replace(/["'`]/g, "");
+      if (unquoted.length > 0) {
+        const unquotedIndex = haystack.indexOf(unquoted);
+        if (unquotedIndex >= 0) return unquotedIndex;
+      }
+    }
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  private positionBonus(matchIndex: number): number {
+    if (matchIndex < 0) {
+      return 0;
+    }
+    if (matchIndex <= 80) {
+      return 2;
+    }
+    if (matchIndex <= 200) {
+      return 1;
+    }
+    return 0;
+  }
+
+  private extractRouteLiterals(rawQuery: string): string[] {
+    const matches = rawQuery.toLowerCase().match(/\/[a-z0-9][a-z0-9/_-]*/g);
+    if (!matches) {
+      return [];
+    }
+    return matches.filter((route) => route.length >= 6);
   }
 
   private async searchQdrantOnly(

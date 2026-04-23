@@ -285,6 +285,28 @@ describe("SemanticChunker", () => {
       }
       expect(hasDifference).toBe(true);
     });
+
+    test("extracts route handler blocks as dedicated chunks", () => {
+      const content = [
+        "export class Server {",
+        "  setup(): void {",
+        "    this.app.get(\"/api/v1/search\", async (c) => {",
+        "      const query = c.req.query(\"query\");",
+        "      return c.json({ query });",
+        "    });",
+        "  }",
+        "}",
+      ].join("\n");
+
+      const result = chunker.chunkFile("rest-server.ts", content);
+      const routeChunks = result.filter((c) => c.chunkType === "block");
+
+      expect(routeChunks.length).toBe(1);
+      expect(routeChunks[0]!.name).toBe("GET /api/v1/search");
+      expect(routeChunks[0]!.startLine).toBe(3);
+      expect(routeChunks[0]!.endLine).toBe(6);
+      expect(routeChunks[0]!.content).toContain("/api/v1/search");
+    });
   });
 
   describe("Python support", () => {
