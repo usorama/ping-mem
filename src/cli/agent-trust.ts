@@ -473,16 +473,17 @@ export async function buildAgentGraphAnswer(opts: AgentGraphAnswerOptions): Prom
   const runtime = resolveRuntime(opts);
   const invalid = validateApprovedIdentity("agent graph answer", runtime, startedAt, opts.agentId, opts.projectDir, opts.evidenceDir);
   if (invalid) return invalid;
+  const runtimeProjectDir = toRuntimeProjectDir(opts.projectDir!);
 
   try {
     const body: Record<string, unknown> = {
       agentId: opts.agentId,
-      projectDir: opts.projectDir,
+      projectDir: runtimeProjectDir,
       mode: opts.mode,
       population: {
         kind: "project",
-        root: opts.projectDir,
-        corpusId: `project:${opts.projectDir}`,
+        root: runtimeProjectDir,
+        corpusId: `project:${runtimeProjectDir}`,
       },
     };
     if (opts.query) body.query = opts.query;

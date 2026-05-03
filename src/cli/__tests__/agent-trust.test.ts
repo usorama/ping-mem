@@ -270,12 +270,12 @@ describe("agent trust spine", () => {
     expect((fetchCall[1].headers as Record<string, string>)["X-Ping-Mem-Approved-Path"]).toBe("true");
     expect(JSON.parse(fetchCall[1].body as string)).toMatchObject({
       agentId: "codex-local",
-      projectDir: "/Users/umasankr/Projects/ping-mem",
+      projectDir: "/projects/ping-mem",
       mode: "complete_graph",
       query: "graph contract",
       population: {
         kind: "project",
-        root: "/Users/umasankr/Projects/ping-mem",
+        root: "/projects/ping-mem",
       },
     });
   });
