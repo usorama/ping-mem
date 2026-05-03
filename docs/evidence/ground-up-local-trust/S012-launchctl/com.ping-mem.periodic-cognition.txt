@@ -1,0 +1,84 @@
+plist=/Users/umasankr/Library/LaunchAgents/com.ping-mem.periodic-cognition.plist
+label=com.ping-mem.periodic-cognition
+program_arguments:
+Array {
+    /bin/bash
+    /Users/umasankr/Projects/ping-mem/scripts/periodic-cognition.sh
+}
+environment:
+Dict {
+    PATH = /Users/umasankr/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+    HOME = /Users/umasankr
+    PING_MEM_ENV_FILE = /Users/umasankr/Projects/ping-mem/.env
+}
+stdout:
+/Users/umasankr/Library/Logs/ping-mem/periodic-cognition.log
+stderr:
+/Users/umasankr/Library/Logs/ping-mem/periodic-cognition.err
+launchctl_print:
+gui/501/com.ping-mem.periodic-cognition = {
+	active count = 0
+	path = /Users/umasankr/Library/LaunchAgents/com.ping-mem.periodic-cognition.plist
+	type = LaunchAgent
+	state = not running
+
+	program = /bin/bash
+	arguments = {
+		/bin/bash
+		/Users/umasankr/Projects/ping-mem/scripts/periodic-cognition.sh
+	}
+
+	working directory = /Users/umasankr/Projects/ping-mem
+
+	stdout path = /Users/umasankr/Library/Logs/ping-mem/periodic-cognition.log
+	stderr path = /Users/umasankr/Library/Logs/ping-mem/periodic-cognition.err
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.aqJNTIlfRF/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		PATH => /Users/umasankr/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+		PING_MEM_ENV_FILE => /Users/umasankr/Projects/ping-mem/.env
+		HOME => /Users/umasankr
+		XPC_SERVICE_NAME => com.ping-mem.periodic-cognition
+	}
+
+	domain = gui/501 [100025]
+	asid = 100025
+	minimum runtime = 300
+	exit timeout = 5
+	runs = 3
+	last exit code = 0
+
+	resource coalition = {
+		ID = 20953
+		type = resource
+		state = active
+		active count = 1
+		name = com.ping-mem.periodic-cognition
+	}
+
+	jetsam coalition = {
+		ID = 20954
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.ping-mem.periodic-cognition
+	}
+
+	spawn type = background (5)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+	run interval = 86400 seconds
+
+	properties = runatload | inferred program
+}

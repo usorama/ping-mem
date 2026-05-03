@@ -6,8 +6,15 @@ Universal Memory Layer for AI agents — persistent, intelligent, contextually-a
 
 ## Agent Session Start
 
-```json
-{ "name": "context_session_start", "arguments": { "name": "agent-session", "projectDir": "/Users/umasankr/Projects/ping-mem", "autoIngest": true } }
+ping-mem is currently under the 2026-04-29 local trust rebuild. Do not use MCP
+tools, direct DB mode, or codebase grounding tools as proof until the local
+S001-S015 gate package says they are re-adopted.
+
+Approved local proof starts through the REST-only CLI trust spine:
+
+```bash
+bun run src/cli/index.ts agent status --json
+bun run src/cli/index.ts agent proof memory-lifecycle --agent claude-code-local --project /Users/umasankr/Projects/ping-mem --json
 ```
 
 ## Dev Commands
@@ -20,7 +27,6 @@ bun run typecheck    # Type check (0 errors required)
 bun run lint         # Lint
 bun run start        # unified server (:3003)
 bun run start:sse    # legacy label; unified HTTP server still exposes /mcp on :3003
-bun run dist/mcp/cli.js  # MCP stdio
 scripts/pre-push.sh  # pre-push gate — install: ln -sf ../../scripts/pre-push.sh .git/hooks/pre-push
 ```
 
@@ -29,7 +35,7 @@ scripts/pre-push.sh  # pre-push gate — install: ln -sf ../../scripts/pre-push.
 ## Key Rules
 
 - **Port 3003** is the supported local/public listener for the unified server
-- **Admin auth** required for MCP proxy: `PING_MEM_ADMIN_USER=admin` / `PING_MEM_ADMIN_PASS=ping-mem-dev-local` in both `.env` and `~/.claude/mcp.json`
+- **Agent re-adoption is blocked until S015**. Do not add ping-mem back to Claude Code or Codex config from this file.
 - **Ollama is primary LLM**: Entity extraction, contradiction detection, causal discovery all use Ollama `llama3.2` via OpenAI-compatible API. OpenAI is fallback only.
 - **Codebase search** is GET `/api/v1/codebase/search?query=...` (NOT POST)
 - **Health** is GET `/health` — always 200, no auth required
@@ -65,8 +71,9 @@ Routes: `/ui` `/ui/memories` `/ui/diagnostics` `/ui/ingestion` `/ui/agents` `/ui
 
 ## MCP Transport Modes
 
-- **Proxy mode** (recommended): `PING_MEM_REST_URL=http://localhost:3003 bun run dist/mcp/proxy-cli.js` — all tools proxy through Docker, no DB opened in the MCP process
-- **Direct mode** (deprecated): `bun run dist/mcp/cli.js` — opens DB directly, concurrent access issues with Docker
+- **Current approved proof path**: `bun run src/cli/index.ts agent ... --json` against the REST runtime.
+- **Proxy mode**: quarantined until S015/S016 re-adoption proof.
+- **Direct mode**: offline development only; it cannot prove local trust or agent readiness.
 
 ## Deployment
 

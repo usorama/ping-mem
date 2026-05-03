@@ -1,0 +1,80 @@
+plist=/Users/umasankr/Library/LaunchAgents/com.ping-mem.soak-monitor.plist
+label=com.ping-mem.soak-monitor
+program_arguments:
+Array {
+    /bin/bash
+    -lc
+    /Users/umasankr/Projects/ping-mem/scripts/soak-monitor.sh
+}
+environment:
+Dict {
+    PATH = /Users/umasankr/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+}
+stdout:
+/Users/umasankr/Library/Logs/ping-mem/soak-monitor.log
+stderr:
+/Users/umasankr/Library/Logs/ping-mem/soak-monitor.err
+launchctl_print:
+gui/501/com.ping-mem.soak-monitor = {
+	active count = 0
+	path = /Users/umasankr/Library/LaunchAgents/com.ping-mem.soak-monitor.plist
+	type = LaunchAgent
+	state = not running
+
+	program = /bin/bash
+	arguments = {
+		/bin/bash
+		-lc
+		/Users/umasankr/Projects/ping-mem/scripts/soak-monitor.sh
+	}
+
+	stdout path = /Users/umasankr/Library/Logs/ping-mem/soak-monitor.log
+	stderr path = /Users/umasankr/Library/Logs/ping-mem/soak-monitor.err
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.aqJNTIlfRF/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		PATH => /Users/umasankr/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+		XPC_SERVICE_NAME => com.ping-mem.soak-monitor
+	}
+
+	domain = gui/501 [100025]
+	asid = 100025
+	minimum runtime = 10
+	exit timeout = 30
+	runs = 3
+	last exit code = 0
+
+	resource coalition = {
+		ID = 20957
+		type = resource
+		state = active
+		active count = 1
+		name = com.ping-mem.soak-monitor
+	}
+
+	jetsam coalition = {
+		ID = 20958
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.ping-mem.soak-monitor
+	}
+
+	spawn type = background (5)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+	run interval = 86400 seconds
+
+	properties = runatload | inferred program
+}

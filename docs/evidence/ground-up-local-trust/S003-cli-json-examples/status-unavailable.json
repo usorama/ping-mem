@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "status": "blocked",
+  "command": "agent status",
+  "runtime": {
+    "url": "http://127.0.0.1:9",
+    "timeoutMs": 1000
+  },
+  "elapsedMs": 9,
+  "checkedAt": "2026-04-30T14:56:00.986Z",
+  "error": {
+    "code": "RUNTIME_UNAVAILABLE",
+    "message": "Unable to connect. Is the computer able to access the url?",
+    "layer": "runtime"
+  }
+}

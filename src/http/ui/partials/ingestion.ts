@@ -5,9 +5,7 @@
  */
 
 import type { Context } from "hono";
-import * as os from "os";
 import * as path from "path";
-import * as fs from "fs";
 import { escapeHtml, getClientIp } from "../layout.js";
 import { badge } from "../components.js";
 import type { UIDependencies } from "../routes.js";
@@ -75,23 +73,21 @@ export function registerIngestionPartialRoutes(deps: UIDependencies) {
         </div>`);
       }
 
-      // Validate projectDir against registered projects
-      const registeredPath = path.join(os.homedir(), ".ping-mem", "registered-projects.txt");
-      let allowedProjects: string[] = [];
+      // Validate projectDir against the runtime registered-project inventory.
+      let allowedProjects: string[];
       try {
-        if (fs.existsSync(registeredPath)) {
-          allowedProjects = fs.readFileSync(registeredPath, "utf-8")
-            .split("\n")
-            .map(l => l.trim())
-            .filter(Boolean)
-            .map(l => path.resolve(l));
-        }
+        const projects = await ingestionService.listProjects({
+          scope: "registered",
+          limit: 1000,
+          sortBy: "rootPath",
+        });
+        allowedProjects = projects.map((project) => path.resolve(project.rootPath));
       } catch (err) {
-        // Fail CLOSED: if we cannot read the allowlist, deny all requests
-        log.warn("Failed to read registered-projects.txt", { error: err instanceof Error ? err.message : String(err) });
+        // Fail CLOSED: if runtime registry truth is unavailable, deny all requests.
+        log.warn("Failed to load runtime registered projects", { error: err instanceof Error ? err.message : String(err) });
         return c.html(`<div class="card" style="margin-top:16px">
           <div style="padding:16px;color:var(--error)">
-            ${badge("Forbidden", "error")} Unable to verify project allowlist. Access denied.
+            ${badge("Forbidden", "error")} Unable to verify runtime project registry. Access denied.
           </div>
         </div>`, 403);
       }

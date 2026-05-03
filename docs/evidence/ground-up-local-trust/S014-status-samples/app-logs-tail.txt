@@ -1,0 +1,160 @@
+{"level":"info","module":"TemporalCodeGraph","msg":"Neo4j constraints ensured","ts":"2026-04-30T16:34:04.301Z"}
+{"level":"info","module":"EventStore","msg":"WAL file oversized, running TRUNCATE checkpoint","ts":"2026-04-30T16:34:04.308Z","data":{"walSize":2080632}}
+{"level":"info","module":"EventStore","msg":"WAL recovery complete","ts":"2026-04-30T16:34:04.315Z","data":{"newWalSize":0}}
+{"level":"info","module":"HTTP Server","msg":"Starting with transport: streamable-http","ts":"2026-04-30T16:34:04.316Z"}
+{"level":"info","module":"HTTP Server","msg":"Listening on 0.0.0.0:3003","ts":"2026-04-30T16:34:04.316Z"}
+{"level":"warn","module":"REST Server","msg":"No API key configured. All routes are unauthenticated.","ts":"2026-04-30T16:34:04.317Z"}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.348Z","data":{"sessionId":"unknown","eventCount":1764}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.354Z","data":{"sessionId":"019d84fb-bb51-7e60-a97e-4e35948e7de9","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.358Z","data":{"sessionId":"019d86ac-0d12-7d13-9baf-2c2959f7de91","eventCount":12}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.386Z","data":{"sessionId":"019dc385-52e3-7b0e-b654-f525e09bd7b6","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.386Z","data":{"sessionId":"019dc385-546c-72b1-83aa-67d26e3061b1","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.386Z","data":{"sessionId":"019dc385-6783-7199-a55e-acce7798b00c","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.388Z","data":{"sessionId":"019dc3e6-67ea-7e55-93c3-e2e1dc9e70f6","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.388Z","data":{"sessionId":"019dc3e6-8bd7-74ff-ac7b-80c1f485719f","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.390Z","data":{"sessionId":"019dc42b-ceb0-7a03-bc66-19276a1cfbfa","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.390Z","data":{"sessionId":"019dc42c-b92c-784b-a28d-c1ee090cf3ab","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.390Z","data":{"sessionId":"019dc42c-e084-7ba5-a2c3-91e5eb2a79e4","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.390Z","data":{"sessionId":"019dc42c-ff5d-7996-b1bf-76f255ae099f","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.458Z","data":{"sessionId":"019dd15c-7c06-7e75-bc67-8e06ba9948bd","eventCount":6}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.458Z","data":{"sessionId":"019dd15c-6ed8-725f-bc07-ff77a28ea973","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.471Z","data":{"sessionId":"019dd279-7dbd-7f07-9974-b93277f229fa","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd279-f2ea-73ad-95f6-257162a70767","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27a-6824-7da2-9022-55251273ea6d","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27a-dd57-777d-9f8e-d27e93c2d4ba","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27b-5286-7870-80bf-4c57110b7259","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27b-c7bf-726e-85de-ffc29f3588a3","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27c-3cee-7498-b210-32d9df578c51","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27c-b21d-7075-b9c1-2b5365a33a01","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27d-2752-77ff-84e4-be10bf746a88","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.475Z","data":{"sessionId":"019dd2bd-b419-7fc3-b07b-e778643de7de","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.475Z","data":{"sessionId":"019dd2be-2951-7865-a8a4-b8e73cef0e08","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.479Z","data":{"sessionId":"019dd342-02ea-7b24-b16b-0beaf382f10c","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.479Z","data":{"sessionId":"019dd342-6500-7c82-9d5a-f0ba2ba8dba2","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.479Z","data":{"sessionId":"019dd342-7825-747a-be6f-97d565ef7e23","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.479Z","data":{"sessionId":"019dd346-2b7d-7214-9d83-b5d9734ad637","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.479Z","data":{"sessionId":"019dd346-3e79-7e75-82a0-b35c7345dd60","eventCount":1}}
+{"level":"info","module":"SessionManager","msg":"Session hydration complete","ts":"2026-04-30T16:34:04.483Z","data":{"restored":0,"skippedEnded":5360,"skippedInvalid":30,"totalScanned":5390}}
+{"level":"info","module":"REST Server","msg":"Started (ready to handle requests)","ts":"2026-04-30T16:34:04.483Z"}
+{"level":"info","module":"SSE Server","msg":"Ready (waiting for HTTP requests, multi-session enabled)","ts":"2026-04-30T16:34:04.483Z"}
+{"level":"info","module":"HealthMonitor","msg":"Started","ts":"2026-04-30T16:34:04.526Z"}
+{"level":"info","module":"HTTP Server","msg":"Server listening on http://0.0.0.0:3003","ts":"2026-04-30T16:34:04.530Z"}
+{"level":"info","module":"HTTP Server","msg":"Transport: streamable-http","ts":"2026-04-30T16:34:04.530Z"}
+{"level":"info","module":"HTTP Server","msg":"Press Ctrl+C to stop","ts":"2026-04-30T16:34:04.530Z"}
+<-- GET /health
+--> GET /health [32m200[0m 2ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+{"level":"warn","module":"Neo4jClient","msg":"Neo4j ping failed","ts":"2026-04-30T16:34:44.512Z","data":{"error":"Query execution failed: Failed to connect to server. Please ensure that your database is listening on the correct host and port and that you have compatible encryption settings both on Neo4j server and driver. Note that the default encryption setting has changed in Neo4j 4.0. Caused by: connect ECONNREFUSED 192.168.107.2:7687"}}
+{"level":"warn","module":"health-probes","msg":"Neo4j probe failed","ts":"2026-04-30T16:34:44.513Z","data":{"error":"ping returned false"}}
+{"level":"warn","module":"HealthMonitor","msg":"WARNING Neo4j is unreachable","ts":"2026-04-30T16:34:44.515Z","data":{"key":"neo4j:service_down","source":"neo4j"}}
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+{"level":"warn","module":"Neo4jClient","msg":"Neo4j ping failed","ts":"2026-04-30T16:35:14.542Z","data":{"error":"Query execution failed: Failed to connect to server. Please ensure that your database is listening on the correct host and port and that you have compatible encryption settings both on Neo4j server and driver. Note that the default encryption setting has changed in Neo4j 4.0. Caused by: connect ECONNREFUSED 192.168.107.2:7687"}}
+{"level":"warn","module":"health-probes","msg":"Neo4j probe failed","ts":"2026-04-30T16:35:14.542Z","data":{"error":"ping returned false"}}
+{"level":"warn","module":"HealthMonitor","msg":"WARNING Neo4j is unreachable","ts":"2026-04-30T16:35:14.545Z","data":{"key":"neo4j:service_down","source":"neo4j"}}
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+{"level":"warn","module":"Neo4jClient","msg":"Neo4j ping failed","ts":"2026-04-30T16:35:24.539Z","data":{"error":"Query execution failed: Failed to connect to server. Please ensure that your database is listening on the correct host and port and that you have compatible encryption settings both on Neo4j server and driver. Note that the default encryption setting has changed in Neo4j 4.0. Caused by: connect ECONNREFUSED 192.168.107.2:7687"}}
+{"level":"warn","module":"health-probes","msg":"Neo4j probe failed","ts":"2026-04-30T16:35:24.539Z","data":{"error":"ping returned false"}}
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+{"level":"warn","module":"QdrantClient","msg":"healthCheck failed","ts":"2026-04-30T16:36:04.601Z","data":{"error":"Unable to connect. Is the computer able to access the url?"}}
+{"level":"warn","module":"HealthMonitor","msg":"WARNING Qdrant is unreachable","ts":"2026-04-30T16:36:04.602Z","data":{"key":"qdrant:service_down","source":"qdrant"}}
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 2ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+{"level":"warn","module":"QdrantClient","msg":"healthCheck failed","ts":"2026-04-30T16:36:14.594Z","data":{"error":"Was there a typo in the url or port?"}}
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 2ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /api/v1/observability/status
+--> GET /api/v1/observability/status [32m200[0m 27ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /api/v1/codebase/projects?limit=500
+<-- GET /api/v1/session/list?status=active&limit=200
+--> GET /api/v1/session/list?status=active&limit=200 [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- POST /api/v1/session/start
+--> POST /api/v1/session/start [32m200[0m 9ms
+<-- GET /api/v1/search?query=ping-learn%20pricing%20research&limit=5
+--> GET /api/v1/search?query=ping-learn%20pricing%20research&limit=5 [32m200[0m 6s
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+{"level":"debug","module":"TemporalCodeGraph","msg":"Query completed: listProjects","ts":"2026-04-30T16:38:30.281Z","data":{"durationMs":5679}}
+--> GET /api/v1/codebase/projects?limit=500 [32m200[0m 6s
+<-- GET /api/v1/search?query=Firebase%20FCM%20pinglearn-c63a2&limit=5
+--> GET /api/v1/search?query=Firebase%20FCM%20pinglearn-c63a2&limit=5 [32m200[0m 5s
+{"level":"warn","module":"health-probes","msg":"Neo4j probe failed","ts":"2026-04-30T16:38:35.450Z","data":{"error":"Neo4j probe timed out after 8000ms"}}
+<-- GET /api/v1/search?query=classroom%20redesign%20worktree&limit=5
+--> GET /api/v1/search?query=classroom%20redesign%20worktree&limit=5 [32m200[0m 5s
+{"level":"warn","module":"Neo4jClient","msg":"Neo4j ping failed","ts":"2026-04-30T16:38:40.501Z","data":{"error":"Query execution failed: Operation timed out after 15000ms"}}
+{"level":"warn","module":"QdrantClient","msg":"healthCheck failed","ts":"2026-04-30T16:38:40.503Z","data":{"error":"JSON Parse error: Unexpected EOF"}}
+{"level":"warn","module":"HealthMonitor","msg":"WARNING Neo4j is unreachable","ts":"2026-04-30T16:38:40.505Z","data":{"key":"neo4j:service_down","source":"neo4j"}}
+{"level":"warn","module":"HealthMonitor","msg":"WARNING Qdrant is unreachable","ts":"2026-04-30T16:38:40.505Z","data":{"key":"qdrant:service_down","source":"qdrant"}}
+<-- GET /api/v1/search?query=PR%20236%20JWT%20secret%20isolation&limit=5
+--> GET /api/v1/search?query=PR%20236%20JWT%20secret%20isolation&limit=5 [32m200[0m 5s
+<-- GET /health
+--> GET /health [32m200[0m 17ms
+<-- GET /ui/health
+--> GET /ui/health [32m200[0m 74ms

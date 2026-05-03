@@ -1,0 +1,102 @@
+plist=/Users/umasankr/Library/LaunchAgents/com.ping-mem.daemon.plist
+label=com.ping-mem.daemon
+program_arguments:
+Array {
+    /Users/umasankr/.bun/bin/bun
+    run
+    /Users/umasankr/Projects/ping-mem/dist/cli/index.js
+    daemon
+    start
+    --foreground
+}
+environment:
+Dict {
+    PING_MEM_REST_URL = http://localhost:3003
+}
+stdout:
+/Users/umasankr/Library/Logs/ping-mem-daemon.log
+stderr:
+/Users/umasankr/Library/Logs/ping-mem-daemon.log
+launchctl_print:
+gui/501/com.ping-mem.daemon = {
+	active count = 1
+	path = /Users/umasankr/Library/LaunchAgents/com.ping-mem.daemon.plist
+	type = LaunchAgent
+	state = running
+
+	program = /Users/umasankr/.bun/bin/bun
+	arguments = {
+		/Users/umasankr/.bun/bin/bun
+		run
+		/Users/umasankr/Projects/ping-mem/dist/cli/index.js
+		daemon
+		start
+		--foreground
+	}
+
+	stdout path = /Users/umasankr/Library/Logs/ping-mem-daemon.log
+	stderr path = /Users/umasankr/Library/Logs/ping-mem-daemon.log
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.aqJNTIlfRF/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		PING_MEM_REST_URL => http://localhost:3003
+		XPC_SERVICE_NAME => com.ping-mem.daemon
+	}
+
+	domain = gui/501 [100025]
+	asid = 100025
+	minimum runtime = 30
+	exit timeout = 30
+	nice = 10
+	runs = 7
+	pid = 25465
+	immediate reason = inefficient
+	forks = 0
+	execs = 1
+	initialized = 1
+	trampolined = 1
+	started suspended = 0
+	proxy started suspended = 0
+	checked allocations = 0 (queried = 1)
+	checked allocations reason = no host
+	checked allocations flags = 0x0
+	last exit code = 0
+
+	resource coalition = {
+		ID = 20949
+		type = resource
+		state = active
+		active count = 1
+		name = com.ping-mem.daemon
+	}
+
+	jetsam coalition = {
+		ID = 20950
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.ping-mem.daemon
+	}
+
+	spawn type = interactive (4)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+	resource limits = {
+		maxfiles (soft) => 4096
+		maxfiles (hard) => 8192
+	}
+
+
+	properties = keepalive | runatload | inferred program
+}

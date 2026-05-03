@@ -800,25 +800,24 @@ flowchart TD
   <div class="two-col">
     <div>
       <div class="ve-card ve-card--teal fade-up" style="margin-bottom:1rem">
-        <div class="card-title">MCP Server (stdio, :3003)</div>
-        <div class="card-desc" style="margin-bottom:0.75rem">Claude Code integration. All tools available as <code>ping_mem_*</code> in Claude Code. Add to <code>~/.claude/mcp.json</code>.</div>
-        <pre style="padding:0.75rem;margin-bottom:0.75rem"><span class="hl">bun run</span> /Users/umasankr/Projects/ping-mem/<span class="hl">dist/mcp/cli.js</span></pre>
-        <div class="card-title" style="margin-bottom:0.35rem;margin-top:0.75rem">Session Start (REQUIRED)</div>
-        <pre><span class="kw">context_session_start</span>({
-  name: <span class="hl">"agent-session"</span>,
-  projectDir: <span class="hl">"/Users/umasankr/Projects/ping-mem"</span>,
-  autoIngest: <span class="hl">true</span>
-})</pre>
+        <div class="card-title">Approved Agent Proof (:3003)</div>
+        <div class="card-desc" style="margin-bottom:0.75rem">Claude Code and Codex re-adoption are gated by the local trust rebuild. Use the REST-only CLI proof path until S015 approves config changes.</div>
+        <pre style="padding:0.75rem;margin-bottom:0.75rem"><span class="hl">bun run</span> src/cli/index.ts agent status --json</pre>
+        <div class="card-title" style="margin-bottom:0.35rem;margin-top:0.75rem">Memory Proof</div>
+        <pre><span class="kw">bun run</span> src/cli/index.ts agent proof memory-lifecycle \
+  --agent claude-code-local \
+  --project /Users/umasankr/Projects/ping-mem \
+  --json</pre>
       </div>
 
       <div class="ve-card fade-up">
         <div class="card-title">REST Client (any language)</div>
         <div class="card-desc">Consumer projects call the REST API directly. Node.js, Python, curl, etc. Port 3003.</div>
         <ul class="card-list">
-          <li>Register project: <code>echo "path" >> ~/.ping-mem/registered-projects.txt</code></li>
-          <li>Auto-ingest on git commit (global hook)</li>
-          <li>launchd periodic job every 10 minutes</li>
-          <li>Manual: <code>bun run scripts/force-ingest.ts &lt;dir&gt;</code></li>
+          <li>List registered projects: <code>GET /api/v1/codebase/projects?scope=registered</code></li>
+          <li>Use CLI proof bundles before claiming agent readiness</li>
+          <li>Keep LaunchAgent and hook re-adoption gated until S015</li>
+          <li>Manual direct scripts are offline-only and cannot prove trust</li>
         </ul>
       </div>
     </div>
@@ -1086,7 +1085,7 @@ sequenceDiagram
       </ul>
       <div class="spacer"></div>
       <div class="callout callout-warn" style="margin-bottom:0;padding:0.5rem 0.75rem">
-        <p>Empty results = project not ingested. Run <code>force-ingest.ts</code></p>
+        <p>Empty results must be reported as blocked or unproven until runtime registry and ingest proof pass.</p>
       </div>
     </div>
   </div>
@@ -1222,7 +1221,7 @@ sequenceDiagram
             <tr>
               <td>Empty search results</td>
               <td>Project not ingested into Qdrant</td>
-              <td><code>bun run scripts/force-ingest.ts &lt;dir&gt;</code></td>
+              <td>Run the approved codebase proof after runtime registry evidence is available</td>
             </tr>
             <tr>
               <td>Wrong projectId</td>
@@ -1327,7 +1326,7 @@ sequenceDiagram
     <div class="grid-4">
       <div style="display:flex;flex-direction:column;gap:0.4rem">
         <div class="section-label"><span class="dot" style="background:var(--teal)"></span>Register</div>
-        <code style="font-size:11px;display:block;line-height:1.5">echo "/path/to/project" &gt;&gt;<br>~/.ping-mem/registered-projects.txt</code>
+        <code style="font-size:11px;display:block;line-height:1.5">GET /api/v1/codebase/projects?scope=registered</code>
       </div>
       <div style="display:flex;flex-direction:column;gap:0.4rem">
         <div class="section-label"><span class="dot" style="background:var(--amber)"></span>Health Check</div>
@@ -1339,7 +1338,7 @@ sequenceDiagram
       </div>
       <div style="display:flex;flex-direction:column;gap:0.4rem">
         <div class="section-label"><span class="dot" style="background:var(--rose)"></span>If 503</div>
-        <code style="font-size:11px;display:block;line-height:1.5">bun run scripts/force-ingest.ts /path/to/project</code>
+        <code style="font-size:11px;display:block;line-height:1.5">agent codebase projects --scope registered --json</code>
       </div>
     </div>
   </div>

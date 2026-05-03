@@ -1,0 +1,22 @@
+{
+  "ok": true,
+  "status": "available",
+  "command": "agent status",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 3000
+  },
+  "elapsedMs": 12,
+  "checkedAt": "2026-04-30T16:36:06.032Z",
+  "data": {
+    "status": "degraded",
+    "timestamp": "2026-04-30T16:36:06.030Z",
+    "components": {
+      "sqlite": "healthy",
+      "neo4j": "healthy",
+      "qdrant": "unhealthy",
+      "diagnostics": "healthy"
+    },
+    "embeddingProvider": "ollama"
+  }
+}

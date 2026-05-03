@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "status": "blocked",
+  "command": "agent status",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 5000
+  },
+  "elapsedMs": 9,
+  "checkedAt": "2026-04-30T14:56:00.950Z",
+  "error": {
+    "code": "RUNTIME_UNAVAILABLE",
+    "message": "Unable to connect. Is the computer able to access the url?",
+    "layer": "runtime"
+  }
+}

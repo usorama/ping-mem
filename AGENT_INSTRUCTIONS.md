@@ -8,59 +8,46 @@
 > all 30+ MCP tools, Docker integration, performance tuning, and troubleshooting,
 > see the canonical guide above.
 
-This document defines the mandatory workflow for AI agents using ping-mem.
-All agents (Claude Code, Cursor, OpenCode, etc.) MUST follow these instructions.
+This document is quarantined during the 2026-04-29 local trust rebuild.
+It is not an approved agent onboarding path and must not be used to configure
+Claude Code, Codex, Cursor, OpenCode, or other agents until S015 explicitly
+re-adopts an integration.
 
 ---
 
 ## Core Principle
 
-**ping-mem replaces traditional search tools** (grep, ripgrep, find) with semantic,
-deterministic, time-aware codebase understanding. Use ping-mem tools for ALL
-codebase operations.
+Use direct repo evidence first: files, `rg`, tests, runtime output, and the
+approved REST-only CLI proof commands. ping-mem MCP tools and codebase
+grounding remain untrusted until their local proof slices pass.
 
 ---
 
 ## Mandatory Workflow
 
-### Phase 1: Session Initialization
+### Phase 1: Approved Status Proof
 
 On every new session or conversation:
 
-```
-1. context_session_start({
-     name: "descriptive-session-name",
-     projectDir: "/path/to/project"
-   })
-
-2. codebase_verify({ projectDir: "/path/to/project" })
-   - If valid=false or first time: proceed to step 3
-   - If valid=true: skip to Phase 2
-
-3. codebase_ingest({ projectDir: "/path/to/project" })
-   - Indexes all code, comments, docstrings
-   - Extracts git history
-   - Creates deterministic manifest
+```bash
+bun run src/cli/index.ts agent status --json
+bun run src/cli/index.ts agent proof memory-lifecycle --agent codex-local --project /path/to/project --json
 ```
 
 ### Phase 2: Code Understanding
 
-For ANY question about code, structure, or implementation:
+For ANY question about code, structure, or implementation before S007/S008 pass:
 
 ```
 # DO THIS:
-codebase_search({
-  query: "natural language description of what you're looking for",
-  projectId: "...",  // optional filter
-  type: "code",      // or "comment", "docstring"
-  limit: 10
-})
+rg "exact pattern" .
+sed -n '1,160p' path/to/file
+bun test <targeted-tests>
 
 # DO NOT:
-- grep for patterns
-- ripgrep for text
-- cat/head/tail to read files
-- manual file exploration
+- use codebase_ingest/codebase_verify/codebase_search as grounding proof
+- rely on MCP output for acceptance
+- edit user-level agent configs before S015
 ```
 
 ### Phase 3: History Understanding
@@ -193,23 +180,12 @@ PING_MEM_DB_PATH=/path/to/ping-mem.db
 
 ### MCP Configuration (Claude Code)
 
-Add to `~/.claude/mcp.json`:
+Do not add ping-mem to `~/.claude/mcp.json` from this document. MCP
+configuration is blocked until S015/S016.
 
 ```json
 {
-  "mcpServers": {
-    "ping-mem": {
-      "command": "bun",
-      "args": ["run", "/path/to/ping-mem/dist/mcp/cli.js"],
-      "env": {
-        "NEO4J_URI": "bolt://localhost:7687",
-        "NEO4J_USERNAME": "neo4j",
-        "NEO4J_PASSWORD": "neo4j_password",
-        "QDRANT_URL": "http://localhost:6333",
-        "QDRANT_COLLECTION_NAME": "ping-mem-vectors"
-      }
-    }
-  }
+  "status": "blocked until S015 re-adoption proof"
 }
 ```
 

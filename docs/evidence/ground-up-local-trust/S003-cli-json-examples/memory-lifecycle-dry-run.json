@@ -1,0 +1,38 @@
+{
+  "ok": true,
+  "status": "dry-run",
+  "command": "agent proof memory-lifecycle",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 5000
+  },
+  "elapsedMs": 0,
+  "checkedAt": "2026-04-30T14:56:01.012Z",
+  "evidenceDir": "docs/evidence/ground-up-local-trust/S003-cli-json-examples",
+  "data": {
+    "readOnly": true,
+    "mutatesRuntime": false,
+    "agentId": "codex-local",
+    "projectDir": "/Users/umasankr/Projects/ping-mem",
+    "requiredIdentity": [
+      "agentId",
+      "projectDir",
+      "sessionId"
+    ],
+    "plannedOperations": [
+      "start-session",
+      "save",
+      "search",
+      "retrieve",
+      "update-or-supersede",
+      "delete",
+      "confirm-absent",
+      "end-session"
+    ],
+    "nextOwners": [
+      "S004 identity and project path safety",
+      "S005 Codex memory path",
+      "S006 Claude Code memory path"
+    ]
+  }
+}

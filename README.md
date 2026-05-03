@@ -231,7 +231,17 @@ service is already running. It avoids opening SQLite directly from the MCP
 subprocess and keeps Claude Code on the same live server state as REST, UI,
 and admin flows.
 
-Add to `~/.claude/mcp.json`:
+Do not add ping-mem back to Claude Code config until the local trust rebuild
+re-adoption gate passes. The current approved proof path is the REST-only CLI:
+
+```bash
+bun run src/cli/index.ts agent status --json
+bun run src/cli/index.ts agent proof memory-lifecycle --agent claude-code-local --project /path/to/project --json
+```
+
+When S015 explicitly approves re-adoption, use the proxy shape below with
+machine-local credentials from the approved secret store, not checked-in sample
+defaults:
 
 ```json
 {
@@ -241,8 +251,8 @@ Add to `~/.claude/mcp.json`:
       "args": ["run", "/path/to/ping-mem/dist/mcp/proxy-cli.js"],
       "env": {
         "PING_MEM_REST_URL": "http://localhost:3003",
-        "PING_MEM_ADMIN_USER": "admin",
-        "PING_MEM_ADMIN_PASS": "ping-mem-dev-local"
+        "PING_MEM_ADMIN_USER": "<approved-local-user>",
+        "PING_MEM_ADMIN_PASS": "<approved-local-password>"
       }
     }
   }

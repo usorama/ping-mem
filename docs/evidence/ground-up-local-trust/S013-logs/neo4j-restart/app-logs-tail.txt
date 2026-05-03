@@ -1,0 +1,120 @@
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- POST /api/v1/codebase/verify
+{"level":"info","module":"ProjectScanner","msg":"Using git ls-files: 599 tracked, 43 filtered by ignore rules, 556 to ingest","ts":"2026-04-30T16:30:22.685Z"}
+{"level":"info","module":"ProjectScanner","msg":"Skipped 2 files","ts":"2026-04-30T16:30:22.783Z","data":{"reasons":{".env file":2}}}
+--> POST /api/v1/codebase/verify [32m200[0m 124ms
+<-- POST /api/v1/codebase/ingest
+{"level":"info","module":"IngestionQueue","msg":"Starting ingestion run 0c92fbf1-3aac-4c3e-b41a-107fa1618916","ts":"2026-04-30T16:30:22.790Z","data":{"projectDir":"/projects/ping-mem"}}
+{"level":"info","module":"IngestionService","msg":"maxCommitAgeDays not specified — ingesting full history (no age filter)","ts":"2026-04-30T16:30:22.790Z"}
+{"level":"info","module":"ProjectScanner","msg":"Using git ls-files: 599 tracked, 43 filtered by ignore rules, 556 to ingest","ts":"2026-04-30T16:30:22.793Z"}
+{"level":"info","module":"ProjectScanner","msg":"Skipped 2 files","ts":"2026-04-30T16:30:22.813Z","data":{"reasons":{".env file":2}}}
+{"level":"info","module":"ProjectScanner","msg":"Using git ls-files: 599 tracked, 43 filtered by ignore rules, 556 to ingest","ts":"2026-04-30T16:30:22.819Z"}
+{"level":"info","module":"ProjectScanner","msg":"Skipped 2 files","ts":"2026-04-30T16:30:22.836Z","data":{"reasons":{".env file":2}}}
+{"level":"info","module":"REST Server","msg":"Ingestion queue reconciled admin store after no-change verify","ts":"2026-04-30T16:30:22.844Z","data":{"projectId":"15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa","projectDir":"/projects/ping-mem","treeHash":"5b5a9d9fa990922d8076e134c8d90561d844271b9a1a720bb78ce6c16d62358f"}}
+{"level":"info","module":"IngestionQueue","msg":"Ingestion run 0c92fbf1-3aac-4c3e-b41a-107fa1618916 completed","ts":"2026-04-30T16:30:22.844Z","data":{"projectId":null,"filesIndexed":0}}
+{"level":"info","module":"ProjectScanner","msg":"Using git ls-files: 599 tracked, 43 filtered by ignore rules, 556 to ingest","ts":"2026-04-30T16:30:22.848Z"}
+{"level":"info","module":"ProjectScanner","msg":"Skipped 2 files","ts":"2026-04-30T16:30:22.864Z","data":{"reasons":{".env file":2}}}
+--> POST /api/v1/codebase/ingest [32m200[0m 79ms
+<-- GET /api/v1/codebase/projects?scope=registered&limit=1000
+{"level":"debug","module":"TemporalCodeGraph","msg":"Query completed: listProjects","ts":"2026-04-30T16:30:22.873Z","data":{"durationMs":3}}
+--> GET /api/v1/codebase/projects?scope=registered&limit=1000 [32m200[0m 4ms
+<-- GET /api/v1/codebase/search?query=registered%20project&projectId=15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa&limit=5
+--> GET /api/v1/codebase/search?query=registered%20project&projectId=15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa&limit=5 [32m200[0m 664ms
+<-- GET /api/v1/codebase/timeline?projectId=15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa&limit=5
+--> GET /api/v1/codebase/timeline?projectId=15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa&limit=5 [32m200[0m 11ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /api/v1/search?query=email&limit=5&channel=auto-os%3Aemail
+--> GET /api/v1/search?query=email&limit=5&channel=auto-os%3Aemail [33m400[0m 4ms
+<-- GET /api/v1/search?query=finance&limit=5&channel=auto-os%3Afinance
+--> GET /api/v1/search?query=finance&limit=5&channel=auto-os%3Afinance [33m400[0m 5ms
+<-- GET /api/v1/search?query=paro&limit=5&channel=auto-os%3Aparo
+--> GET /api/v1/search?query=paro&limit=5&channel=auto-os%3Aparo [33m400[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+{"level":"info","module":"HTTP Server","msg":"Shutting down...","ts":"2026-04-30T16:34:03.460Z"}
+{"level":"info","module":"HTTP Server","msg":"Shutdown signal received","ts":"2026-04-30T16:34:03.460Z","data":{"signal":"SIGTERM"}}
+{"level":"info","module":"SSE Server","msg":"Stopped","ts":"2026-04-30T16:34:03.464Z"}
+{"level":"info","module":"REST Server","msg":"Stopped","ts":"2026-04-30T16:34:03.464Z"}
+{"level":"info","module":"HTTP Server","msg":"Shutdown complete","ts":"2026-04-30T16:34:03.475Z"}
+{"level":"warn","module":"LLMEntityExtractor","msg":"Prompt file not found, using fallback","ts":"2026-04-30T16:34:04.240Z","data":{"filename":"entity-extractor.md"}}
+{"level":"warn","module":"CausalDiscoveryAgent","msg":"Prompt file not found, using fallback","ts":"2026-04-30T16:34:04.240Z","data":{"filename":"causal-discovery.md"}}
+{"level":"warn","module":"DreamingEngine","msg":"Prompt file not found, using fallback","ts":"2026-04-30T16:34:04.241Z","data":{"filename":"deduction.md"}}
+{"level":"warn","module":"DreamingEngine","msg":"Prompt file not found, using fallback","ts":"2026-04-30T16:34:04.241Z","data":{"filename":"generalization.md"}}
+{"level":"info","module":"Runtime","msg":"Neo4j connected","ts":"2026-04-30T16:34:04.273Z","data":{"attempt":1}}
+{"level":"info","module":"Runtime","msg":"Qdrant connected","ts":"2026-04-30T16:34:04.283Z","data":{"attempt":1}}
+{"level":"info","module":"Runtime","msg":"HybridSearchEngine created with ollama embeddings","ts":"2026-04-30T16:34:04.283Z"}
+{"level":"info","module":"Runtime","msg":"LLMEntityExtractor created (Ollama llama3.2)","ts":"2026-04-30T16:34:04.284Z","data":{"ollamaUrl":"http://host.docker.internal:11434"}}
+{"level":"info","module":"Runtime","msg":"ContradictionDetector created (Ollama llama3.2)","ts":"2026-04-30T16:34:04.284Z","data":{"ollamaUrl":"http://host.docker.internal:11434"}}
+{"level":"info","module":"Runtime","msg":"CausalDiscoveryAgent created (Ollama llama3.2)","ts":"2026-04-30T16:34:04.284Z","data":{"ollamaUrl":"http://host.docker.internal:11434"}}
+{"level":"info","module":"TemporalCodeGraph","msg":"Neo4j constraints ensured","ts":"2026-04-30T16:34:04.301Z"}
+{"level":"info","module":"EventStore","msg":"WAL file oversized, running TRUNCATE checkpoint","ts":"2026-04-30T16:34:04.308Z","data":{"walSize":2080632}}
+{"level":"info","module":"EventStore","msg":"WAL recovery complete","ts":"2026-04-30T16:34:04.315Z","data":{"newWalSize":0}}
+{"level":"info","module":"HTTP Server","msg":"Starting with transport: streamable-http","ts":"2026-04-30T16:34:04.316Z"}
+{"level":"info","module":"HTTP Server","msg":"Listening on 0.0.0.0:3003","ts":"2026-04-30T16:34:04.316Z"}
+{"level":"warn","module":"REST Server","msg":"No API key configured. All routes are unauthenticated.","ts":"2026-04-30T16:34:04.317Z"}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.348Z","data":{"sessionId":"unknown","eventCount":1764}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.354Z","data":{"sessionId":"019d84fb-bb51-7e60-a97e-4e35948e7de9","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.358Z","data":{"sessionId":"019d86ac-0d12-7d13-9baf-2c2959f7de91","eventCount":12}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.386Z","data":{"sessionId":"019dc385-52e3-7b0e-b654-f525e09bd7b6","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.386Z","data":{"sessionId":"019dc385-546c-72b1-83aa-67d26e3061b1","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.386Z","data":{"sessionId":"019dc385-6783-7199-a55e-acce7798b00c","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.388Z","data":{"sessionId":"019dc3e6-67ea-7e55-93c3-e2e1dc9e70f6","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.388Z","data":{"sessionId":"019dc3e6-8bd7-74ff-ac7b-80c1f485719f","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.390Z","data":{"sessionId":"019dc42b-ceb0-7a03-bc66-19276a1cfbfa","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.390Z","data":{"sessionId":"019dc42c-b92c-784b-a28d-c1ee090cf3ab","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.390Z","data":{"sessionId":"019dc42c-e084-7ba5-a2c3-91e5eb2a79e4","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.390Z","data":{"sessionId":"019dc42c-ff5d-7996-b1bf-76f255ae099f","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.458Z","data":{"sessionId":"019dd15c-7c06-7e75-bc67-8e06ba9948bd","eventCount":6}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.458Z","data":{"sessionId":"019dd15c-6ed8-725f-bc07-ff77a28ea973","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.471Z","data":{"sessionId":"019dd279-7dbd-7f07-9974-b93277f229fa","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd279-f2ea-73ad-95f6-257162a70767","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27a-6824-7da2-9022-55251273ea6d","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27a-dd57-777d-9f8e-d27e93c2d4ba","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27b-5286-7870-80bf-4c57110b7259","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27b-c7bf-726e-85de-ffc29f3588a3","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27c-3cee-7498-b210-32d9df578c51","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27c-b21d-7075-b9c1-2b5365a33a01","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.472Z","data":{"sessionId":"019dd27d-2752-77ff-84e4-be10bf746a88","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.475Z","data":{"sessionId":"019dd2bd-b419-7fc3-b07b-e778643de7de","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.475Z","data":{"sessionId":"019dd2be-2951-7865-a8a4-b8e73cef0e08","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.479Z","data":{"sessionId":"019dd342-02ea-7b24-b16b-0beaf382f10c","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.479Z","data":{"sessionId":"019dd342-6500-7c82-9d5a-f0ba2ba8dba2","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.479Z","data":{"sessionId":"019dd342-7825-747a-be6f-97d565ef7e23","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.479Z","data":{"sessionId":"019dd346-2b7d-7214-9d83-b5d9734ad637","eventCount":1}}
+{"level":"warn","module":"SessionManager","msg":"Session has events but no SESSION_STARTED event — skipping hydration","ts":"2026-04-30T16:34:04.479Z","data":{"sessionId":"019dd346-3e79-7e75-82a0-b35c7345dd60","eventCount":1}}
+{"level":"info","module":"SessionManager","msg":"Session hydration complete","ts":"2026-04-30T16:34:04.483Z","data":{"restored":0,"skippedEnded":5360,"skippedInvalid":30,"totalScanned":5390}}
+{"level":"info","module":"REST Server","msg":"Started (ready to handle requests)","ts":"2026-04-30T16:34:04.483Z"}
+{"level":"info","module":"SSE Server","msg":"Ready (waiting for HTTP requests, multi-session enabled)","ts":"2026-04-30T16:34:04.483Z"}
+{"level":"info","module":"HealthMonitor","msg":"Started","ts":"2026-04-30T16:34:04.526Z"}
+{"level":"info","module":"HTTP Server","msg":"Server listening on http://0.0.0.0:3003","ts":"2026-04-30T16:34:04.530Z"}
+{"level":"info","module":"HTTP Server","msg":"Transport: streamable-http","ts":"2026-04-30T16:34:04.530Z"}
+{"level":"info","module":"HTTP Server","msg":"Press Ctrl+C to stop","ts":"2026-04-30T16:34:04.530Z"}
+<-- GET /health
+--> GET /health [32m200[0m 2ms
+<-- GET /health
+--> GET /health [32m200[0m 1ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms
+<-- GET /health
+--> GET /health [32m200[0m 0ms

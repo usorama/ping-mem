@@ -80,3 +80,17 @@ export {
   EvolutionQueryOptions,
   createEvolutionEngine,
 } from "./EvolutionEngine.js";
+
+export {
+  StructuredKnowledgeGraph,
+  StructuredKnowledgeGraphError,
+  createStructuredKnowledgeGraph,
+  type GraphAnswerKind,
+  type GraphAnswerPopulation,
+  type GraphAnswerRequest,
+  type StructuredGraphAnswer,
+  type StructuredGraphNode,
+  type StructuredGraphEdge,
+  type GraphSourceAnchor,
+  type DenominatorEvidence,
+} from "./StructuredKnowledgeGraph.js";

@@ -16,27 +16,13 @@ echo "=== Agent Path Integration Audit ==="
 echo "Target: $BASE"
 echo ""
 
-# --- PATH 1: MCP stdio tool discovery ---
-echo "--- MCP STDIO ---"
-TOOL_COUNT=$(echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"audit","version":"1.0"}}}
-{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' | perl -e 'alarm 15; exec @ARGV' bun run dist/mcp/cli.js 2>/dev/null | python3 -c "
-import json,sys
-for line in sys.stdin:
-    try:
-        msg = json.loads(line.strip())
-        if msg.get('id') == 2:
-            print(len(msg['result']['tools']))
-            break
-    except: pass
-" 2>/dev/null)
-[ "${TOOL_COUNT:-0}" -ge 50 ] && pass "MCP stdio: $TOOL_COUNT tools" || fail "MCP stdio: ${TOOL_COUNT:-0} tools (expect ≥50)"
+# --- PATH 1: REST tool discovery ---
+echo "--- REST TOOL DISCOVERY ---"
+TOOL_COUNT=$(curl -sf "$BASE/api/v1/tools" | jq -r '.data.tools | length' 2>/dev/null || echo 0)
+[ "${TOOL_COUNT:-0}" -ge 50 ] && pass "REST tools: $TOOL_COUNT tools" || fail "REST tools: ${TOOL_COUNT:-0} tools (expect ≥50)"
 
-# --- PATH 2: dist freshness ---
-echo ""
-echo "--- DIST FRESHNESS ---"
-DIST_TIME=$(stat -f %m dist/mcp/cli.js 2>/dev/null || echo 0)
-LAST_COMMIT=$(git log -1 --format=%ct 2>/dev/null || echo 0)
-[ "$DIST_TIME" -ge "$LAST_COMMIT" ] && pass "dist/ newer than last commit" || fail "dist/ is STALE — run 'bun run build'"
+# Direct MCP remains available only for isolated offline/dev work. It is not an
+# approved live-agent audit path because it can open local state outside REST.
 
 # --- PATH 3: Write-then-search round-trip ---
 echo ""

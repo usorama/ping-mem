@@ -1,0 +1,120 @@
+2026-04-25 18:37:32.128+0000 WARN  Use of deprecated setting 'dbms.memory.heap.initial_size'. It is replaced by 'server.memory.heap.initial_size'.
+2026-04-25 18:37:32.132+0000 INFO  Starting...
+2026-04-25 18:37:32.571+0000 INFO  This instance is ServerId{4447d810} (4447d810-2101-4ea5-ab64-d2807662c2c4)
+2026-04-25 18:37:33.223+0000 INFO  ======== Neo4j 5.25.1 ========
+2026-04-25 18:37:34.285+0000 INFO  Anonymous Usage Data is being sent to Neo4j, see https://neo4j.com/docs/usage-data/
+2026-04-25 18:37:34.310+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2026-04-25 18:37:34.648+0000 INFO  HTTP enabled on 0.0.0.0:7474.
+2026-04-25 18:37:34.648+0000 INFO  Remote interface available at http://localhost:7474/
+2026-04-25 18:37:34.649+0000 INFO  id: 73F18B347F0762586EBFE49CA9C1E27A7EAC862C38E75B075905A25DD7BC7BC4
+2026-04-25 18:37:34.649+0000 INFO  name: system
+2026-04-25 18:37:34.650+0000 INFO  creationDate: 2026-03-14T18:07:16.062Z
+2026-04-25 18:37:34.650+0000 INFO  Started.
+2026-04-25 18:38:53.688+0000 INFO  Neo4j Server shutdown initiated by request
+2026-04-25 18:38:53.689+0000 INFO  Stopping...
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+2026-04-25 18:39:06.009+0000 INFO  Logging config in use: File '/var/lib/neo4j/conf/user-logs.xml'
+2026-04-25 18:39:06.012+0000 WARN  Use of deprecated setting 'dbms.memory.pagecache.size'. It is replaced by 'server.memory.pagecache.size'.
+2026-04-25 18:39:06.012+0000 WARN  Use of deprecated setting 'dbms.memory.heap.max_size'. It is replaced by 'server.memory.heap.max_size'.
+2026-04-25 18:39:06.012+0000 WARN  Use of deprecated setting 'dbms.memory.heap.initial_size'. It is replaced by 'server.memory.heap.initial_size'.
+2026-04-25 18:39:06.016+0000 INFO  Starting...
+2026-04-25 18:39:06.447+0000 INFO  This instance is ServerId{4447d810} (4447d810-2101-4ea5-ab64-d2807662c2c4)
+2026-04-25 18:39:06.960+0000 INFO  ======== Neo4j 5.25.1 ========
+2026-04-25 18:39:07.964+0000 INFO  Anonymous Usage Data is being sent to Neo4j, see https://neo4j.com/docs/usage-data/
+2026-04-25 18:39:07.990+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2026-04-25 18:39:08.334+0000 INFO  HTTP enabled on 0.0.0.0:7474.
+2026-04-25 18:39:08.334+0000 INFO  Remote interface available at http://localhost:7474/
+2026-04-25 18:39:08.336+0000 INFO  id: 73F18B347F0762586EBFE49CA9C1E27A7EAC862C38E75B075905A25DD7BC7BC4
+2026-04-25 18:39:08.336+0000 INFO  name: system
+2026-04-25 18:39:08.336+0000 INFO  creationDate: 2026-03-14T18:07:16.062Z
+2026-04-25 18:39:08.336+0000 INFO  Started.
+2026-04-25 19:59:14.335+0000 ERROR Increase in network aborts detected (more than 2 network related connection aborts over a period of 600000 ms) - This may indicate an issue with the network environment or an overload condition
+2026-04-25 20:36:44.093+0000 INFO  Network abort rate has normalized
+2026-04-26 01:50:37.878+0000 INFO  Neo4j Server shutdown initiated by request
+2026-04-26 01:50:37.880+0000 INFO  Stopping...
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+2026-04-26 03:59:05.072+0000 INFO  Logging config in use: File '/var/lib/neo4j/conf/user-logs.xml'
+2026-04-26 03:59:05.086+0000 WARN  Use of deprecated setting 'dbms.memory.pagecache.size'. It is replaced by 'server.memory.pagecache.size'.
+2026-04-26 03:59:05.086+0000 WARN  Use of deprecated setting 'dbms.memory.heap.max_size'. It is replaced by 'server.memory.heap.max_size'.
+2026-04-26 03:59:05.086+0000 WARN  Use of deprecated setting 'dbms.memory.heap.initial_size'. It is replaced by 'server.memory.heap.initial_size'.
+2026-04-26 03:59:05.106+0000 INFO  Starting...
+2026-04-26 03:59:06.508+0000 INFO  This instance is ServerId{4447d810} (4447d810-2101-4ea5-ab64-d2807662c2c4)
+2026-04-26 03:59:08.263+0000 INFO  ======== Neo4j 5.25.1 ========
+2026-04-26 03:59:10.034+0000 INFO  Anonymous Usage Data is being sent to Neo4j, see https://neo4j.com/docs/usage-data/
+2026-04-26 03:59:10.110+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2026-04-26 03:59:11.070+0000 INFO  HTTP enabled on 0.0.0.0:7474.
+2026-04-26 03:59:11.071+0000 INFO  Remote interface available at http://localhost:7474/
+2026-04-26 03:59:11.073+0000 INFO  id: 73F18B347F0762586EBFE49CA9C1E27A7EAC862C38E75B075905A25DD7BC7BC4
+2026-04-26 03:59:11.073+0000 INFO  name: system
+2026-04-26 03:59:11.073+0000 INFO  creationDate: 2026-03-14T18:07:16.062Z
+2026-04-26 03:59:11.073+0000 INFO  Started.
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+2026-04-26 06:35:34.632+0000 INFO  Logging config in use: File '/var/lib/neo4j/conf/user-logs.xml'
+2026-04-26 06:35:34.714+0000 WARN  Use of deprecated setting 'dbms.memory.pagecache.size'. It is replaced by 'server.memory.pagecache.size'.
+2026-04-26 06:35:34.716+0000 WARN  Use of deprecated setting 'dbms.memory.heap.max_size'. It is replaced by 'server.memory.heap.max_size'.
+2026-04-26 06:35:34.716+0000 WARN  Use of deprecated setting 'dbms.memory.heap.initial_size'. It is replaced by 'server.memory.heap.initial_size'.
+2026-04-26 06:35:34.766+0000 INFO  Starting...
+2026-04-26 06:35:36.084+0000 INFO  This instance is ServerId{4447d810} (4447d810-2101-4ea5-ab64-d2807662c2c4)
+2026-04-26 06:35:38.890+0000 INFO  ======== Neo4j 5.25.1 ========
+2026-04-26 06:35:42.291+0000 INFO  Anonymous Usage Data is being sent to Neo4j, see https://neo4j.com/docs/usage-data/
+2026-04-26 06:35:42.383+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2026-04-26 06:35:43.626+0000 INFO  HTTP enabled on 0.0.0.0:7474.
+2026-04-26 06:35:43.629+0000 INFO  Remote interface available at http://localhost:7474/
+2026-04-26 06:35:43.636+0000 INFO  id: 73F18B347F0762586EBFE49CA9C1E27A7EAC862C38E75B075905A25DD7BC7BC4
+2026-04-26 06:35:43.637+0000 INFO  name: system
+2026-04-26 06:35:43.637+0000 INFO  creationDate: 2026-03-14T18:07:16.062Z
+2026-04-26 06:35:43.638+0000 INFO  Started.
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+2026-04-27 05:52:03.429+0000 INFO  Logging config in use: File '/var/lib/neo4j/conf/user-logs.xml'
+2026-04-27 05:52:03.477+0000 WARN  Use of deprecated setting 'dbms.memory.pagecache.size'. It is replaced by 'server.memory.pagecache.size'.
+2026-04-27 05:52:03.477+0000 WARN  Use of deprecated setting 'dbms.memory.heap.max_size'. It is replaced by 'server.memory.heap.max_size'.
+2026-04-27 05:52:03.477+0000 WARN  Use of deprecated setting 'dbms.memory.heap.initial_size'. It is replaced by 'server.memory.heap.initial_size'.
+2026-04-27 05:52:03.483+0000 INFO  Starting...
+2026-04-27 05:52:04.287+0000 INFO  This instance is ServerId{4447d810} (4447d810-2101-4ea5-ab64-d2807662c2c4)
+2026-04-27 05:52:06.056+0000 INFO  ======== Neo4j 5.25.1 ========
+2026-04-27 05:52:09.188+0000 INFO  Anonymous Usage Data is being sent to Neo4j, see https://neo4j.com/docs/usage-data/
+2026-04-27 05:52:09.440+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2026-04-27 05:52:10.655+0000 INFO  HTTP enabled on 0.0.0.0:7474.
+2026-04-27 05:52:10.656+0000 INFO  Remote interface available at http://localhost:7474/
+2026-04-27 05:52:10.657+0000 INFO  id: 73F18B347F0762586EBFE49CA9C1E27A7EAC862C38E75B075905A25DD7BC7BC4
+2026-04-27 05:52:10.657+0000 INFO  name: system
+2026-04-27 05:52:10.657+0000 INFO  creationDate: 2026-03-14T18:07:16.062Z
+2026-04-27 05:52:10.657+0000 INFO  Started.
+2026-04-28 10:25:42.345+0000 INFO  Neo4j Server shutdown initiated by request
+2026-04-28 10:25:42.361+0000 INFO  Stopping...
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+2026-04-28 10:27:47.665+0000 INFO  Logging config in use: File '/var/lib/neo4j/conf/user-logs.xml'
+2026-04-28 10:27:47.671+0000 WARN  Use of deprecated setting 'dbms.memory.pagecache.size'. It is replaced by 'server.memory.pagecache.size'.
+2026-04-28 10:27:47.671+0000 WARN  Use of deprecated setting 'dbms.memory.heap.max_size'. It is replaced by 'server.memory.heap.max_size'.
+2026-04-28 10:27:47.671+0000 WARN  Use of deprecated setting 'dbms.memory.heap.initial_size'. It is replaced by 'server.memory.heap.initial_size'.
+2026-04-28 10:27:47.675+0000 INFO  Starting...
+2026-04-28 10:27:48.110+0000 INFO  This instance is ServerId{4447d810} (4447d810-2101-4ea5-ab64-d2807662c2c4)
+2026-04-28 10:27:48.762+0000 INFO  ======== Neo4j 5.25.1 ========
+2026-04-28 10:27:49.958+0000 INFO  Anonymous Usage Data is being sent to Neo4j, see https://neo4j.com/docs/usage-data/
+2026-04-28 10:27:50.072+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2026-04-28 10:27:50.569+0000 INFO  HTTP enabled on 0.0.0.0:7474.
+2026-04-28 10:27:50.570+0000 INFO  Remote interface available at http://localhost:7474/
+2026-04-28 10:27:50.571+0000 INFO  id: 73F18B347F0762586EBFE49CA9C1E27A7EAC862C38E75B075905A25DD7BC7BC4
+2026-04-28 10:27:50.571+0000 INFO  name: system
+2026-04-28 10:27:50.571+0000 INFO  creationDate: 2026-03-14T18:07:16.062Z
+2026-04-28 10:27:50.571+0000 INFO  Started.
+2026-04-30 08:30:21.263+0000 INFO  Neo4j Server shutdown initiated by request
+2026-04-30 08:30:21.307+0000 INFO  Stopping...
+Changed password for user 'neo4j'. IMPORTANT: this change will only take effect if performed before the database is started for the first time.
+2026-04-30 16:10:16.352+0000 INFO  Logging config in use: File '/var/lib/neo4j/conf/user-logs.xml'
+2026-04-30 16:10:16.361+0000 WARN  Use of deprecated setting 'dbms.memory.pagecache.size'. It is replaced by 'server.memory.pagecache.size'.
+2026-04-30 16:10:16.361+0000 WARN  Use of deprecated setting 'dbms.memory.heap.max_size'. It is replaced by 'server.memory.heap.max_size'.
+2026-04-30 16:10:16.361+0000 WARN  Use of deprecated setting 'dbms.memory.heap.initial_size'. It is replaced by 'server.memory.heap.initial_size'.
+2026-04-30 16:10:16.370+0000 INFO  Starting...
+2026-04-30 16:10:17.360+0000 INFO  This instance is ServerId{4447d810} (4447d810-2101-4ea5-ab64-d2807662c2c4)
+2026-04-30 16:10:18.464+0000 INFO  ======== Neo4j 5.25.1 ========
+2026-04-30 16:10:19.608+0000 INFO  Anonymous Usage Data is being sent to Neo4j, see https://neo4j.com/docs/usage-data/
+2026-04-30 16:10:19.674+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2026-04-30 16:10:20.027+0000 INFO  HTTP enabled on 0.0.0.0:7474.
+2026-04-30 16:10:20.028+0000 INFO  Remote interface available at http://localhost:7474/
+2026-04-30 16:10:20.029+0000 INFO  id: 73F18B347F0762586EBFE49CA9C1E27A7EAC862C38E75B075905A25DD7BC7BC4
+2026-04-30 16:10:20.029+0000 INFO  name: system
+2026-04-30 16:10:20.029+0000 INFO  creationDate: 2026-03-14T18:07:16.062Z
+2026-04-30 16:10:20.029+0000 INFO  Started.
+2026-04-30 16:34:42.830+0000 INFO  Neo4j Server shutdown initiated by request
+2026-04-30 16:34:42.832+0000 INFO  Stopping...

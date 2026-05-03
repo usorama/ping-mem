@@ -1,0 +1,86 @@
+plist=/Users/umasankr/Library/LaunchAgents/com.ping-mem.doctor.plist
+label=com.ping-mem.doctor
+program_arguments:
+Array {
+    /bin/bash
+    -lc
+    cd /Users/umasankr/Projects/ping-mem && bun run dist/cli/index.js doctor --quiet
+}
+environment:
+Dict {
+    PING_MEM_ADMIN_PASS = <redacted>
+    PING_MEM_REST_URL = http://localhost:3003
+    PING_MEM_ADMIN_USER = admin
+    PATH = /Users/umasankr/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+}
+stdout:
+/Users/umasankr/Library/Logs/ping-mem/doctor.log
+stderr:
+/Users/umasankr/Library/Logs/ping-mem/doctor.err
+launchctl_print:
+gui/501/com.ping-mem.doctor = {
+	active count = 0
+	path = /Users/umasankr/Library/LaunchAgents/com.ping-mem.doctor.plist
+	type = LaunchAgent
+	state = not running
+
+	program = /bin/bash
+	arguments = {
+		/bin/bash
+		-lc
+		cd /Users/umasankr/Projects/ping-mem && bun run dist/cli/index.js doctor --quiet
+	}
+
+	stdout path = /Users/umasankr/Library/Logs/ping-mem/doctor.log
+	stderr path = /Users/umasankr/Library/Logs/ping-mem/doctor.err
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.aqJNTIlfRF/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		PING_MEM_ADMIN_USER => admin
+		PATH => /Users/umasankr/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+		PING_MEM_ADMIN_PASS => <redacted>
+		PING_MEM_REST_URL => http://localhost:3003
+		XPC_SERVICE_NAME => com.ping-mem.doctor
+	}
+
+	domain = gui/501 [100025]
+	asid = 100025
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 207
+	last exit code = 2
+
+	resource coalition = {
+		ID = 20951
+		type = resource
+		state = active
+		active count = 1
+		name = com.ping-mem.doctor
+	}
+
+	jetsam coalition = {
+		ID = 20952
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.ping-mem.doctor
+	}
+
+	spawn type = background (5)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+	run interval = 900 seconds
+
+	properties = runatload | inferred program
+}

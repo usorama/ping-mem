@@ -1,0 +1,56 @@
+ 6156 78236 /Applications/Codex.app/Contents/Resources/node_repl
+ 7227     1 /Applications/Codex.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate com.openai.codex /Users/umasankr umasankr
+ 7228     1 /Users/umasankr/Library/Caches/com.openai.codex/org.sparkle-project.Sparkle/Launcher/vT0FlicUW/Updater.app/Contents/MacOS/Updater /Applications/Codex.app 0
+ 9178 78236 /Applications/Codex.app/Contents/Resources/node_repl
+ 9499 78236 /Applications/Codex.app/Contents/Resources/node_repl
+18314 78236 /Applications/Codex.app/Contents/Resources/node_repl
+18666 78236 /Applications/Codex.app/Contents/Resources/node_repl
+19320 78236 /Applications/Codex.app/Contents/Resources/node_repl
+25899 78236 /Applications/Codex.app/Contents/Resources/node_repl
+25901 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+27429 78236 /Applications/Codex.app/Contents/Resources/node_repl
+37671 78236 /Applications/Codex.app/Contents/Resources/node_repl
+38469 78236 /Applications/Codex.app/Contents/Resources/node_repl
+41458     1 /Applications/Codex.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler --no-rate-limit --monitor-self-annotation=ptype=crashpad-handler --database=/Users/umasankr/Library/Application Support/Codex/Crashpad --url=https://f.a.k/e --annotation=_productName=Codex --annotation=_version=26.422.30944 --annotation=plat=OS X --annotation=prod=Electron --annotation=ver=41.2.0 --handshake-fd=18
+47687 47683 /Users/umasankr/.vscode/extensions/openai.chatgpt-26.422.71525-darwin-arm64/bin/macos-aarch64/codex app-server --analytics-default-enabled
+48680 78236 /Applications/Codex.app/Contents/Resources/node_repl
+48681 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+48867 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+49267 78236 /bin/zsh -c ps -axo pid,ppid,command | rg 'Codex\.app|app-server|ping-mem/dist/mcp/proxy-cli|dist/mcp/proxy-cli|dist/mcp/cli' | tee docs/evidence/ground-up-local-trust/S015-codex-readoption/final-process-inventory.txt || true
+49294 49267 rg Codex\.app|app-server|ping-mem/dist/mcp/proxy-cli|dist/mcp/proxy-cli|dist/mcp/cli
+51158 78236 /Applications/Codex.app/Contents/Resources/node_repl
+61662 78236 /Applications/Codex.app/Contents/Resources/node_repl
+62462 78236 /Applications/Codex.app/Contents/Resources/node_repl
+62842 78236 /Applications/Codex.app/Contents/Resources/node_repl
+62844 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+63027 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+63266 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+63267 78236 /Applications/Codex.app/Contents/Resources/node_repl
+63492 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+63804 78236 /Applications/Codex.app/Contents/Resources/node_repl
+63805 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+63978 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+64099 78236 /Applications/Codex.app/Contents/Resources/node_repl
+64856 78236 /Applications/Codex.app/Contents/Resources/node_repl
+71225 78236 /Applications/Codex.app/Contents/Resources/node_repl
+71227 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+71426 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+76048 78236 /Applications/Codex.app/Contents/Resources/node_repl
+76051 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+76357 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+77090 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+78195     1 /Applications/Codex.app/Contents/MacOS/Codex
+78215     1 /Applications/Codex.app/Contents/Frameworks/Electron Framework.framework/Helpers/chrome_crashpad_handler --no-rate-limit --monitor-self-annotation=ptype=crashpad-handler --database=/Users/umasankr/Library/Application Support/Codex/Crashpad --url=https://f.a.k/e --annotation=_productName=Codex --annotation=_version=26.422.71525 --annotation=plat=OS X --annotation=prod=Electron --annotation=ver=41.2.0 --handshake-fd=18
+78216 78195 /Applications/Codex.app/Contents/Frameworks/Codex Helper.app/Contents/MacOS/Codex Helper --type=gpu-process --user-data-dir=/Users/umasankr/Library/Application Support/Codex --gpu-preferences=SAAAAAAAAAAgAQAEAAAAAAAAAAAAAGAAAwAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAAAAAAAAAAAAQAAAAAAAAABAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAA== --shared-files --field-trial-handle=1718379636,r,12390950858665376275,3807730891667590140,262144 --enable-features=DocumentPolicyIncludeJSCallStacksInCrashReports,PdfUseShowSaveFilePicker,ScreenCaptureKitPickerScreen,ScreenCaptureKitStreamPickerSonoma --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TimeoutHangingVideoCaptureStarts,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1935764596,r,14579009964901453205,7676493696581878860,4 --trace-process-track-uuid=3190708988185955192 --seatbelt-client=31
+78218 78195 /Applications/Codex.app/Contents/Frameworks/Codex Helper.app/Contents/MacOS/Codex Helper --type=utility --utility-sub-type=network.mojom.NetworkService --lang=en-GB --service-sandbox-type=network --user-data-dir=/Users/umasankr/Library/Application Support/Codex --standard-schemes=app --secure-schemes=app,sentry-ipc --bypasscsp-schemes=sentry-ipc --cors-schemes=sentry-ipc --fetch-schemes=app,sentry-ipc --streaming-schemes=app --shared-files --field-trial-handle=1718379636,r,12390950858665376275,3807730891667590140,262144 --enable-features=DocumentPolicyIncludeJSCallStacksInCrashReports,PdfUseShowSaveFilePicker,ScreenCaptureKitPickerScreen,ScreenCaptureKitStreamPickerSonoma --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TimeoutHangingVideoCaptureStarts,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1935764596,r,14579009964901453205,7676493696581878860,4 --trace-process-track-uuid=3190708989122997041 --seatbelt-client=33
+78236 78195 /Applications/Codex.app/Contents/Resources/codex app-server --analytics-default-enabled
+78285 78195 /Applications/Codex.app/Contents/Frameworks/Codex Helper (Renderer).app/Contents/MacOS/Codex Helper (Renderer) --type=renderer --user-data-dir=/Users/umasankr/Library/Application Support/Codex --standard-schemes=app --secure-schemes=app,sentry-ipc --bypasscsp-schemes=sentry-ipc --cors-schemes=sentry-ipc --fetch-schemes=app,sentry-ipc --streaming-schemes=app --app-path=/Applications/Codex.app/Contents/Resources/app.asar --enable-sandbox --lang=en-GB --num-raster-threads=4 --enable-zero-copy --enable-gpu-memory-buffer-compositor-resources --enable-main-frame-before-activation --renderer-client-id=4 --time-ticks-at-unix-epoch=-1777263042665918 --launch-time-ticks=194890448098 --shared-files --field-trial-handle=1718379636,r,12390950858665376275,3807730891667590140,262144 --enable-features=DocumentPolicyIncludeJSCallStacksInCrashReports,PdfUseShowSaveFilePicker,ScreenCaptureKitPickerScreen,ScreenCaptureKitStreamPickerSonoma --disable-features=DropInputEventsWhilePaintHolding,LocalNetworkAccessChecks,ScreenAIOCREnabled,SpareRendererForSitePerProcess,TimeoutHangingVideoCaptureStarts,TraceSiteInstanceGetProcessCreation --variations-seed-version --pseudonymization-salt-handle=1935764596,r,14579009964901453205,7676493696581878860,4 --trace-process-track-uuid=3190708990060038890 --seatbelt-client=79
+81679 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+83827 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+84267 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+84272 78236 /Applications/Codex.app/Contents/Resources/node_repl
+86584 78236 /Applications/Codex.app/Contents/Resources/node_repl
+86983 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+92728 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+92949 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js
+96923 78236 bun run /Users/umasankr/Projects/ping-mem/dist/mcp/proxy-cli.js

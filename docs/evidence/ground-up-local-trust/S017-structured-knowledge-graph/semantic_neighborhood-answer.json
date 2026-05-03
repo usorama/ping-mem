@@ -1,0 +1,165 @@
+{
+  "ok": true,
+  "answerKind": "semantic_neighborhood",
+  "query": "structured knowledge graph relationships",
+  "nodes": [
+    {
+      "id": "file:CONTEXT.md",
+      "type": "CODE_FILE",
+      "label": "CONTEXT.md",
+      "sourceAnchors": [
+        {
+          "type": "file",
+          "root": "/Users/umasankr/Projects/ping-mem",
+          "path": "CONTEXT.md",
+          "lineStart": 1,
+          "lineEnd": 5,
+          "excerpt": "# ping-mem Domain Context\n\n## Structured Knowledge Graph\n\nA product module that stores and answers over typed nodes and edges from codebase",
+          "checkedAt": "2026-05-03T04:34:16.540Z",
+          "diskChecked": true
+        }
+      ],
+      "properties": {
+        "populationKind": "project",
+        "corpusId": "project:/Users/umasankr/Projects/ping-mem"
+      }
+    },
+    {
+      "id": "file:docs/architecture/2026-05-02-structured-knowledge-graph-module.md",
+      "type": "CODE_FILE",
+      "label": "docs/architecture/2026-05-02-structured-knowledge-graph-module.md",
+      "sourceAnchors": [
+        {
+          "type": "file",
+          "root": "/Users/umasankr/Projects/ping-mem",
+          "path": "docs/architecture/2026-05-02-structured-knowledge-graph-module.md",
+          "lineStart": 1,
+          "lineEnd": 5,
+          "excerpt": "# Architecture Deepening: Structured Knowledge Graph Module\n\n**Date:** 2026-05-02\n**Status:** candidate architecture issue package\n**Source contract:** `docs/prds/2026-04-29-ground-up-local-trust-rebuild.md`",
+          "checkedAt": "2026-05-03T04:34:16.540Z",
+          "diskChecked": true
+        }
+      ],
+      "properties": {
+        "populationKind": "project",
+        "corpusId": "project:/Users/umasankr/Projects/ping-mem"
+      }
+    },
+    {
+      "id": "file:docs/issues/2026-04-29-ground-up-local-trust-rebuild/S017-structured-knowledge-graph-module.md",
+      "type": "CODE_FILE",
+      "label": "docs/issues/2026-04-29-ground-up-local-trust-rebuild/S017-structured-knowledge-graph-module.md",
+      "sourceAnchors": [
+        {
+          "type": "file",
+          "root": "/Users/umasankr/Projects/ping-mem",
+          "path": "docs/issues/2026-04-29-ground-up-local-trust-rebuild/S017-structured-knowledge-graph-module.md",
+          "lineStart": 1,
+          "lineEnd": 5,
+          "excerpt": "---\nid: S017\ntitle: \"Structured Knowledge Graph module\"\ntype: AFK\nstatus: todo",
+          "checkedAt": "2026-05-03T04:34:16.540Z",
+          "diskChecked": true
+        }
+      ],
+      "properties": {
+        "populationKind": "project",
+        "corpusId": "project:/Users/umasankr/Projects/ping-mem"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge:file:CONTEXT.md->file:docs/architecture/2026-05-02-structured-knowledge-graph-module.md",
+      "type": "RELATED_TO",
+      "sourceId": "file:CONTEXT.md",
+      "targetId": "file:docs/architecture/2026-05-02-structured-knowledge-graph-module.md",
+      "sourceAnchors": [
+        {
+          "type": "file",
+          "root": "/Users/umasankr/Projects/ping-mem",
+          "path": "docs/architecture/2026-05-02-structured-knowledge-graph-module.md",
+          "lineStart": 1,
+          "lineEnd": 5,
+          "excerpt": "# Architecture Deepening: Structured Knowledge Graph Module\n\n**Date:** 2026-05-02\n**Status:** candidate architecture issue package\n**Source contract:** `docs/prds/2026-04-29-ground-up-local-trust-rebuild.md`",
+          "checkedAt": "2026-05-03T04:34:16.540Z",
+          "diskChecked": true
+        }
+      ],
+      "properties": {
+        "relation": "declared_population_order",
+        "proof": "finite population relationship path"
+      }
+    }
+  ],
+  "relationshipPaths": [
+    {
+      "nodeIds": [
+        "file:CONTEXT.md",
+        "file:docs/architecture/2026-05-02-structured-knowledge-graph-module.md"
+      ],
+      "edgeIds": [
+        "edge:file:CONTEXT.md->file:docs/architecture/2026-05-02-structured-knowledge-graph-module.md"
+      ],
+      "sourceAnchors": [
+        {
+          "type": "file",
+          "root": "/Users/umasankr/Projects/ping-mem",
+          "path": "docs/architecture/2026-05-02-structured-knowledge-graph-module.md",
+          "lineStart": 1,
+          "lineEnd": 5,
+          "excerpt": "# Architecture Deepening: Structured Knowledge Graph Module\n\n**Date:** 2026-05-02\n**Status:** candidate architecture issue package\n**Source contract:** `docs/prds/2026-04-29-ground-up-local-trust-rebuild.md`",
+          "checkedAt": "2026-05-03T04:34:16.540Z",
+          "diskChecked": true
+        }
+      ]
+    }
+  ],
+  "sourceAnchors": [
+    {
+      "type": "file",
+      "root": "/Users/umasankr/Projects/ping-mem",
+      "path": "CONTEXT.md",
+      "lineStart": 1,
+      "lineEnd": 5,
+      "excerpt": "# ping-mem Domain Context\n\n## Structured Knowledge Graph\n\nA product module that stores and answers over typed nodes and edges from codebase",
+      "checkedAt": "2026-05-03T04:34:16.540Z",
+      "diskChecked": true
+    },
+    {
+      "type": "file",
+      "root": "/Users/umasankr/Projects/ping-mem",
+      "path": "docs/architecture/2026-05-02-structured-knowledge-graph-module.md",
+      "lineStart": 1,
+      "lineEnd": 5,
+      "excerpt": "# Architecture Deepening: Structured Knowledge Graph Module\n\n**Date:** 2026-05-02\n**Status:** candidate architecture issue package\n**Source contract:** `docs/prds/2026-04-29-ground-up-local-trust-rebuild.md`",
+      "checkedAt": "2026-05-03T04:34:16.540Z",
+      "diskChecked": true
+    },
+    {
+      "type": "file",
+      "root": "/Users/umasankr/Projects/ping-mem",
+      "path": "docs/issues/2026-04-29-ground-up-local-trust-rebuild/S017-structured-knowledge-graph-module.md",
+      "lineStart": 1,
+      "lineEnd": 5,
+      "excerpt": "---\nid: S017\ntitle: \"Structured Knowledge Graph module\"\ntype: AFK\nstatus: todo",
+      "checkedAt": "2026-05-03T04:34:16.540Z",
+      "diskChecked": true
+    }
+  ],
+  "provenance": {
+    "module": "StructuredKnowledgeGraph",
+    "generatedAt": "2026-05-03T04:34:16.540Z",
+    "agentId": "codex-local",
+    "projectDir": "/Users/umasankr/Projects/ping-mem",
+    "sourceAnchorCount": 3
+  },
+  "freshness": {
+    "status": "current",
+    "checkedAt": "2026-05-03T04:34:16.540Z",
+    "actualCorpusHash": "sha256:ac5a0d63349696adb4baccb153b10643df34793cce0ee010418bd369746e8c40"
+  },
+  "blockedClaims": [
+    "This is a semantic neighborhood and is intentionally incomplete.",
+    "Do not use this answer as denominator-backed proof of every matching relationship."
+  ]
+}

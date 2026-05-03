@@ -47,6 +47,10 @@ export interface HealthProbeDeps {
   skipIntegrityCheck?: boolean;
 }
 
+function envConfigured(name: string): boolean {
+  return typeof process.env[name] === "string" && process.env[name]!.trim().length > 0;
+}
+
 export function sanitizeHealthError(error: unknown): string {
   // Extract message: check Error.message first, then structured error objects
   // (e.g., Neo4j/Qdrant may return plain objects with .message or .error),
@@ -213,6 +217,9 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
       status: "not_configured",
       configured: false,
     };
+    if (envConfigured("NEO4J_URI") && status !== "unhealthy") {
+      status = "degraded";
+    }
   }
 
   let qdrant: HealthComponent;
@@ -244,6 +251,9 @@ export async function probeSystemHealth(deps: HealthProbeDeps): Promise<HealthSn
       status: "not_configured",
       configured: false,
     };
+    if (envConfigured("QDRANT_URL") && status !== "unhealthy") {
+      status = "degraded";
+    }
   }
 
   let diagnostics: HealthComponent | undefined;

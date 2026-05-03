@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "status": "blocked",
+  "command": "agent proof codebase-grounding",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 300000
+  },
+  "elapsedMs": 0,
+  "checkedAt": "2026-04-30T16:32:50.077Z",
+  "error": {
+    "code": "DEPENDENCY_DOWN",
+    "message": "Simulated dependency-down response; proof must block, not return empty success",
+    "layer": "runtime"
+  },
+  "data": {
+    "simulated": true,
+    "scenario": "dependency-down",
+    "repairsAttempted": false
+  }
+}

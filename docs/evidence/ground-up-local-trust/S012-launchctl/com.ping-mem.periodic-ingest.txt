@@ -1,0 +1,85 @@
+plist=/Users/umasankr/Library/LaunchAgents/com.ping-mem.periodic-ingest.plist
+label=com.ping-mem.periodic-ingest
+program_arguments:
+Array {
+    /bin/bash
+    /Users/umasankr/Projects/ping-mem/scripts/periodic-ingest.sh
+}
+environment:
+Dict {
+    PATH = /Users/umasankr/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+    HOME = /Users/umasankr
+    PING_MEM_REST_URL = http://localhost:3003
+}
+stdout:
+/Users/umasankr/Library/Logs/ping-mem/periodic-ingest.log
+stderr:
+/Users/umasankr/Library/Logs/ping-mem/periodic-ingest.err
+launchctl_print:
+gui/501/com.ping-mem.periodic-ingest = {
+	active count = 0
+	path = /Users/umasankr/Library/LaunchAgents/com.ping-mem.periodic-ingest.plist
+	type = LaunchAgent
+	state = not running
+
+	program = /bin/bash
+	arguments = {
+		/bin/bash
+		/Users/umasankr/Projects/ping-mem/scripts/periodic-ingest.sh
+	}
+
+	working directory = /Users/umasankr/Projects/ping-mem
+
+	stdout path = /Users/umasankr/Library/Logs/ping-mem/periodic-ingest.log
+	stderr path = /Users/umasankr/Library/Logs/ping-mem/periodic-ingest.err
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.aqJNTIlfRF/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		PATH => /Users/umasankr/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin
+		PING_MEM_REST_URL => http://localhost:3003
+		HOME => /Users/umasankr
+		XPC_SERVICE_NAME => com.ping-mem.periodic-ingest
+	}
+
+	domain = gui/501 [100025]
+	asid = 100025
+	minimum runtime = 10
+	exit timeout = 5
+	nice = 10
+	runs = 315
+	last exit code = 127
+
+	resource coalition = {
+		ID = 20955
+		type = resource
+		state = active
+		active count = 1
+		name = com.ping-mem.periodic-ingest
+	}
+
+	jetsam coalition = {
+		ID = 20956
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.ping-mem.periodic-ingest
+	}
+
+	spawn type = background (5)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+	run interval = 600 seconds
+
+	properties = runatload | inferred program
+}

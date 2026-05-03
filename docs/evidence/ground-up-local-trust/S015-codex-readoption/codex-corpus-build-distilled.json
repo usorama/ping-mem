@@ -1,0 +1,11 @@
+{
+  "ok": true,
+  "dest": "/Users/umasankr/Projects/codex-corpus",
+  "stats": {
+    "sourceFiles": 454,
+    "sourceChunks": 766,
+    "threads": 348,
+    "stageOutputs": 73,
+    "logRows": 351670
+  }
+}

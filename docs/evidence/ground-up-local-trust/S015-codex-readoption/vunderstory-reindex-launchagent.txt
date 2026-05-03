@@ -1,0 +1,86 @@
+gui/501/com.ping-mem.vunderstory-reindex = {
+	active count = 0
+	path = /Users/umasankr/Library/LaunchAgents/com.ping-mem.vunderstory-reindex.plist
+	type = LaunchAgent
+	state = not running
+
+	program = /bin/zsh
+	arguments = {
+		/bin/zsh
+		/Users/umasankr/.ping-mem/scripts/vunderstory-incremental-reindex.sh
+	}
+
+	stdout path = /Users/umasankr/.ping-mem/logs/vunderstory-reindex.launchd.out.log
+	stderr path = /Users/umasankr/.ping-mem/logs/vunderstory-reindex.launchd.err.log
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.aqJNTIlfRF/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		XPC_SERVICE_NAME => com.ping-mem.vunderstory-reindex
+	}
+
+	domain = gui/501 [100025]
+	asid = 100025
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 2
+	last exit code = 0
+
+	event triggers = {
+		com.apple.launchd.WatchPaths => {
+			keepalive = 0
+			service = com.ping-mem.vunderstory-reindex
+			stream = com.apple.fsevents.matching
+			monitor = com.apple.UserEventAgent-Aqua
+			descriptor = {
+				"WatchPaths" => [
+					0 = "/Users/umasankr/Projects/vunderstory"
+				]
+			}
+		}
+	}
+
+	event channels = {
+		"com.apple.fsevents.matching" = {
+			port = 0x40e9b
+			active = 0
+			managed = 1
+			reset = 0
+			hide = 0
+			watching = 1
+		}
+	}
+
+	resource coalition = {
+		ID = 46378
+		type = resource
+		state = active
+		active count = 1
+		name = com.ping-mem.vunderstory-reindex
+	}
+
+	jetsam coalition = {
+		ID = 46379
+		type = jetsam
+		state = active
+		active count = 1
+		name = com.ping-mem.vunderstory-reindex
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+	run interval = 120 seconds
+
+	properties = runatload | inferred program
+}

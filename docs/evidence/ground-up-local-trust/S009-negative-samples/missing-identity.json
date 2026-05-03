@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "status": "blocked",
+  "command": "agent proof memory-lifecycle",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 30000
+  },
+  "elapsedMs": 0,
+  "checkedAt": "2026-04-30T16:32:50.027Z",
+  "error": {
+    "code": "MISSING_AGENT",
+    "message": "Missing --agent",
+    "layer": "input"
+  }
+}

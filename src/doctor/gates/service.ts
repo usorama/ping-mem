@@ -1,6 +1,6 @@
 /**
  * Service gates (7):
- *   rest-health, rest-admin-auth, mcp-proxy-stdio,
+ *   rest-health, rest-admin-auth, agent-approved-status,
  *   ollama-reachable, ollama-model-qwen3, ollama-warm-latency,
  *   session-cap-utilization.
  *
@@ -75,22 +75,23 @@ export const serviceGates: DoctorGate[] = [
   },
 
   {
-    id: "service.mcp-proxy-stdio",
+    id: "service.agent-approved-status",
     group: "service",
-    description: "ping-mem-mcp binary is on PATH (proxy stdio entry)",
-    async run() {
-      const { stdout, code } = await runShell("command -v ping-mem-mcp 2>/dev/null || true");
-      if (code === 0 && stdout.trim().length > 0) {
-        return { status: "pass", detail: stdout.trim() };
+    description: "Approved REST status target is reachable without direct MCP or repair",
+    async run(ctx) {
+      try {
+        const { status, body } = await fetchWithTimeout(`${ctx.restUrl}/health`, {}, 10000);
+        if (status !== 200) {
+          return { status: "fail", detail: `HTTP ${status}` };
+        }
+        const parsed = JSON.parse(body) as { status?: string; components?: Record<string, string> };
+        if (parsed.status === "ok") {
+          return { status: "pass", detail: "approved REST status target is ok" };
+        }
+        return { status: "fail", detail: parsed.status ?? "REST status target not ok" };
+      } catch (err) {
+        return { status: "fail", detail: (err as Error).message };
       }
-      // Fallback: check the built dist entry
-      const { code: distCode } = await runShell(
-        "test -f /Users/umasankr/Projects/ping-mem/dist/mcp/cli.js && echo ok",
-      );
-      if (distCode === 0) {
-        return { status: "pass", detail: "dist/mcp/cli.js present" };
-      }
-      return { status: "fail", detail: "neither ping-mem-mcp binary nor dist/mcp/cli.js present" };
     },
   },
 

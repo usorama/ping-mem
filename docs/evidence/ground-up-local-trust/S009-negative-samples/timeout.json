@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "status": "blocked",
+  "command": "agent proof codebase-grounding",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 1000
+  },
+  "elapsedMs": 0,
+  "checkedAt": "2026-04-30T16:32:50.153Z",
+  "error": {
+    "code": "RUNTIME_TIMEOUT",
+    "message": "Simulated timeout after 1000ms",
+    "layer": "runtime"
+  },
+  "data": {
+    "simulated": true,
+    "scenario": "timeout",
+    "repairsAttempted": false
+  }
+}
