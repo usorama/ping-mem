@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "status": "blocked",
+  "command": "agent proof codebase-grounding",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 300000
+  },
+  "elapsedMs": 0,
+  "checkedAt": "2026-04-30T16:32:50.102Z",
+  "error": {
+    "code": "STALE_DATA",
+    "message": "Simulated stale data response; proof must report stale, not current",
+    "layer": "runtime"
+  },
+  "data": {
+    "simulated": true,
+    "scenario": "stale",
+    "repairsAttempted": false
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "data": {
+    "count": 2,
+    "sortBy": "lastIngestedAt",
+    "scope": "registered",
+    "projects": [
+      {
+        "projectId": "4d613b144c43657637f463d1ff26371ecd2b23e3e745a896fe4bab03ee7098fd",
+        "rootPath": "/projects/codex-corpus",
+        "treeHash": "982a3a1857fea5974ceac3c6d1af66d984d7e1d5c8223d54577e9e928c0e54e2",
+        "filesCount": 463,
+        "chunksCount": 517,
+        "commitsCount": 0,
+        "lastIngestedAt": "2026-05-01T03:30:59.484Z"
+      },
+      {
+        "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+        "rootPath": "/projects/vunderstory",
+        "treeHash": "41b1e72651885d4465fe216c9e77487fa601d3487aad0a86fe8c8302552ff5bb",
+        "filesCount": 243,
+        "chunksCount": 260,
+        "commitsCount": 200,
+        "lastIngestedAt": "2026-05-01T03:30:43.867Z"
+      }
+    ]
+  }
+}

@@ -82,12 +82,18 @@ const timeline = defineCommand({
 const projects = defineCommand({
   meta: { name: "projects", description: "List ingested projects" },
   args: {
+    scope: { type: "string", description: "Project inventory scope (registered or all)", default: "registered" },
+    limit: { type: "string", description: "Maximum projects to return", default: "100" },
     ...outputArgs,
     ...serverArgs,
   },
   async run({ args }) {
     const client = createClient({ serverUrl: args.server });
-    const result = await client.get("/api/v1/codebase/projects");
+    const params: Record<string, string> = {
+      scope: args.scope === "all" ? "all" : "registered",
+    };
+    if (args.limit) params.limit = args.limit;
+    const result = await client.get("/api/v1/codebase/projects", params);
     printOutput(result, resolveFormat(args));
   },
 });

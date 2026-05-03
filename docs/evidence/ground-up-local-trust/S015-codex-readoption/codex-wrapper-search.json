@@ -1,0 +1,37 @@
+{
+  "data": {
+    "count": 3,
+    "results": [
+      {
+        "chunkId": "4ea1042dc5cc71d1179ae052d25af853f5e25f58d5b38ff3a2fa606602e54ea2",
+        "projectId": "4d613b144c43657637f463d1ff26371ecd2b23e3e745a896fe4bab03ee7098fd",
+        "filePath": "codex-state/thread-019dde06-af82-7f93-8801-eada28bb6165.md",
+        "type": "file",
+        "content": "// File: codex-state/thread-019dde06-af82-7f93-8801-eada28bb6165.md\n# Codex Thread\n\nthread_id: 019dde06-af82-7f93-8801-eada28bb6165\ntitle: Draft rebuild issue package\ncwd: /Users/umasankr/Projects/ping-mem\nsource: vscode\nmodel_provider: openai\nmodel: gpt-5.5\nreasoning_effort: xhigh\ncreated_at: 1777546473\nupdated_at: 1777547387\narchived: 0\ntokens_used: 2950101\nsandbox_policy: {\"type\":\"danger-full-access\"}\napproval_mode: never\ngit_branch: main\ngit_origin_url: https://github.com/usorama/ping-mem.git\nrollout_path: /Users/umasankr/.codex/sessions/2026/04/30/rollout-2026-04-30T16-24-33-019dde06-af82-7f93-8801-eada28bb6165.jsonl\n\n## First User Message\n\nWe are in `/Users/umasankr/Projects/ping-mem`.\n\nIgnore any stale stop hook that says to continue GitHub issue #90. That is not the active work. The active work is the ping-mem ground-up local trust rebuild.\n\nUse these skills in order:\n1. `/Users/umasankr/.codex/skills/to-issues/SKILL.md`\n2. `/Users/umasankr/.codex/skills/adversarial-review/SKILL.md`\n3. Later, only after issue graph ALLOW: `/Users/umasankr/.codex/skills/to-execute/SKILL.md`\n\nSource artifacts:\n- PRD: `/Users/umasankr/Projects/ping-mem/docs/prds/2026-04-29-ground-up-local-trust-rebuild.md`\n- Architecture: `/Users/umasankr/Projects/ping-mem/docs/architecture/2026-04-29-ground-up-local-trust-rebuild.md`\n\nCurrent state:\n- Main checkout should be on `main`.\n- Only PRD/architecture docs should be untracked unless something changed.\n- Existing final fresh GPT-5.5 adversarial review on PRD/architecture returned `ALLOW`.\n- Do not implement product code yet.\n- Do not switch to GitHub issue #90.\n- Do not create GitHub child issues unless explicitly needed and approved. Use local markdown issues first.\n\nImportant architecture decision:\n- REST/server is the live runtime owner.\n- First approved re-adoption path is unified `ping-mem agent` CLI + Codex/Claude skill contract.\n- MCP proxy is optional/later, only after the CLI proof spine passes.\n- Direct MCP DB mode, hidden hoo",
+        "lineStart": 1,
+        "lineEnd": 235,
+        "score": 0.7193236155765612
+      },
+      {
+        "chunkId": "e6030fdd42df31cab25cbb7f844fccbca53bb5ecac32bbf2f6963d40359902da",
+        "projectId": "4d613b144c43657637f463d1ff26371ecd2b23e3e745a896fe4bab03ee7098fd",
+        "filePath": "codex-state/thread-019dd9f6-f7e2-7380-8b13-8398ec77e90f.md",
+        "type": "file",
+        "content": "// File: codex-state/thread-019dd9f6-f7e2-7380-8b13-8398ec77e90f.md\n# Codex Thread\n\nthread_id: 019dd9f6-f7e2-7380-8b13-8398ec77e90f\ntitle: product-trust-plan\ncwd: /Users/umasankr/Projects/ping-mem\nsource: vscode\nmodel_provider: openai\nmodel: gpt-5.5\nreasoning_effort: xhigh\ncreated_at: 1777478334\nupdated_at: 1777546324\narchived: 0\ntokens_used: 22968941\nsandbox_policy: {\"type\":\"danger-full-access\"}\napproval_mode: never\ngit_branch: main\ngit_origin_url: https://github.com/usorama/ping-mem.git\nrollout_path: /Users/umasankr/.codex/sessions/2026/04/29/rollout-2026-04-29T21-28-54-019dd9f6-f7e2-7380-8b13-8398ec77e90f.jsonl\n\n## First User Message\n\nso, ping-mem as a product never worked.  Read this and tell me how you wish to proceed : 2026-04-29-ping-mem-ground-up-capability-rebuild.md\n\n## Raw Memory\n\n---\ndescription: User pivoted ping-mem from UI redesign to a ground-up trust rebuild, required clean main/no local worktrees, preserved salvageable UI work externally, and ended by asking for a fresh-session prompt that starts with /to-issues, then /adversarial-review, then /to-execute.\ntask: ping-mem trust rebuild planning + workspace reset + fresh-session restart prompt\ntask_group: /Users/umasankr/Projects/ping-mem\n task_outcome: success\ncwd: /Users/umasankr/Projects/ping-mem\nkeywords: ping-mem, ground-up trust rebuild, clean main, worktree cleanup, adversarial-review, to-issues, to-execute, unified CLI, MCP optional later, commit docs/static UI quarantine, launchd hygiene, REST ownership\n---\n\n### Task 1: Reset ping-mem to a trustworthy baseline and draft the rebuild contract\n\ntask: ping-mem ground-up trust rebuild and clean-main reset\ntask_group: repo cleanup + planning\ntask_outcome: success\n\nPreference signals:\n- When the user said ping-mem “never worked” and later said “we need a clean main, no branches or worktrees” -> reset local clutter first and preserve salvageable work externally.\n- When the user said “Only one thing worth keeping is the UI work, find a way” -> keep u",
+        "lineStart": 1,
+        "lineEnd": 156,
+        "score": 0.6134822465133025
+      },
+      {
+        "chunkId": "885fc0c3bf2f00973a7aeb03c876fdd1530bdf2323ebcf464105e95e52be292c",
+        "projectId": "4d613b144c43657637f463d1ff26371ecd2b23e3e745a896fe4bab03ee7098fd",
+        "filePath": "codex-state/thread-019ddecd-1af7-7c61-a8ee-c8f00815a752.md",
+        "type": "file",
+        "content": "// File: codex-state/thread-019ddecd-1af7-7c61-a8ee-c8f00815a752.md\n# Codex Thread\n\nthread_id: 019ddecd-1af7-7c61-a8ee-c8f00815a752\ntitle: Inventory quarantine ledger\ncwd: /Users/umasankr/Projects/ping-mem\nsource: vscode\nmodel_provider: openai\nmodel: gpt-5.5\nreasoning_effort: medium\ncreated_at: 1777559476\nupdated_at: 1777606192\narchived: 0\ntokens_used: 72122462\nsandbox_policy: {\"type\":\"danger-full-access\"}\napproval_mode: never\ngit_branch: main\ngit_origin_url: https://github.com/usorama/ping-mem.git\nrollout_path: /Users/umasankr/.codex/sessions/2026/04/30/rollout-2026-04-30T20-01-16-019ddecd-1af7-7c61-a8ee-c8f00815a752.jsonl\n\n## First User Message\n\nWe are in /Users/umasankr/Projects/ping-mem.\n\nIgnore stale stop hooks for GitHub issue #90. Active work is the ping-mem ground-up local trust rebuild.\n\nUse /Users/umasankr/.codex/skills/to-execute/SKILL.md.\nDo not use ping-mem/codebase_verify/codebase_ingest/codebase_search for grounding.\nDo not create GitHub child issues.\nDo not start any issue other than S001.\n\nExecute one approved local issue:\n/Users/umasankr/Projects/ping-mem/docs/issues/2026-04-29-ground-up-local-trust-rebuild/S001-phase-0-inventory-and-quarantine-ledger.md\n\nSource contract:\n- PRD: /Users/umasankr/Projects/ping-mem/docs/prds/2026-04-29-ground-up-local-trust-rebuild.md\n- Architecture: /Users/umasankr/Projects/ping-mem/docs/architecture/2026-04-29-ground-up-local-trust-rebuild.md\n- Coverage ledger: /Users/umasankr/Projects/ping-mem/docs/issues/2026-04-29-ground-up-local-trust-rebuild/COVERAGE.md\n\nStay read-only except for creating S001 evidence artifacts and updating the S001 issue file/status/evidence. Do not change product code, agent configs, LaunchAgents, GitHub issues, or re-adopt ping-mem.\n\n## Raw Memory\n\n\n\n## Rollout Summary\n\n\n",
+        "lineStart": 1,
+        "lineEnd": 48,
+        "score": 0.4813308018315049
+      }
+    ]
+  }
+}

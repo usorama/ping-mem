@@ -1,0 +1,47 @@
+{
+  "ok": true,
+  "status": "available",
+  "command": "agent codebase projects",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 5000
+  },
+  "elapsedMs": 20,
+  "checkedAt": "2026-04-30T16:19:35.362Z",
+  "data": {
+    "data": {
+      "count": 3,
+      "sortBy": "lastIngestedAt",
+      "scope": "registered",
+      "projects": [
+        {
+          "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+          "rootPath": "/projects/vunderstory",
+          "treeHash": "41b1e72651885d4465fe216c9e77487fa601d3487aad0a86fe8c8302552ff5bb",
+          "filesCount": 243,
+          "chunksCount": 260,
+          "commitsCount": 200,
+          "lastIngestedAt": "2026-04-29T17:53:43.425Z"
+        },
+        {
+          "projectId": "e3b7b78ce1a619148280a2de8279e3f7a583fe512adc573477f5c3cac08a7ade",
+          "rootPath": "/projects/ping-learn",
+          "treeHash": "aadb3860d5bb99de4a834afbe8205a3b976ab57274cc50d3b943f3e8b636ff96",
+          "filesCount": 1279,
+          "chunksCount": 3627,
+          "commitsCount": 761,
+          "lastIngestedAt": "2026-04-29T13:53:35.460Z"
+        },
+        {
+          "projectId": "a3f37384f8b7362aa2db593d90fe119ccf12f37fc53f3bd76f2df97c9fcade96",
+          "rootPath": "/projects/ping-learn-mobile",
+          "treeHash": "65072fedbb36539f7a460c332935e44bd0c316c460916495096be0ddc4c13155",
+          "filesCount": 32,
+          "chunksCount": 46,
+          "commitsCount": 188,
+          "lastIngestedAt": "2026-04-22T14:31:56.836Z"
+        }
+      ]
+    }
+  }
+}

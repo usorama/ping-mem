@@ -19,6 +19,10 @@ import * as path from "path";
 import * as fs from "fs";
 import { createLogger } from "../util/logger.js";
 import { isProjectDirSafe } from "../util/path-safety.js";
+import {
+  createStructuredKnowledgeGraph,
+  StructuredKnowledgeGraphError,
+} from "../graph/StructuredKnowledgeGraph.js";
 
 const log = createLogger("REST Server");
 
@@ -78,6 +82,7 @@ import {
   KnowledgeIngestSchema,
   IngestionEnqueueSchema,
   GraphHybridSearchSchema,
+  GraphAnswerSchema,
   CausalDiscoverSchema,
   WorklogRecordSchema,
   MemorySubscribeSchema,
@@ -794,6 +799,18 @@ export class RESTPingMemServer {
           );
         }
         const body = parseResult.data;
+        if (this.isApprovedAgentPath(c) && !body.agentId) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "agentId is required for approved agent paths" },
+            400
+          );
+        }
+        if (this.isApprovedAgentPath(c) && !body.projectDir) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "projectDir is required for approved agent paths" },
+            400
+          );
+        }
         if (body.projectDir !== undefined && !isProjectDirSafe(body.projectDir)) {
           return c.json<RESTErrorResponse>(
             { error: "Bad Request", message: "projectDir must be within an allowed root" },
@@ -911,6 +928,12 @@ export class RESTPingMemServer {
           );
         }
         const body = parseResult.data;
+        if (this.isApprovedAgentPath(c) && !c.req.header("x-session-id")) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "X-Session-ID header is required for approved agent paths" },
+            400
+          );
+        }
         const sessionId = this.getSessionIdFromRequest(c);
 
         if (!sessionId) {
@@ -1249,6 +1272,12 @@ export class RESTPingMemServer {
           );
         }
         const projectDir = path.resolve(parseResult.data.projectDir);
+        if (this.isApprovedAgentPath(c) && !parseResult.data.agentId) {
+          return c.json(
+            { error: "BadRequest", message: "agentId is required for approved agent paths" },
+            400
+          );
+        }
 
         // Phase 0: Security fix — reject unsafe project directories (EVAL C2)
         if (!isProjectDirSafe(projectDir)) {
@@ -1326,12 +1355,6 @@ export class RESTPingMemServer {
 
     this.app.post("/api/v1/codebase/verify", async (c) => {
       try {
-        if (!this.config.ingestionService) {
-          return c.json(
-            { error: "ServiceUnavailable", message: "Ingestion service not configured" },
-            503
-          );
-        }
         const parseResult = CodebaseVerifySchema.safeParse(await c.req.json());
         if (!parseResult.success) {
           return c.json(
@@ -1340,6 +1363,24 @@ export class RESTPingMemServer {
           );
         }
         const projectDir = path.resolve(parseResult.data.projectDir);
+        if (this.isApprovedAgentPath(c) && !parseResult.data.agentId) {
+          return c.json(
+            { error: "BadRequest", message: "agentId is required for approved agent paths" },
+            400
+          );
+        }
+        if (!isProjectDirSafe(projectDir)) {
+          return c.json(
+            { error: "Forbidden", message: "Project directory is outside allowed roots" },
+            403
+          );
+        }
+        if (!this.config.ingestionService) {
+          return c.json(
+            { error: "ServiceUnavailable", message: "Ingestion service not configured" },
+            503
+          );
+        }
         const result = await this.config.ingestionService.verifyProject(projectDir);
         return c.json({ data: result });
       } catch (error) {
@@ -2774,6 +2815,42 @@ export class RESTPingMemServer {
       }
     });
 
+    this.app.post("/api/v1/graph/answer", async (c) => {
+      try {
+        let rawBody: unknown;
+        try { rawBody = await c.req.json(); }
+        catch { return c.json<RESTErrorResponse>({ error: "Bad Request", message: "Invalid JSON body" }, 400); }
+
+        const parseResult = GraphAnswerSchema.safeParse(rawBody);
+        if (!parseResult.success) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: parseResult.error.issues[0]?.message ?? "Invalid request" },
+            400,
+          );
+        }
+
+        const body = parseResult.data;
+        if (this.isApprovedAgentPath(c) && (!body.agentId || !body.projectDir)) {
+          return c.json<RESTErrorResponse>(
+            { error: "Bad Request", message: "agentId and projectDir are required for approved graph answer paths" },
+            400,
+          );
+        }
+        if (!isProjectDirSafe(body.projectDir)) {
+          return c.json<RESTErrorResponse>(
+            { error: "Forbidden", message: "Project path is outside allowed roots" },
+            403,
+          );
+        }
+
+        const graph = createStructuredKnowledgeGraph();
+        const answer = graph.answer(body);
+        return c.json({ data: answer });
+      } catch (error) {
+        return this.handleError(c, error);
+      }
+    });
+
     this.app.get("/api/v1/graph/lineage/:entity", async (c) => {
       try {
         if (!this.config.lineageEngine) {
@@ -4148,6 +4225,10 @@ export class RESTPingMemServer {
     return this.currentSessionId;
   }
 
+  private isApprovedAgentPath(c: Context<AppEnv>): boolean {
+    return c.req.header("x-ping-mem-approved-path") === "true";
+  }
+
   /**
    * Compute the effective externally-visible health status.
    *
@@ -4299,6 +4380,12 @@ export class RESTPingMemServer {
       // Use error class name or code property for reliable mapping
       const name = error.name;
       if (name === "TimeoutError") return 504;
+      if (error instanceof StructuredKnowledgeGraphError) {
+        if (error.code === "UNSAFE_PROJECT") return 403;
+        if (error.code === "MISSING_SOURCE_ANCHOR") return 404;
+        if (error.code === "STALE_CORPUS") return 409;
+        return 400;
+      }
       if (name === "MemoryKeyNotFoundError" || name === "AgentNotRegisteredError") return 404;
       if (name === "QuotaExhaustedError" || name === "WriteLockConflictError") return 409;
       if (name === "EvidenceGateRejectionError" || name === "ScopeViolationError") return 403;
@@ -4342,6 +4429,7 @@ export class RESTPingMemServer {
       409: "Conflict",
       410: "Gone",
       429: "Too Many Requests",
+      504: "Gateway Timeout",
       500: "Internal Server Error",
       503: "Service Unavailable",
     };

@@ -1,0 +1,22 @@
+## main...origin/main
+ M AGENT_INSTRUCTIONS.md
+ M CLAUDE.md
+ M README.md
+ M scripts/agent-path-audit.sh
+ M src/cli/commands/agent.ts
+ M src/cli/commands/codebase.ts
+ M src/doctor/gates/service.ts
+ M src/http/__tests__/agent-rest.test.ts
+ M src/http/rest-server.ts
+ M src/http/ui/__tests__/ingestion.test.ts
+ M src/http/ui/ingestion.ts
+ M src/http/ui/partials/ingestion.ts
+ M src/mcp/__tests__/proxy-cli.test.ts
+ M src/static/codebase-diagram.html
+ M src/validation/api-schemas.ts
+?? docs/architecture/
+?? docs/evidence/
+?? docs/issues/
+?? docs/prds/
+?? src/cli/__tests__/agent-trust.test.ts
+?? src/cli/agent-trust.ts

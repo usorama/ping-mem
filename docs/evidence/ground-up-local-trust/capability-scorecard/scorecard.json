@@ -1,0 +1,604 @@
+{
+  "generatedAt": "2026-05-03T05:14:32.728Z",
+  "liveChecksEnabled": false,
+  "overall": {
+    "score": 94,
+    "passed": 49,
+    "total": 52,
+    "status": "yellow"
+  },
+  "objectives": [
+    {
+      "id": "OBJ-1",
+      "score": 83,
+      "passed": 5,
+      "total": 6,
+      "status": "yellow"
+    },
+    {
+      "id": "OBJ-2",
+      "score": 100,
+      "passed": 6,
+      "total": 6,
+      "status": "green"
+    },
+    {
+      "id": "OBJ-3",
+      "score": 100,
+      "passed": 6,
+      "total": 6,
+      "status": "green"
+    },
+    {
+      "id": "OBJ-4",
+      "score": 100,
+      "passed": 4,
+      "total": 4,
+      "status": "green"
+    },
+    {
+      "id": "OBJ-5",
+      "score": 100,
+      "passed": 4,
+      "total": 4,
+      "status": "green"
+    },
+    {
+      "id": "OBJ-6",
+      "score": 100,
+      "passed": 5,
+      "total": 5,
+      "status": "green"
+    },
+    {
+      "id": "OBJ-7",
+      "score": 100,
+      "passed": 6,
+      "total": 6,
+      "status": "green"
+    },
+    {
+      "id": "OBJ-8",
+      "score": 100,
+      "passed": 4,
+      "total": 4,
+      "status": "green"
+    }
+  ],
+  "outcomes": [
+    {
+      "id": "OUT-1",
+      "score": 83,
+      "passed": 5,
+      "total": 6,
+      "status": "yellow"
+    },
+    {
+      "id": "OUT-2",
+      "score": 100,
+      "passed": 6,
+      "total": 6,
+      "status": "green"
+    },
+    {
+      "id": "OUT-3",
+      "score": 100,
+      "passed": 6,
+      "total": 6,
+      "status": "green"
+    },
+    {
+      "id": "OUT-4",
+      "score": 100,
+      "passed": 4,
+      "total": 4,
+      "status": "green"
+    },
+    {
+      "id": "OUT-5",
+      "score": 100,
+      "passed": 4,
+      "total": 4,
+      "status": "green"
+    },
+    {
+      "id": "OUT-6",
+      "score": 100,
+      "passed": 5,
+      "total": 5,
+      "status": "green"
+    },
+    {
+      "id": "OUT-7",
+      "score": 100,
+      "passed": 6,
+      "total": 6,
+      "status": "green"
+    },
+    {
+      "id": "OUT-8",
+      "score": 100,
+      "passed": 4,
+      "total": 4,
+      "status": "green"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "CAP-1",
+      "name": "Runtime Ground Truth",
+      "outcome": "OUT-4",
+      "objective": "OBJ-4",
+      "goal": "One local REST runtime owns writes, sessions, indexes, and project registry truth.",
+      "metrics": [
+        {
+          "name": "S002 REST owner issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S010 runtime registry issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Direct-mode quarantine evidence exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Runtime registry alignment evidence exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        }
+      ],
+      "score": 100,
+      "passed": 4,
+      "total": 4,
+      "status": "green"
+    },
+    {
+      "id": "CAP-2",
+      "name": "Agent Reachability",
+      "outcome": "OUT-1",
+      "objective": "OBJ-1",
+      "goal": "Codex and Claude Code can reach the intended local runtime through approved entrypoints.",
+      "metrics": [
+        {
+          "name": "S003 unified CLI issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S005 Codex memory proof issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S006 Claude memory proof issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S007 Codex codebase proof issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S008 Claude codebase proof issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Approved ping-mem wrapper projects",
+          "passed": false,
+          "weight": 1,
+          "detail": "not run; use --live to execute"
+        }
+      ],
+      "score": 83,
+      "passed": 5,
+      "total": 6,
+      "status": "yellow"
+    },
+    {
+      "id": "CAP-3",
+      "name": "Explicit Identity",
+      "outcome": "OUT-5",
+      "objective": "OBJ-5",
+      "goal": "Every approved path carries project, agent, and session identity or fails loudly.",
+      "metrics": [
+        {
+          "name": "S004 identity issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Identity/path safety evidence exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Agent REST tests include graph identity gate",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Agent trust tests include graph answer identity",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        }
+      ],
+      "score": 100,
+      "passed": 4,
+      "total": 4,
+      "status": "green"
+    },
+    {
+      "id": "CAP-4",
+      "name": "Memory Lifecycle Correctness",
+      "outcome": "OUT-2",
+      "objective": "OBJ-2",
+      "goal": "Save, search, retrieve, update/supersede, recall, delete, and confirm absent work end to end.",
+      "metrics": [
+        {
+          "name": "S005 Codex memory issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S006 Claude memory issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Codex proof JSON exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Claude proof JSON exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Codex memory proof ok",
+          "passed": true,
+          "weight": 1,
+          "detail": "ok=true"
+        },
+        {
+          "name": "Claude memory proof ok",
+          "passed": true,
+          "weight": 1,
+          "detail": "ok=true"
+        }
+      ],
+      "score": 100,
+      "passed": 6,
+      "total": 6,
+      "status": "green"
+    },
+    {
+      "id": "CAP-5",
+      "name": "Codebase Grounding Correctness",
+      "outcome": "OUT-3",
+      "objective": "OBJ-3",
+      "goal": "Verify, ingest, search, timeline, registered inventory, and file/line anchors work on real repos.",
+      "metrics": [
+        {
+          "name": "S007 Codex codebase issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S008 Claude codebase issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Codex codebase proof JSON exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Claude codebase proof JSON exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Codex codebase proof ok",
+          "passed": true,
+          "weight": 1,
+          "detail": "ok=true"
+        },
+        {
+          "name": "Claude codebase proof ok",
+          "passed": true,
+          "weight": 1,
+          "detail": "ok=true"
+        }
+      ],
+      "score": 100,
+      "passed": 6,
+      "total": 6,
+      "status": "green"
+    },
+    {
+      "id": "CAP-6",
+      "name": "Recovery And Readiness",
+      "outcome": "OUT-6",
+      "objective": "OBJ-6",
+      "goal": "Sleep, reboot, runtime restart, Neo4j restart, Qdrant restart, auth drift, and stale launchd states are known events.",
+      "metrics": [
+        {
+          "name": "S012 LaunchAgent hygiene issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S013 recovery scenarios issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Recovery scenario report exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "LaunchAgent reconciliation evidence exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Sleep/wake HITL blocker remains explicit",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        }
+      ],
+      "score": 100,
+      "passed": 5,
+      "total": 5,
+      "status": "green"
+    },
+    {
+      "id": "CAP-7",
+      "name": "Truthful Observability",
+      "outcome": "OUT-7",
+      "objective": "OBJ-7",
+      "goal": "Health, doctor, UI, logs, alerts, and graph answers distinguish healthy, stale, partial, blocked, and error states.",
+      "metrics": [
+        {
+          "name": "S009 failure-state honesty issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S014 observability issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S017 structured graph issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Failure-state matrix exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Observability alignment evidence exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "Structured graph evidence exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        }
+      ],
+      "score": 100,
+      "passed": 6,
+      "total": 6,
+      "status": "green"
+    },
+    {
+      "id": "CAP-8",
+      "name": "Controlled Re-Adoption",
+      "outcome": "OUT-8",
+      "objective": "OBJ-8",
+      "goal": "Agent integrations are restored only after proof passes and final claims stay inside evidence.",
+      "metrics": [
+        {
+          "name": "S015 CLI-first re-adoption issue done",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S016 optional MCP proxy remains blocked/deferred",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S015 readoption report exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        },
+        {
+          "name": "S016 quarantine report exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        }
+      ],
+      "score": 100,
+      "passed": 4,
+      "total": 4,
+      "status": "green"
+    }
+  ],
+  "features": [
+    {
+      "id": "FEATURE-graph-relationship-lift",
+      "name": "ping-mem relationship lift over rg",
+      "goal": "Return the files rg can reveal plus relationship edges, paths, provenance, and denominator evidence the user did not explicitly ask for.",
+      "metrics": [
+        {
+          "name": "Complete graph evidence file exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "complete_graph-answer.json"
+        },
+        {
+          "name": "Complete answer has denominator",
+          "passed": true,
+          "weight": 1,
+          "detail": "nodeCount=4, edgeCount=3"
+        },
+        {
+          "name": "Complete answer has unasked relationship edges",
+          "passed": true,
+          "weight": 1,
+          "detail": "edgeCount=3"
+        },
+        {
+          "name": "Complete answer has source anchors",
+          "passed": true,
+          "weight": 1,
+          "detail": "sourceAnchorCount=4"
+        },
+        {
+          "name": "Semantic answer blocks completeness language",
+          "passed": true,
+          "weight": 1,
+          "detail": "semantic blockedClaims mention incomplete"
+        }
+      ],
+      "extra": {
+        "nodeCount": 4,
+        "edgeCount": 3,
+        "anchorCount": 4
+      },
+      "score": 100,
+      "passed": 5,
+      "total": 5,
+      "status": "green"
+    },
+    {
+      "id": "FEATURE-rg-baseline",
+      "name": "rg baseline remains available",
+      "goal": "rg stays the fast exact-match baseline; ping-mem must add relationship and provenance lift, not replace exact search.",
+      "metrics": [
+        {
+          "name": "rg exact search runs",
+          "passed": true,
+          "weight": 1,
+          "detail": "9 hit(s)"
+        },
+        {
+          "name": "rg finds direct text hits",
+          "passed": true,
+          "weight": 1,
+          "detail": "9 hit(s) for Structured Knowledge Graph"
+        }
+      ],
+      "extra": {
+        "query": "Structured Knowledge Graph",
+        "hits": 9
+      },
+      "score": 100,
+      "passed": 2,
+      "total": 2,
+      "status": "green"
+    },
+    {
+      "id": "FEATURE-live-ping-mem-discovery",
+      "name": "Live ping-mem discovery path",
+      "goal": "The approved ping-mem wrapper should discover indexed context when the runtime has ingestion configured.",
+      "metrics": [
+        {
+          "name": "ping-mem registered project inventory live check",
+          "passed": false,
+          "weight": 1,
+          "detail": "not run; use --live to execute"
+        },
+        {
+          "name": "ping-mem indexed discovery live check",
+          "passed": false,
+          "weight": 1,
+          "detail": "not run; use --live to execute"
+        }
+      ],
+      "score": 0,
+      "passed": 0,
+      "total": 2,
+      "status": "red"
+    },
+    {
+      "id": "FEATURE-optional-mcp-proxy",
+      "name": "Optional MCP proxy remains outside current claim",
+      "goal": "MCP can become a convenience adapter later, but it must not inflate the current proven capability score.",
+      "metrics": [
+        {
+          "name": "S016 is blocked/deferred",
+          "passed": true,
+          "weight": 1,
+          "detail": "status=blocked"
+        },
+        {
+          "name": "S016 quarantine evidence exists",
+          "passed": true,
+          "weight": 1,
+          "detail": "passed"
+        }
+      ],
+      "score": 100,
+      "passed": 2,
+      "total": 2,
+      "status": "green"
+    }
+  ],
+  "claimBoundary": [
+    "Scorecard metrics are proof-routing signals, not a replacement for direct evidence.",
+    "ping-mem results are treated as discovery leads unless backed by evidence files, tests, or live runtime output.",
+    "S016 optional MCP proxy remains blocked/deferred and must not expand the current completion claim."
+  ]
+}

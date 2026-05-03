@@ -1,0 +1,16 @@
+{
+  "ok": false,
+  "status": "blocked",
+  "command": "agent session start",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 5000
+  },
+  "elapsedMs": 0,
+  "checkedAt": "2026-04-30T15:00:57.414Z",
+  "error": {
+    "code": "MISSING_AGENT",
+    "message": "Missing --agent",
+    "layer": "input"
+  }
+}

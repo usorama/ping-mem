@@ -1,0 +1,61 @@
+{
+  "ok": true,
+  "status": "available",
+  "command": "agent proof memory-lifecycle",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 30000
+  },
+  "elapsedMs": 11271,
+  "checkedAt": "2026-04-30T16:18:31.716Z",
+  "evidenceDir": "docs/evidence/ground-up-local-trust/S005-codex-memory",
+  "data": {
+    "agentId": "codex-local",
+    "projectDir": "/Users/umasankr/Projects/ping-mem",
+    "sessionId": "019ddf2f-1eaa-7fca-b6c8-9047ea73cb85",
+    "key": "ground-up/codex-local/1777565900445",
+    "steps": [
+      {
+        "name": "start-session",
+        "ok": true,
+        "detail": "019ddf2f-1eaa-7fca-b6c8-9047ea73cb85"
+      },
+      {
+        "name": "save",
+        "ok": true
+      },
+      {
+        "name": "search",
+        "ok": true,
+        "detail": "search response contains unique key"
+      },
+      {
+        "name": "retrieve",
+        "ok": true,
+        "detail": "retrieved original value"
+      },
+      {
+        "name": "update-or-supersede",
+        "ok": true
+      },
+      {
+        "name": "recall",
+        "ok": true,
+        "detail": "auto-recall returned structured response"
+      },
+      {
+        "name": "delete",
+        "ok": true
+      },
+      {
+        "name": "confirm-absent",
+        "ok": true,
+        "detail": "deleted key returns 404 from context lookup"
+      },
+      {
+        "name": "end-session",
+        "ok": true
+      }
+    ]
+  }
+}

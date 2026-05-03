@@ -1,0 +1,21 @@
+{
+  "ok": false,
+  "status": "blocked",
+  "command": "agent proof memory-lifecycle",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 30000
+  },
+  "elapsedMs": 0,
+  "checkedAt": "2026-04-30T16:32:50.051Z",
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Simulated unauthorized response; proof must block, not return empty success",
+    "layer": "runtime"
+  },
+  "data": {
+    "simulated": true,
+    "scenario": "unauthorized",
+    "repairsAttempted": false
+  }
+}

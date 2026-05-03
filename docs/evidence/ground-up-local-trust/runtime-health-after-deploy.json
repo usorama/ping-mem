@@ -1,0 +1,1 @@
+{"status":"ok","timestamp":"2026-04-30T16:12:24.570Z","components":{"sqlite":"healthy","neo4j":"healthy","qdrant":"healthy","diagnostics":"healthy"},"embeddingProvider":"ollama"}

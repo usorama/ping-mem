@@ -9,8 +9,6 @@ import type { Context } from "hono";
 import { renderLayout, escapeHtml, getCspNonce, getCsrfToken } from "./layout.js";
 import { loadingIndicator } from "./components.js";
 import type { UIDependencies } from "./routes.js";
-import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { createLogger } from "../../util/logger.js";
 
@@ -22,18 +20,19 @@ export function registerIngestionRoutes(deps: UIDependencies) {
     const { ingestionService } = deps;
     const available = !!ingestionService;
 
-    // Read registered projects
-    const registeredPath = path.join(os.homedir(), ".ping-mem", "registered-projects.txt");
-    let projects: string[] = [];
-    try {
-      if (fs.existsSync(registeredPath)) {
-        projects = fs.readFileSync(registeredPath, "utf-8")
-          .split("\n")
-          .map((l) => l.trim())
-          .filter((l) => l.length > 0);
+    let projects: Array<{ projectId?: string; rootPath: string }> = [];
+    let registryError: string | null = null;
+    if (ingestionService) {
+      try {
+        projects = await ingestionService.listProjects({
+          scope: "registered",
+          limit: 1000,
+          sortBy: "rootPath",
+        });
+      } catch (err) {
+        registryError = err instanceof Error ? err.message : String(err);
+        log.error("Failed to load registered projects from runtime registry", { error: registryError });
       }
-    } catch (err) {
-      log.error("Failed to read registered projects", { error: err instanceof Error ? err.message : String(err) });
     }
 
     const statusBadge = available
@@ -42,19 +41,22 @@ export function registerIngestionRoutes(deps: UIDependencies) {
 
     // Build project list
     let projectsHtml: string;
-    if (projects.length === 0) {
-      projectsHtml = `<div class="empty-state"><p>No registered projects. Add paths to ~/.ping-mem/registered-projects.txt</p></div>`;
+    if (registryError) {
+      projectsHtml = `<div class="empty-state"><p>Registered project registry unavailable: ${escapeHtml(registryError)}</p></div>`;
+    } else if (projects.length === 0) {
+      projectsHtml = `<div class="empty-state"><p>No registered projects reported by the runtime registry.</p></div>`;
     } else {
-      const rows = projects.map((p) => {
-        const projectName = path.basename(p);
+      const rows = projects.map((project) => {
+        const projectPath = project.rootPath;
+        const projectName = path.basename(projectPath);
         return `<tr>
           <td class="mono">${escapeHtml(projectName)}</td>
-          <td class="mono" style="font-size:12px" title="${escapeHtml(p)}">${escapeHtml(p)}</td>
+          <td class="mono" style="font-size:12px" title="${escapeHtml(projectPath)}">${escapeHtml(projectPath)}</td>
           <td>
             ${available
               ? `<button class="btn btn-ghost btn-sm"
                   hx-post="/ui/partials/ingestion/reingest"
-                  hx-vals="${escapeHtml(JSON.stringify({ projectDir: p }))}"
+                  hx-vals="${escapeHtml(JSON.stringify({ projectDir: projectPath }))}"
                   hx-target="#ingestion-status"
                   hx-swap="innerHTML"
                   hx-indicator="#reingest-indicator"
@@ -85,7 +87,7 @@ export function registerIngestionRoutes(deps: UIDependencies) {
         </div>
         <div class="stat-card">
           <div class="stat-label">REGISTERED PROJECTS</div>
-          <div class="stat-value">${projects.length}</div>
+          <div class="stat-value">${registryError ? "Blocked" : projects.length}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">NEO4J</div>

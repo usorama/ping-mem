@@ -1,0 +1,69 @@
+{
+  "ok": false,
+  "status": "blocked",
+  "command": "agent proof codebase-grounding",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 300000
+  },
+  "elapsedMs": 174,
+  "checkedAt": "2026-05-01T02:50:33.471Z",
+  "evidenceDir": "/Users/umasankr/Projects/ping-mem/docs/evidence/ground-up-local-trust/S015-codex-readoption",
+  "error": {
+    "code": "RUNTIME_UNAVAILABLE",
+    "message": "Codebase search returned no source result",
+    "layer": "runtime"
+  },
+  "data": {
+    "agentId": "codex-local",
+    "projectDir": "/Users/umasankr/Projects/vunderstory",
+    "runtimeProjectDir": "/projects/vunderstory",
+    "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+    "anchor": null,
+    "steps": [
+      {
+        "name": "verify",
+        "ok": true,
+        "detail": "Project manifest is up-to-date and matches on-disk files.",
+        "data": {
+          "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+          "valid": true,
+          "manifestTreeHash": "41b1e72651885d4465fe216c9e77487fa601d3487aad0a86fe8c8302552ff5bb",
+          "currentTreeHash": "41b1e72651885d4465fe216c9e77487fa601d3487aad0a86fe8c8302552ff5bb",
+          "message": "Project manifest is up-to-date and matches on-disk files."
+        }
+      },
+      {
+        "name": "ingest",
+        "ok": true,
+        "detail": "ingest completed or returned existing project identity",
+        "data": {
+          "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+          "treeHash": "41b1e72651885d4465fe216c9e77487fa601d3487aad0a86fe8c8302552ff5bb",
+          "filesIndexed": 0,
+          "chunksIndexed": 0,
+          "commitsIndexed": 0,
+          "ingestedAt": "2026-05-01T02:50:33.442Z",
+          "hadChanges": false
+        }
+      },
+      {
+        "name": "registered-project-inventory",
+        "ok": true,
+        "detail": "runtime registered project count: 0",
+        "data": {
+          "count": 0,
+          "sortBy": "lastIngestedAt",
+          "scope": "registered",
+          "projects": []
+        }
+      },
+      {
+        "name": "search",
+        "ok": false,
+        "detail": "search returned source result for selected project",
+        "data": null
+      }
+    ]
+  }
+}

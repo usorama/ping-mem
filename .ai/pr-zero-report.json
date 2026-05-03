@@ -1,0 +1,61 @@
+{
+  "pr": 141,
+  "branch": "codex/capability-metrics-live-discovery",
+  "base": "main",
+  "status": "clean",
+  "cycle_count": 2,
+  "generated_at": "2026-05-03T16:00:00Z",
+  "external_feedback": [
+    {
+      "source": "CodeRabbit",
+      "status": "skipped",
+      "detail": "Review skipped because the PR has 300 files, which is over CodeRabbit's file limit. No actionable line comments were present."
+    }
+  ],
+  "cycles": [
+    {
+      "cycle": 1,
+      "finding": {
+        "severity": "high",
+        "status": "fixed",
+        "file": "src/cli/agent-trust.ts",
+        "summary": "Graph proof CLI used the host project path when calling the REST server, which would fail against the Docker/OrbStack runtime where projects are mounted under /projects."
+      },
+      "fix_commit": "0fc7190"
+    },
+    {
+      "cycle": 2,
+      "finding": null,
+      "status": "clean"
+    }
+  ],
+  "quality_gates": [
+    {
+      "command": "bun test src/cli/__tests__/agent-trust.test.ts src/graph/__tests__/StructuredKnowledgeGraph.test.ts src/http/__tests__/agent-rest.test.ts src/observability/__tests__/health-probes.test.ts tests/regression/memory-sync-coverage.test.ts",
+      "status": "pass",
+      "result": "69 pass, 0 fail"
+    },
+    {
+      "command": "bun run typecheck",
+      "status": "pass",
+      "result": "tsc --noEmit passed"
+    },
+    {
+      "command": "git diff --check",
+      "status": "pass",
+      "result": "no whitespace errors"
+    },
+    {
+      "command": "git push",
+      "status": "pass",
+      "result": "pre-push hook passed tsc --noEmit and full bun test: 2051 pass, 0 fail"
+    },
+    {
+      "command": "secret scan over changed source, scripts, docs, evidence, continuation packages, and .ai",
+      "status": "pass",
+      "result": "no live credential found; hits were documented placeholders, test fixtures, redaction tests, or non-secret evidence text"
+    }
+  ],
+  "remaining_actionable_findings": [],
+  "tracked_out_of_scope": []
+}

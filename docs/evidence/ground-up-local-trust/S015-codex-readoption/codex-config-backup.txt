@@ -1,0 +1,6 @@
+total 32
+drwxr-xr-x@ 5 umasankr  staff   160 May  1 09:02 .
+drwxr-xr-x@ 3 umasankr  staff    96 May  1 09:02 ..
+-rw-r--r--@ 1 umasankr  staff  6456 May  1 09:02 AGENTS.md
+-rw-------@ 1 umasankr  staff  3069 May  1 09:02 config.toml
+-rw-r--r--@ 1 umasankr  staff  1675 May  1 09:02 instructions.md

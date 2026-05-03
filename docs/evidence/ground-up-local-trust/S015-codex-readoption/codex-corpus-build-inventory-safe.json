@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "dest": "/Users/umasankr/Projects/codex-corpus",
+  "stats": {
+    "sourceFiles": 102,
+    "sourceChunks": 108,
+    "threads": 350,
+    "stageOutputs": 73,
+    "logRows": 351670,
+    "inventoriedRawSessionFiles": 354,
+    "inventoriedRawSessionBytes": 1409258427
+  }
+}

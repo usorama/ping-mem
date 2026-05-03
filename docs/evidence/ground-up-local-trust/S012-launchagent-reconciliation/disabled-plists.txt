@@ -1,0 +1,6 @@
+/Users/umasankr/Library/LaunchAgents/.ping-mem-disabled-20260430-215056/com.ping-mem.daemon.plist
+/Users/umasankr/Library/LaunchAgents/.ping-mem-disabled-20260430-215056/com.ping-mem.doctor.plist
+/Users/umasankr/Library/LaunchAgents/.ping-mem-disabled-20260430-215056/com.ping-mem.periodic-cognition.plist
+/Users/umasankr/Library/LaunchAgents/.ping-mem-disabled-20260430-215056/com.ping-mem.periodic-ingest.plist
+/Users/umasankr/Library/LaunchAgents/.ping-mem-disabled-20260430-215056/com.ping-mem.soak-monitor.plist
+/Users/umasankr/Library/LaunchAgents/.ping-mem-disabled-20260430-215056/com.ping-mem.system-ready.plist

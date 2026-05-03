@@ -1,0 +1,135 @@
+{
+  "ok": true,
+  "status": "available",
+  "command": "agent proof codebase-grounding",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 300000
+  },
+  "elapsedMs": 278423,
+  "checkedAt": "2026-04-30T16:29:18.351Z",
+  "evidenceDir": "docs/evidence/ground-up-local-trust/S007-codex-codebase",
+  "data": {
+    "agentId": "codex-local",
+    "projectDir": "/Users/umasankr/Projects/ping-mem",
+    "runtimeProjectDir": "/projects/ping-mem",
+    "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
+    "anchor": {
+      "absolutePath": "/Users/umasankr/Projects/ping-mem/src/ingest/__tests__/registered-projects.test.ts",
+      "filePath": "src/ingest/__tests__/registered-projects.test.ts",
+      "lineStart": 1,
+      "lineEnd": 94
+    },
+    "steps": [
+      {
+        "name": "verify",
+        "ok": true,
+        "detail": "Project has changed since last ingestion. Re-ingest to update.",
+        "data": {
+          "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
+          "valid": false,
+          "manifestTreeHash": "39deaf5f8196ef48839401debca4209fa27504fbedae3c22de93af8bcd1632aa",
+          "currentTreeHash": "5b5a9d9fa990922d8076e134c8d90561d844271b9a1a720bb78ce6c16d62358f",
+          "message": "Project has changed since last ingestion. Re-ingest to update."
+        }
+      },
+      {
+        "name": "ingest",
+        "ok": true,
+        "detail": "ingest completed or returned existing project identity",
+        "data": {
+          "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
+          "treeHash": "5b5a9d9fa990922d8076e134c8d90561d844271b9a1a720bb78ce6c16d62358f",
+          "filesIndexed": 554,
+          "chunksIndexed": 2195,
+          "commitsIndexed": 206,
+          "ingestedAt": "2026-04-30T16:24:43.508Z",
+          "hadChanges": true
+        }
+      },
+      {
+        "name": "registered-project-inventory",
+        "ok": true,
+        "detail": "runtime registered project count: 3",
+        "data": {
+          "count": 3,
+          "sortBy": "lastIngestedAt",
+          "scope": "registered",
+          "projects": [
+            {
+              "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+              "rootPath": "/projects/vunderstory",
+              "treeHash": "41b1e72651885d4465fe216c9e77487fa601d3487aad0a86fe8c8302552ff5bb",
+              "filesCount": 243,
+              "chunksCount": 260,
+              "commitsCount": 200,
+              "lastIngestedAt": "2026-04-29T17:53:43.425Z"
+            },
+            {
+              "projectId": "e3b7b78ce1a619148280a2de8279e3f7a583fe512adc573477f5c3cac08a7ade",
+              "rootPath": "/projects/ping-learn",
+              "treeHash": "aadb3860d5bb99de4a834afbe8205a3b976ab57274cc50d3b943f3e8b636ff96",
+              "filesCount": 1279,
+              "chunksCount": 3627,
+              "commitsCount": 761,
+              "lastIngestedAt": "2026-04-29T13:53:35.460Z"
+            },
+            {
+              "projectId": "a3f37384f8b7362aa2db593d90fe119ccf12f37fc53f3bd76f2df97c9fcade96",
+              "rootPath": "/projects/ping-learn-mobile",
+              "treeHash": "65072fedbb36539f7a460c332935e44bd0c316c460916495096be0ddc4c13155",
+              "filesCount": 32,
+              "chunksCount": 46,
+              "commitsCount": 188,
+              "lastIngestedAt": "2026-04-22T14:31:56.836Z"
+            }
+          ]
+        }
+      },
+      {
+        "name": "search",
+        "ok": true,
+        "detail": "search returned source result for selected project",
+        "data": {
+          "chunkId": "2e0bab1930530e947a61eac5964187e52c349d61e7904b37f4e459b4d33c4e47",
+          "projectId": "15019a09f20ff71715da143bdfcfb72c87cfd845e162efd83eb61de592becffa",
+          "filePath": "src/ingest/__tests__/registered-projects.test.ts",
+          "type": "code",
+          "content": "// File: src/ingest/__tests__/registered-projects.test.ts\nimport { afterEach, beforeEach, describe, expect, test } from \"bun:test\";\nimport * as fs from \"fs\";\nimport * as os from \"os\";\nimport * as path from \"path\";\nimport {\n  filterProjectsToRegisteredRoots,\n  loadRegisteredProjectRoots,\n} from \"../registered-projects.js\";\n\ndescribe(\"registered project helpers\", () => {\n  const originalRegisteredProjectsPath = process.env.PING_MEM_REGISTERED_PROJECTS_PATH;\n  const originalHostProjectsRoot = process.env.PING_MEM_HOST_PROJECTS_ROOT;\n  const originalContainerProjectsRoot = process.env.PING_MEM_CONTAINER_PROJECTS_ROOT;\n\n  let tempDir: string;\n  let registeredProjectsPath: string;\n\n  beforeEach(() => {\n    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), \"ping-mem-registered-projects-\"));\n    registeredProjectsPath = path.join(tempDir, \"registered-projects.txt\");\n    process.env.PING_MEM_REGISTERED_PROJECTS_PATH = registeredProjectsPath;\n    process.env.PING_MEM_HOST_PROJECTS_ROOT = \"/Users/tester/Projects\";\n    process.env.PING_MEM_CONTAINER_PROJECTS_ROOT = \"/projects\";\n  });\n\n  afterEach(() => {\n    if (originalRegisteredProjectsPath === undefined) {\n      delete process.env.PING_MEM_REGISTERED_PROJECTS_PATH;\n    } else {\n      process.env.PING_MEM_REGISTERED_PROJECTS_PATH = originalRegisteredProjectsPath;\n    }\n\n    if (originalHostProjectsRoot === undefined) {\n      delete process.env.PING_MEM_HOST_PROJECTS_ROOT;\n    } else {\n      process.env.PING_MEM_HOST_PROJECTS_ROOT = originalHostProjectsRoot;\n    }\n\n    if (originalContainerProjectsRoot === undefined) {\n      delete process.env.PING_MEM_CONTAINER_PROJECTS_ROOT;\n    } else {\n      process.env.PING_MEM_CONTAINER_PROJECTS_ROOT = originalContainerProjectsRoot;\n    }\n\n    fs.rmSync(tempDir, { recursive: true, force: true });\n  });\n\n  test(\"loads host paths and translated container paths from the registered-projects file\", () => {\n    fs.writeFileSync(\n      registeredProjectsPath,\n      [\n        \"# Registered projects\",\n        \"/Users/tester/Projects/ping-mem\",\n        \"/Users/tester/Projects/understory\",\n      ].join(\"\\n\"),\n    );\n\n    const roots = loadRegisteredProjectRoots();\n\n    expect(roots).not.toBeNull();\n    expect(roots?.has(\"/Users/tester/Projects/ping-mem\")).toBe(true);\n    expect(roots?.has(\"/projects/ping-mem\")).toBe(true);\n    expect(roots?.has(\"/Users/tester/Projects/understory\")).toBe(true);\n    expect(roots?.has(\"/projects/understory\")).toBe(true);\n  });\n\n  test(\"filters project rows to the registered set when roots are available\", () => {\n    fs.writeFileSync(\n      registeredProjectsPath,\n      \"/Users/tester/Projects/ping-mem\\n/Users/tester/Projects/understory\\n\",\n    );\n\n    const filtered = filterProjectsToRegisteredRoots(\n      [\n        { rootPath: \"/projects/ping-mem\", projectId: \"p1\" },\n        { rootPath: \"/projects/understory\", projectId: \"p2\" },\n        { rootPath: \"/projects/rankforge-wt/ruff-cleanup\", projectId: \"p3\" },\n      ],\n      loadRegisteredProjectRoots(),\n    );\n\n    expect(filtered.map((project) => project.projectId)).toEqual([\"p1\", \"p2\"]);\n  });\n\n  test(\"returns all projects when the registry file is missing\", () => {\n    const projects = [\n      { rootPath: \"/projects/ping-mem\", projectId: \"p1\" },\n      { rootPath: \"/projects/rankforge-wt/ruff-cleanup\", projectId: \"p2\" },\n    ];\n\n    expect(filterProjectsToRegisteredRoots(projects, loadRegisteredProjectRoots())).toEqual(projects);\n  });\n});\n",
+          "lineStart": 1,
+          "lineEnd": 94,
+          "score": 0.6
+        }
+      },
+      {
+        "name": "source-anchor-disk-check",
+        "ok": true,
+        "detail": "source anchor exists on disk with non-empty line range",
+        "data": {
+          "absolutePath": "/Users/umasankr/Projects/ping-mem/src/ingest/__tests__/registered-projects.test.ts",
+          "filePath": "src/ingest/__tests__/registered-projects.test.ts",
+          "lineStart": 1,
+          "lineEnd": 94
+        }
+      },
+      {
+        "name": "timeline",
+        "ok": true,
+        "detail": "timeline returned project events",
+        "data": {
+          "count": 5
+        }
+      },
+      {
+        "name": "unsafe-project-rejected",
+        "ok": true,
+        "detail": "unsafe project path is rejected before fetch",
+        "data": {
+          "code": "UNSAFE_PROJECT",
+          "message": "Project path is outside allowed roots",
+          "layer": "input"
+        }
+      }
+    ]
+  }
+}

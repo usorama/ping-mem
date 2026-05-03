@@ -1,0 +1,120 @@
+2026-04-30T16:22:41.499082Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000450    
+2026-04-30T16:22:51.487742Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.000214    
+2026-04-30T16:23:01.506348Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000751    
+2026-04-30T16:23:11.512367Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000915    
+2026-04-30T16:23:21.516096Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.000296    
+2026-04-30T16:23:31.522484Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.000406    
+2026-04-30T16:23:41.563805Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.002995    
+2026-04-30T16:23:51.535440Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000631    
+2026-04-30T16:24:01.539851Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000606    
+2026-04-30T16:24:11.572449Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000947    
+2026-04-30T16:24:15.616429Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections/ping-mem-vectors HTTP/1.1" 200 418 "-" "qdrant-js/1.16.2" 0.006657    
+2026-04-30T16:24:21.558514Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000764    
+2026-04-30T16:24:31.574692Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.000436    
+2026-04-30T16:24:41.561764Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000225    
+2026-04-30T16:24:51.562452Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000261    
+2026-04-30T16:25:01.571202Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000429    
+2026-04-30T16:25:11.581473Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.004007    
+2026-04-30T16:25:21.574992Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000295    
+2026-04-30T16:26:20.677486Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000461    
+2026-04-30T16:26:20.711302Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 73 "-" "qdrant-js/1.16.2" 0.054120    
+2026-04-30T16:26:20.748672Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 73 "-" "qdrant-js/1.16.2" 0.026816    
+2026-04-30T16:26:20.777277Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 74 "-" "qdrant-js/1.16.2" 0.019958    
+2026-04-30T16:26:20.808263Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 73 "-" "qdrant-js/1.16.2" 0.022467    
+2026-04-30T16:26:20.836101Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 74 "-" "qdrant-js/1.16.2" 0.019383    
+2026-04-30T16:26:20.857344Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 74 "-" "qdrant-js/1.16.2" 0.011792    
+2026-04-30T16:26:20.877728Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 74 "-" "qdrant-js/1.16.2" 0.011024    
+2026-04-30T16:26:20.904437Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 74 "-" "qdrant-js/1.16.2" 0.016849    
+2026-04-30T16:26:20.927866Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 75 "-" "qdrant-js/1.16.2" 0.013034    
+2026-04-30T16:26:20.949865Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 74 "-" "qdrant-js/1.16.2" 0.010312    
+2026-04-30T16:26:20.972498Z  INFO actix_web::middleware::logger: 192.168.107.3 "PUT /collections/ping-mem-vectors/points?wait=true HTTP/1.1" 200 74 "-" "qdrant-js/1.16.2" 0.012563    
+2026-04-30T16:29:10.426898Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.002972    
+2026-04-30T16:29:15.597019Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections/ping-mem-vectors HTTP/1.1" 200 420 "-" "qdrant-js/1.16.2" 0.005684    
+2026-04-30T16:29:18.161868Z  INFO actix_web::middleware::logger: 192.168.107.3 "POST /collections/ping-mem-vectors/points/search HTTP/1.1" 200 8727 "-" "qdrant-js/1.16.2" 0.074266    
+2026-04-30T16:29:20.415765Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000441    
+2026-04-30T16:29:30.422936Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000549    
+2026-04-30T16:29:40.465621Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.004626    
+2026-04-30T16:29:50.446538Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000539    
+2026-04-30T16:30:00.446331Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000576    
+2026-04-30T16:30:10.456439Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000691    
+2026-04-30T16:30:20.464957Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000923    
+2026-04-30T16:30:23.475032Z  INFO actix_web::middleware::logger: 192.168.107.3 "POST /collections/ping-mem-vectors/points/search HTTP/1.1" 200 8726 "-" "qdrant-js/1.16.2" 0.022968    
+2026-04-30T16:30:30.472331Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.001143    
+2026-04-30T16:30:40.470680Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000390    
+2026-04-30T16:30:50.472592Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.001195    
+2026-04-30T16:31:00.486516Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000818    
+2026-04-30T16:31:10.508391Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 161 "-" "qdrant-js/1.16.2" 0.009571    
+2026-04-30T16:31:20.491335Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000637    
+2026-04-30T16:31:30.498220Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000554    
+2026-04-30T16:31:40.505279Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000574    
+2026-04-30T16:31:50.517062Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000403    
+2026-04-30T16:32:00.531465Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.002868    
+2026-04-30T16:32:10.522637Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000805    
+2026-04-30T16:32:20.537912Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000772    
+2026-04-30T16:32:30.550442Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.001052    
+2026-04-30T16:32:40.577998Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.008746    
+2026-04-30T16:32:50.551988Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000496    
+2026-04-30T16:33:00.557721Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000461    
+2026-04-30T16:33:10.560728Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.000330    
+2026-04-30T16:33:20.569071Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000168    
+2026-04-30T16:33:30.585543Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000969    
+2026-04-30T16:33:40.582053Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000335    
+2026-04-30T16:33:50.590842Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000809    
+2026-04-30T16:34:00.591840Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.001115    
+2026-04-30T16:34:04.282694Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000322    
+2026-04-30T16:34:04.283407Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000115    
+2026-04-30T16:34:04.535082Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.000155    
+2026-04-30T16:34:04.574140Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections/ping-mem-vectors HTTP/1.1" 200 420 "-" "qdrant-js/1.16.2" 0.008076    
+2026-04-30T16:34:14.512085Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.001946    
+2026-04-30T16:34:24.522242Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000661    
+2026-04-30T16:34:34.533460Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000416    
+2026-04-30T16:34:44.515010Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 158 "-" "qdrant-js/1.16.2" 0.000701    
+2026-04-30T16:34:54.557007Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.001936    
+2026-04-30T16:35:04.550216Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000728    
+2026-04-30T16:35:14.544413Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000844    
+2026-04-30T16:35:24.541900Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000240    
+2026-04-30T16:35:34.589142Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 159 "-" "qdrant-js/1.16.2" 0.000214    
+2026-04-30T16:35:44.579507Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 161 "-" "qdrant-js/1.16.2" 0.001882    
+2026-04-30T16:35:54.573960Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 160 "-" "qdrant-js/1.16.2" 0.000542    
+           _                 _    
+  __ _  __| |_ __ __ _ _ __ | |_  
+ / _` |/ _` | '__/ _` | '_ \| __| 
+| (_| | (_| | | | (_| | | | | |_  
+ \__, |\__,_|_|  \__,_|_| |_|\__| 
+    |_|                           
+
+Version: 1.12.6, build: e545b696
+Access web UI at http://localhost:6333/dashboard
+
+2026-04-30T16:36:06.163513Z  INFO storage::content_manager::consensus::persistent: Loading raft state from ./storage/raft_state.json    
+2026-04-30T16:36:06.166108Z  INFO storage::content_manager::toc: Loading collection: ws-92c346f944ee9094    
+2026-04-30T16:36:06.338743Z  INFO collection::shards::local_shard: Recovering collection ws-92c346f944ee9094: 0/1 (0%)    
+2026-04-30T16:36:06.370902Z  INFO collection::shards::local_shard: Recovered collection ws-92c346f944ee9094: 1/1 (100%)    
+2026-04-30T16:36:06.371806Z  INFO storage::content_manager::toc: Loading collection: ws-8f444f7c87b03714    
+2026-04-30T16:36:06.581257Z  INFO collection::shards::local_shard: Recovering collection ws-8f444f7c87b03714: 0/9 (0%)    
+2026-04-30T16:36:06.636241Z  INFO collection::shards::local_shard: Recovered collection ws-8f444f7c87b03714: 9/9 (100%)    
+2026-04-30T16:36:06.637490Z  INFO storage::content_manager::toc: Loading collection: ws-fbf43e220995206d    
+2026-04-30T16:36:06.800572Z  INFO collection::shards::local_shard: Recovering collection ws-fbf43e220995206d: 0/1 (0%)    
+2026-04-30T16:36:06.839613Z  INFO collection::shards::local_shard: Recovered collection ws-fbf43e220995206d: 1/1 (100%)    
+2026-04-30T16:36:06.840326Z  INFO storage::content_manager::toc: Loading collection: ping-mem-vectors    
+2026-04-30T16:36:07.135009Z  INFO collection::shards::local_shard: Recovering collection ping-mem-vectors: 0/1 (0%)    
+2026-04-30T16:36:07.194051Z  INFO collection::shards::local_shard: Recovered collection ping-mem-vectors: 1/1 (100%)    
+2026-04-30T16:36:07.195437Z  INFO storage::content_manager::toc: Loading collection: rankforge_cbse_pyqs    
+2026-04-30T16:36:07.251530Z  INFO collection::shards::local_shard: Recovering collection rankforge_cbse_pyqs: 0/0 (0%)    
+2026-04-30T16:36:07.251991Z  INFO collection::shards::local_shard: Recovered collection rankforge_cbse_pyqs: 0/0 (100%)    
+2026-04-30T16:36:07.252463Z  INFO storage::content_manager::toc: Loading collection: rankforge_errors    
+2026-04-30T16:36:07.309419Z  INFO collection::shards::local_shard: Recovering collection rankforge_errors: 0/0 (0%)    
+2026-04-30T16:36:07.309431Z  INFO collection::shards::local_shard: Recovered collection rankforge_errors: 0/0 (100%)    
+2026-04-30T16:36:07.310166Z  INFO storage::content_manager::toc: Loading collection: rankforge_ncert    
+2026-04-30T16:36:07.434029Z  INFO collection::shards::local_shard: Recovering collection rankforge_ncert: 0/1 (0%)    
+2026-04-30T16:36:07.479498Z  INFO collection::shards::local_shard: Recovered collection rankforge_ncert: 1/1 (100%)    
+2026-04-30T16:36:07.481147Z  INFO qdrant: Distributed mode disabled    
+2026-04-30T16:36:07.481219Z  INFO qdrant: Telemetry reporting enabled, id: 27512dc6-2932-4450-90c0-8851bacd9607    
+2026-04-30T16:36:07.481704Z  INFO qdrant: Inference service is not configured.    
+2026-04-30T16:36:07.481958Z  INFO qdrant::actix: TLS disabled for REST API    
+2026-04-30T16:36:07.483200Z  INFO qdrant::actix: Qdrant HTTP listening on 6333    
+2026-04-30T16:36:07.483218Z  INFO actix_server::builder: Starting 11 workers
+2026-04-30T16:36:07.483236Z  INFO actix_server::server: Actix runtime found; starting in Actix runtime
+2026-04-30T16:36:07.483349Z  INFO qdrant::tonic: Qdrant gRPC listening on 6334    
+2026-04-30T16:36:07.483374Z  INFO qdrant::tonic: TLS disabled for gRPC API    
+2026-04-30T16:36:24.645760Z  INFO actix_web::middleware::logger: 192.168.107.3 "GET /collections HTTP/1.1" 200 163 "-" "qdrant-js/1.16.2" 0.014734    

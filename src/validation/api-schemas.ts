@@ -100,6 +100,7 @@ export const CodebaseIngestSchema = z.object({
   forceReingest: z.boolean().optional().default(false),
   maxCommits: z.number().int().min(0).optional(),
   maxCommitAgeDays: z.number().int().min(0).optional(),
+  agentId: z.string().max(256).trim().optional(),
 });
 
 export type CodebaseIngestInput = z.infer<typeof CodebaseIngestSchema>;
@@ -119,6 +120,7 @@ export const IngestionEnqueueSchema = z.object({
   forceReingest: z.boolean().optional().default(false),
   maxCommits: z.number().int().min(0).optional(),
   maxCommitAgeDays: z.number().int().min(0).optional(),
+  agentId: z.string().max(256).trim().optional(),
 });
 
 export type IngestionEnqueueInput = z.infer<typeof IngestionEnqueueSchema>;
@@ -135,6 +137,7 @@ export const CodebaseVerifySchema = z.object({
     .refine((p) => !p.includes(".."), {
       message: "projectDir cannot contain path traversal sequences",
     }),
+  agentId: z.string().max(256).trim().optional(),
 });
 
 export type CodebaseVerifyInput = z.infer<typeof CodebaseVerifySchema>;
@@ -361,6 +364,35 @@ export const GraphHybridSearchSchema = z.object({
 });
 
 export type GraphHybridSearchInput = z.infer<typeof GraphHybridSearchSchema>;
+
+/**
+ * Request body for POST /api/v1/graph/answer
+ */
+export const GraphAnswerSchema = z.object({
+  agentId: z.string().min(1, "agentId is required").max(256).trim(),
+  projectDir: z
+    .string()
+    .min(1, "projectDir is required")
+    .max(4096)
+    .trim()
+    .refine((p) => !p.includes(".."), {
+      message: "projectDir cannot contain path traversal sequences",
+    }),
+  mode: z.enum(["complete_graph", "semantic_neighborhood"]),
+  query: z.string().max(10000).trim().optional(),
+  expectedCorpusHash: z.string().max(256).trim().optional(),
+  requireFreshness: z.boolean().optional(),
+  limit: z.number().int().positive().max(50).optional(),
+  population: z.object({
+    kind: z.enum(["project", "fixture"]),
+    root: z.string().max(4096).trim().optional(),
+    corpusId: z.string().max(500).trim().optional(),
+    include: z.array(z.string().min(1).max(4096).trim()).max(100).optional(),
+    exclude: z.array(z.string().min(1).max(4096).trim()).max(100).optional(),
+  }).optional(),
+});
+
+export type GraphAnswerInput = z.infer<typeof GraphAnswerSchema>;
 
 // ============================================================================
 // Causal Schemas

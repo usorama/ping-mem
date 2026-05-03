@@ -1,0 +1,168 @@
+{
+  "generatedAt": "2026-05-03T11:49:02Z",
+  "sourceIssue": "https://github.com/usorama/ping-mem/issues/137",
+  "sources": [
+    "README.md",
+    "docs/prds/2026-04-29-ground-up-local-trust-rebuild.md",
+    "docs/architecture/2026-04-29-ground-up-local-trust-rebuild.md",
+    "docs/architecture/2026-05-02-structured-knowledge-graph-module.md",
+    "docs/issues/2026-04-29-ground-up-local-trust-rebuild/COVERAGE.md",
+    "src"
+  ],
+  "capabilities": [
+    {
+      "id": "ORIG-01",
+      "name": "Session Lifecycle And Project Tracking",
+      "objective": "OBJ-1",
+      "outcome": "OUT-1",
+      "feature": "Start, end, list, and disambiguate agent sessions with project context.",
+      "ownerPaths": ["src/session/SessionManager.ts", "src/http/rest-server.ts", "src/cli/commands"],
+      "evidenceSources": ["README.md session tools", "src/session/__tests__", "src/http/__tests__/rest-api-new-routes.test.ts"],
+      "status": "verified",
+      "claimBoundary": "Verified for REST/CLI local runtime paths; long-running cross-agent lifecycle policy remains bounded by existing session tests."
+    },
+    {
+      "id": "ORIG-02",
+      "name": "Memory Lifecycle",
+      "objective": "OBJ-2",
+      "outcome": "OUT-2",
+      "feature": "Save, search, retrieve, update, supersede, delete, consolidate, compress, subscribe, and auto-recall memories.",
+      "ownerPaths": ["src/memory/MemoryManager.ts", "src/memory/RelevanceEngine.ts", "src/memory/SemanticCompressor.ts", "src/pubsub/MemoryPubSub.ts"],
+      "evidenceSources": ["docs/evidence/ground-up-local-trust/S005-codex-memory/proof.json", "docs/evidence/ground-up-local-trust/S006-claude-memory/proof.json", "src/memory/__tests__"],
+      "status": "verified",
+      "claimBoundary": "Verified for approved local agent proof paths; native Codex memory writes remain outside ping-mem unless explicitly re-enabled."
+    },
+    {
+      "id": "ORIG-03",
+      "name": "Agent Identity, Scope, And Quotas",
+      "objective": "OBJ-5",
+      "outcome": "OUT-5",
+      "feature": "Register agents, attach identity to sessions, enforce scope, quotas, and write safety.",
+      "ownerPaths": ["src/cli/agent-trust.ts", "src/memory/MemoryManager.ts", "src/storage/WriteLockManager.ts", "src/types/agent-errors.ts"],
+      "evidenceSources": ["docs/evidence/ground-up-local-trust/S004-identity-path-safety.md", "src/cli/__tests__/agent-trust.test.ts", "src/memory/__tests__/agent-scope.test.ts"],
+      "status": "partial",
+      "claimBoundary": "Approved path identity gates are verified; broader multi-agent orchestration and quota behavior need explicit live metrics."
+    },
+    {
+      "id": "ORIG-04",
+      "name": "Codebase Ingestion And Registry",
+      "objective": "OBJ-3",
+      "outcome": "OUT-3",
+      "feature": "Ingest projects, verify manifests, list registered projects, delete project data, and preserve registry truth.",
+      "ownerPaths": ["src/ingest/IngestionService.ts", "src/ingest/ManifestStore.ts", "src/ingest/registered-projects.ts", "src/http/rest-server.ts"],
+      "evidenceSources": ["docs/evidence/ground-up-local-trust/S007-codex-codebase/proof.json", "docs/evidence/ground-up-local-trust/S008-claude-codebase/proof.json", "docs/evidence/ground-up-local-trust/S018-live-ingestion-readiness.md"],
+      "status": "verified",
+      "claimBoundary": "Verified for the approved registered roots; stale or ad hoc ingests must be identified by scope, not mixed into registered truth."
+    },
+    {
+      "id": "ORIG-05",
+      "name": "Code Search, Timeline, And Structural Impact",
+      "objective": "OBJ-3",
+      "outcome": "OUT-3",
+      "feature": "Search indexed code, inspect git timeline, impact, blast radius, and dependency maps.",
+      "ownerPaths": ["src/search/HybridSearchEngine.ts", "src/search/CodeChunkStore.ts", "src/graph/StructuralAnalyzer.ts", "src/ingest/GitHistoryReader.ts"],
+      "evidenceSources": ["README.md codebase tools", "src/search/__tests__", "src/graph/__tests__/StructuralAnalyzer.test.ts"],
+      "status": "partial",
+      "claimBoundary": "Search and structural modules exist with tests; every subtool still needs a live metric before broad product claims."
+    },
+    {
+      "id": "ORIG-06",
+      "name": "Graph Relationships And Structured Answers",
+      "objective": "OBJ-7",
+      "outcome": "OUT-7",
+      "feature": "Return relationships, lineage, evolution, causal paths, semantic neighborhoods, and complete graph answers.",
+      "ownerPaths": ["src/graph/GraphManager.ts", "src/graph/StructuredKnowledgeGraph.ts", "src/graph/LineageEngine.ts", "src/graph/EvolutionEngine.ts", "src/graph/CausalGraphManager.ts"],
+      "evidenceSources": ["docs/evidence/ground-up-local-trust/S017-structured-knowledge-graph.md", "src/graph/__tests__/StructuredKnowledgeGraph.test.ts", "src/http/__tests__/agent-rest.test.ts"],
+      "status": "partial",
+      "claimBoundary": "Structured answer semantics are verified; live Neo4j-backed relationship breadth still needs denominator metrics."
+    },
+    {
+      "id": "ORIG-07",
+      "name": "Events, Worklog, And Streams",
+      "objective": "OBJ-1",
+      "outcome": "OUT-1",
+      "feature": "Record shell, worklog, diagnostic, git, memory, and subscription events with SSE delivery.",
+      "ownerPaths": ["src/storage/EventStore.ts", "src/http/sse-server.ts", "src/http/routes/shell.ts", "src/pubsub/MemoryPubSub.ts"],
+      "evidenceSources": ["README.md worklog tools", "src/http/__tests__/sse-parity.test.ts", "src/http/routes/__tests__/shell.test.ts"],
+      "status": "partial",
+      "claimBoundary": "Routes and tests exist; live stream delivery and event coverage need explicit capability metrics."
+    },
+    {
+      "id": "ORIG-08",
+      "name": "Diagnostics Intelligence",
+      "objective": "OBJ-7",
+      "outcome": "OUT-7",
+      "feature": "Ingest SARIF, list findings, diff runs, summarize, compare tools, and group findings by symbol.",
+      "ownerPaths": ["src/diagnostics", "src/http/rest-server.ts", "src/http/ui/diagnostics.ts"],
+      "evidenceSources": ["README.md diagnostics tools", "src/diagnostics/__tests__", "src/http/ui/__tests__/diagnostics.test.ts"],
+      "status": "partial",
+      "claimBoundary": "Core diagnostics behavior is test-backed; live project diagnostics freshness needs a scorecard metric."
+    },
+    {
+      "id": "ORIG-09",
+      "name": "Knowledge, Mining, Dreaming, And Profiles",
+      "objective": "OBJ-2",
+      "outcome": "OUT-2",
+      "feature": "Mine transcripts, generate deductions/generalizations, manage knowledge entries, and maintain user profile signals.",
+      "ownerPaths": ["src/knowledge/KnowledgeStore.ts", "src/mining", "src/dreaming", "src/profile/UserProfile.ts"],
+      "evidenceSources": ["src/knowledge/__tests__", "src/dreaming/__tests__", "src/http/ui/__tests__/mining.test.ts"],
+      "status": "dormant",
+      "claimBoundary": "Modules exist, but this is not currently in the live capability claim until trigger paths and acceptance metrics are proven."
+    },
+    {
+      "id": "ORIG-10",
+      "name": "Health, Doctor, Observability, And Recovery",
+      "objective": "OBJ-6",
+      "outcome": "OUT-6",
+      "feature": "Expose health, doctor gates, readiness, launchd hygiene, recovery scripts, and operator-visible degraded states.",
+      "ownerPaths": ["src/observability", "src/doctor", "scripts", "launchagents"],
+      "evidenceSources": ["docs/evidence/ground-up-local-trust/S014-observability-alignment.md", "docs/evidence/ground-up-local-trust/S018-live-ingestion-readiness.md", "src/observability/__tests__/health-probes.test.ts"],
+      "status": "verified",
+      "claimBoundary": "Live local runtime readiness is verified; Mac sleep/wake remains explicitly human-in-the-loop where required."
+    },
+    {
+      "id": "ORIG-11",
+      "name": "Web UI And Static Surfaces",
+      "objective": "OBJ-7",
+      "outcome": "OUT-7",
+      "feature": "Dashboard, memories, diagnostics, ingestion, agents, knowledge, sessions, events, worklog, health, and mining views.",
+      "ownerPaths": ["src/http/ui", "src/static"],
+      "evidenceSources": ["README.md UI routes", "src/http/ui/__tests__", "docs/evidence/ground-up-local-trust/S011-active-surface-ledger.md"],
+      "status": "partial",
+      "claimBoundary": "Existing views are tested in pieces; capability metrics dashboard integration is tracked separately by issue #139."
+    },
+    {
+      "id": "ORIG-12",
+      "name": "CLI And Approved Agent Entrypoints",
+      "objective": "OBJ-1",
+      "outcome": "OUT-1",
+      "feature": "Expose agent-safe CLI status, proofs, memory lifecycle, codebase, graph answer, and server commands.",
+      "ownerPaths": ["src/cli", "src/cli.ts", "/Users/umasankr/.codex/bin/ping-mem-codex"],
+      "evidenceSources": ["docs/evidence/ground-up-local-trust/S003-cli-contract.md", "docs/evidence/ground-up-local-trust/S015-readoption-report.md", "docs/evidence/ground-up-local-trust/S018-live-ingestion-readiness.md"],
+      "status": "verified",
+      "claimBoundary": "The Codex-approved wrapper is verified; direct CLI/MCP paths remain quarantined unless explicitly claimed."
+    },
+    {
+      "id": "ORIG-13",
+      "name": "MCP And Proxy Boundaries",
+      "objective": "OBJ-8",
+      "outcome": "OUT-8",
+      "feature": "Expose MCP streamable HTTP and proxy adapters as optional compatibility layers.",
+      "ownerPaths": ["src/mcp", "README.md"],
+      "evidenceSources": ["docs/evidence/ground-up-local-trust/S016-mcp-proxy-readoption.md", "src/mcp/__tests__/proxy-cli.test.ts"],
+      "status": "out_of_current_claim",
+      "claimBoundary": "MCP remains optional and blocked/deferred for current trust claims; it must not inflate live capability scores."
+    },
+    {
+      "id": "ORIG-14",
+      "name": "Docs And Operator Truth",
+      "objective": "OBJ-8",
+      "outcome": "OUT-8",
+      "feature": "Keep README, agent instructions, operator docs, environment guidance, and static surfaces aligned with live truth.",
+      "ownerPaths": ["README.md", "AGENT_INSTRUCTIONS.md", "CLAUDE.md", "docs"],
+      "evidenceSources": ["docs/evidence/ground-up-local-trust/S011-active-surface-ledger.md", "docs/evidence/ground-up-local-trust/capability-scorecard-live/scorecard.md"],
+      "status": "partial",
+      "claimBoundary": "Docs have been quarantined and partially rewritten; final closure evidence and soak remain tracked by Wave 5."
+    }
+  ]
+}

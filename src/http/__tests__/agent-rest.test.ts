@@ -25,12 +25,13 @@ async function request(
   server: RESTPingMemServer,
   method: string,
   path: string,
-  body?: Record<string, unknown>
+  body?: Record<string, unknown>,
+  headers?: Record<string, string>
 ): Promise<Response> {
   const app = server.getApp();
   const init: RequestInit = {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   };
   if (body) {
     init.body = JSON.stringify(body);
@@ -51,6 +52,120 @@ describe("REST Agent Endpoints", () => {
 
   afterEach(async () => {
     await server.stop();
+  });
+
+  describe("approved agent identity gates", () => {
+    test("approved session start rejects missing agentId", async () => {
+      const res = await request(
+        server,
+        "POST",
+        "/api/v1/session/start",
+        { name: "approved", projectDir: "/Users/umasankr/Projects/ping-mem" },
+        { "X-Ping-Mem-Approved-Path": "true" }
+      );
+
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as { message: string };
+      expect(json.message).toContain("agentId");
+    });
+
+    test("approved session start rejects missing projectDir", async () => {
+      const res = await request(
+        server,
+        "POST",
+        "/api/v1/session/start",
+        { name: "approved", agentId: "codex-local" },
+        { "X-Ping-Mem-Approved-Path": "true" }
+      );
+
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as { message: string };
+      expect(json.message).toContain("projectDir");
+    });
+
+    test("approved session start accepts codex-local and claude-code-local on safe roots", async () => {
+      for (const agentId of ["codex-local", "claude-code-local"]) {
+        const res = await request(
+          server,
+          "POST",
+          "/api/v1/session/start",
+          { name: `approved-${agentId}`, agentId, projectDir: "/Users/umasankr/Projects/ping-mem" },
+          { "X-Ping-Mem-Approved-Path": "true" }
+        );
+
+        expect(res.status).toBe(200);
+        const json = (await res.json()) as { data: { metadata: Record<string, unknown>; projectDir: string } };
+        expect(json.data.metadata.agentId).toBe(agentId);
+        expect(json.data.projectDir).toBe("/Users/umasankr/Projects/ping-mem");
+      }
+    });
+
+    test("approved memory save rejects missing X-Session-ID", async () => {
+      const res = await request(
+        server,
+        "POST",
+        "/api/v1/context",
+        { key: "approved/missing-session", value: "must fail before fallback" },
+        { "X-Ping-Mem-Approved-Path": "true" }
+      );
+
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as { message: string };
+      expect(json.message).toContain("X-Session-ID");
+    });
+
+    test("approved codebase verify rejects unsafe projectDir before runtime service work", async () => {
+      const res = await request(
+        server,
+        "POST",
+        "/api/v1/codebase/verify",
+        { agentId: "codex-local", projectDir: "/etc" },
+        { "X-Ping-Mem-Approved-Path": "true" }
+      );
+
+      expect(res.status).toBe(403);
+      const json = (await res.json()) as { message: string };
+      expect(json.message).toContain("outside allowed roots");
+    });
+
+    test("approved graph answer returns complete graph denominator and source anchors", async () => {
+      const res = await request(
+        server,
+        "POST",
+        "/api/v1/graph/answer",
+        {
+          agentId: "codex-local",
+          projectDir: "/Users/umasankr/Projects/ping-mem",
+          mode: "complete_graph",
+          population: {
+            kind: "project",
+            root: "/Users/umasankr/Projects/ping-mem",
+            include: ["CONTEXT.md"],
+          },
+        },
+        { "X-Ping-Mem-Approved-Path": "true" }
+      );
+
+      expect(res.status).toBe(200);
+      const json = (await res.json()) as { data: { answerKind: string; denominator: { nodeCount: number }; sourceAnchors: Array<{ diskChecked: boolean }> } };
+      expect(json.data.answerKind).toBe("complete_graph");
+      expect(json.data.denominator.nodeCount).toBe(1);
+      expect(json.data.sourceAnchors[0]?.diskChecked).toBe(true);
+    });
+
+    test("approved graph answer rejects unsafe projectDir before graph work", async () => {
+      const res = await request(
+        server,
+        "POST",
+        "/api/v1/graph/answer",
+        { agentId: "codex-local", projectDir: "/etc", mode: "semantic_neighborhood" },
+        { "X-Ping-Mem-Approved-Path": "true" }
+      );
+
+      expect(res.status).toBe(403);
+      const json = (await res.json()) as { message: string };
+      expect(json.message).toContain("outside allowed roots");
+    });
   });
 
   // --------------------------------------------------------------------------

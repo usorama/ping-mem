@@ -21,6 +21,7 @@ import { TOOLS } from "../tool-schemas.js";
 const WORKTREE = path.resolve(import.meta.dir, "../../..");
 const PROXY_CLI_PATH = path.join(WORKTREE, "src/mcp/proxy-cli.ts");
 const TOOL_SCHEMAS_PATH = path.join(WORKTREE, "src/mcp/tool-schemas.ts");
+const AGENT_PATH_AUDIT_PATH = path.join(WORKTREE, "scripts/agent-path-audit.sh");
 
 describe("proxy-cli.ts — no DB imports", () => {
   it("should not have import statements for Database", () => {
@@ -79,6 +80,20 @@ describe("tool-schemas.ts — no DB imports", () => {
     expect(content).not.toMatch(/from.*\.\.\/memory\//);
     expect(content).not.toMatch(/from.*\.\.\/graph\//);
     expect(content).not.toMatch(/from.*bun:sqlite/);
+  });
+});
+
+describe("approved agent proof paths — REST-owned runtime only", () => {
+  it("agent-path audit should discover tools through REST instead of direct MCP", () => {
+    const content = readFileSync(AGENT_PATH_AUDIT_PATH, "utf-8");
+    const activeLines = content
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("#"));
+
+    expect(activeLines.join("\n")).toMatch(/\/api\/v1\/tools/);
+    expect(activeLines.join("\n")).not.toMatch(/dist\/mcp\/cli\.js/);
+    expect(activeLines.join("\n")).not.toMatch(/ping-mem-mcp/);
   });
 });
 

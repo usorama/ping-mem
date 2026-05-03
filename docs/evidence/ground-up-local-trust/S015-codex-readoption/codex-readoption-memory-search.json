@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "memory": {
+        "id": "019de199-f92c-7bcc-a5d0-811a5c2f9948",
+        "key": "ping-mem.readoption.codex",
+        "value": "Codex-first ping-mem re-adoption on 2026-05-01 uses one approved local tool path /Users/umasankr/.codex/bin/ping-mem-codex, registered roots /projects/vunderstory and /projects/codex-corpus, and treats ping-mem as discovery aid while direct repo evidence remains authoritative.",
+        "sessionId": "019de199-f894-7a6b-a752-d1614b03ac33",
+        "priority": "high",
+        "privacy": "session",
+        "createdAt": "2026-05-01T03:34:17.644Z",
+        "updatedAt": "2026-05-01T03:34:17.644Z",
+        "metadata": {},
+        "agentScope": "public",
+        "category": "decision"
+      },
+      "score": 1.2850000000000001
+    }
+  ]
+}

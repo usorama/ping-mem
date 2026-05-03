@@ -4,13 +4,23 @@ import { getUiHealthColor, probeSystemHealth, sanitizeHealthError } from "../hea
 
 describe("health-probes", () => {
   let eventStore: EventStore;
+  let originalNeo4jUri: string | undefined;
+  let originalQdrantUrl: string | undefined;
 
   beforeEach(() => {
+    originalNeo4jUri = process.env.NEO4J_URI;
+    originalQdrantUrl = process.env.QDRANT_URL;
+    delete process.env.NEO4J_URI;
+    delete process.env.QDRANT_URL;
     eventStore = new EventStore({ dbPath: ":memory:" });
   });
 
   afterEach(async () => {
     await eventStore.close();
+    if (originalNeo4jUri === undefined) delete process.env.NEO4J_URI;
+    else process.env.NEO4J_URI = originalNeo4jUri;
+    if (originalQdrantUrl === undefined) delete process.env.QDRANT_URL;
+    else process.env.QDRANT_URL = originalQdrantUrl;
   });
 
   test("returns sqlite metrics and not_configured optional services", async () => {
@@ -62,6 +72,17 @@ describe("health-probes", () => {
     const snapshot = await probeSystemHealth({ eventStore });
     expect(snapshot.status).toBe("ok");
     expect(snapshot.timestamp).toBeDefined();
+  });
+
+  test("snapshot degrades when dependency env requires services but clients are missing", async () => {
+    process.env.NEO4J_URI = "bolt://localhost:7687";
+    process.env.QDRANT_URL = "http://localhost:6333";
+
+    const snapshot = await probeSystemHealth({ eventStore });
+
+    expect(snapshot.status).toBe("degraded");
+    expect(snapshot.components.neo4j.status).toBe("not_configured");
+    expect(snapshot.components.qdrant.status).toBe("not_configured");
   });
 
   test("diagnostics probe is included when diagnosticsStore is provided", async () => {

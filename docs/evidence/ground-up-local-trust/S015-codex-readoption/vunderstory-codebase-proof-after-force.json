@@ -1,0 +1,117 @@
+{
+  "ok": true,
+  "status": "available",
+  "command": "agent proof codebase-grounding",
+  "runtime": {
+    "url": "http://localhost:3003",
+    "timeoutMs": 300000
+  },
+  "elapsedMs": 262,
+  "checkedAt": "2026-05-01T02:51:03.307Z",
+  "evidenceDir": "/Users/umasankr/Projects/ping-mem/docs/evidence/ground-up-local-trust/S015-codex-readoption",
+  "data": {
+    "agentId": "codex-local",
+    "projectDir": "/Users/umasankr/Projects/vunderstory",
+    "runtimeProjectDir": "/projects/vunderstory",
+    "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+    "anchor": {
+      "absolutePath": "/Users/umasankr/Projects/vunderstory/docs/architecture/ping-mem-indexing.md",
+      "filePath": "docs/architecture/ping-mem-indexing.md",
+      "lineStart": 1,
+      "lineEnd": 49
+    },
+    "steps": [
+      {
+        "name": "verify",
+        "ok": true,
+        "detail": "Project manifest is up-to-date and matches on-disk files.",
+        "data": {
+          "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+          "valid": true,
+          "manifestTreeHash": "41b1e72651885d4465fe216c9e77487fa601d3487aad0a86fe8c8302552ff5bb",
+          "currentTreeHash": "41b1e72651885d4465fe216c9e77487fa601d3487aad0a86fe8c8302552ff5bb",
+          "message": "Project manifest is up-to-date and matches on-disk files."
+        }
+      },
+      {
+        "name": "ingest",
+        "ok": true,
+        "detail": "ingest completed or returned existing project identity",
+        "data": {
+          "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+          "treeHash": "41b1e72651885d4465fe216c9e77487fa601d3487aad0a86fe8c8302552ff5bb",
+          "filesIndexed": 0,
+          "chunksIndexed": 0,
+          "commitsIndexed": 0,
+          "ingestedAt": "2026-05-01T02:51:03.125Z",
+          "hadChanges": false
+        }
+      },
+      {
+        "name": "registered-project-inventory",
+        "ok": true,
+        "detail": "runtime registered project count: 1",
+        "data": {
+          "count": 1,
+          "sortBy": "lastIngestedAt",
+          "scope": "registered",
+          "projects": [
+            {
+              "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+              "rootPath": "/projects/vunderstory",
+              "treeHash": "41b1e72651885d4465fe216c9e77487fa601d3487aad0a86fe8c8302552ff5bb",
+              "filesCount": 243,
+              "chunksCount": 260,
+              "commitsCount": 200,
+              "lastIngestedAt": "2026-05-01T02:50:49.881Z"
+            }
+          ]
+        }
+      },
+      {
+        "name": "search",
+        "ok": true,
+        "detail": "search returned source result for selected project",
+        "data": {
+          "chunkId": "e46e6f93159fc67dd2c2f43382bc794163175049eb2f9703d292664218f4e746",
+          "projectId": "b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096",
+          "filePath": "docs/architecture/ping-mem-indexing.md",
+          "type": "code",
+          "content": "// File: docs/architecture/ping-mem-indexing.md\n# ping-mem Indexing Contract\n\nVunderstory is now registered with ping-mem through the Docker-visible project\npath:\n\n- Host repo path: `/Users/umasankr/Projects/vunderstory`\n- ping-mem project path: `/projects/vunderstory`\n- ping-mem project id:\n  `b28c6a284d1c6e6a6ff7fd58f0457610d750a87321aef28cf32b6745bded1096`\n\nping-mem runs inside Docker. The host path is correct for shell work, but\ncodebase ingestion must use `/projects/vunderstory`; using the host path causes\n`ENOENT` inside the container.\n\n## Initial Index\n\nInitial successful ingest:\n\n- Date: 2026-04-28\n- Path: `/projects/vunderstory`\n\nUse `bash scripts/ping-mem-sync.sh` for current file, chunk, commit, and tree\nhash counts.\n\n## Incremental Sync\n\nUse:\n\n```bash\nbash scripts/ping-mem-sync.sh\n```\n\nThe script verifies the current ping-mem manifest first. If the tree is already\ncurrent, it exits cleanly. If the tree changed, it runs `codebase ingest` and\nverifies again.\n\nAgents can also call the MCP tools directly:\n\n1. `codebase_verify({ projectDir: \"/projects/vunderstory\" })`\n2. If `valid: false`, call\n   `codebase_ingest({ projectDir: \"/projects/vunderstory\" })`\n3. Verify again with the same `/projects/vunderstory` path.\n\n## Operational State\n\n`.ping-mem/` is local operational state and is ignored by git. Do not treat it as\nproject truth. Durable project truth remains in PRDs, architecture docs, issue\nslices, state files, evidence, commits, and audit records.\n",
+          "lineStart": 1,
+          "lineEnd": 49,
+          "score": 0.6
+        }
+      },
+      {
+        "name": "source-anchor-disk-check",
+        "ok": true,
+        "detail": "source anchor exists on disk with non-empty line range",
+        "data": {
+          "absolutePath": "/Users/umasankr/Projects/vunderstory/docs/architecture/ping-mem-indexing.md",
+          "filePath": "docs/architecture/ping-mem-indexing.md",
+          "lineStart": 1,
+          "lineEnd": 49
+        }
+      },
+      {
+        "name": "timeline",
+        "ok": true,
+        "detail": "timeline returned project events",
+        "data": {
+          "count": 5
+        }
+      },
+      {
+        "name": "unsafe-project-rejected",
+        "ok": true,
+        "detail": "unsafe project path is rejected before fetch",
+        "data": {
+          "code": "UNSAFE_PROJECT",
+          "message": "Project path is outside allowed roots",
+          "layer": "input"
+        }
+      }
+    ]
+  }
+}
