@@ -110,6 +110,20 @@ describe("IngestionService healthMonitor option", () => {
     };
     expect(opts.healthMonitor).toBeUndefined();
   });
+
+  test("HTTP startup wires HealthMonitor into IngestionService", async () => {
+    const fs = await import("fs");
+    const path = await import("path");
+
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src/http/server.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("const healthMonitor = createHealthMonitor");
+    expect(source).toContain("new IngestionService");
+    expect(source).toContain("healthMonitor,");
+  });
 });
 
 // ============================================================================

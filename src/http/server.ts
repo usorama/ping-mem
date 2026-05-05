@@ -43,6 +43,13 @@ export async function startHTTPServer(): Promise<void> {
 
   const runtimeConfig = loadRuntimeConfig();
   const services = await createRuntimeServices();
+  const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
+  const adminDbPath = process.env.PING_MEM_ADMIN_DB_PATH ?? runtimeConfig.pingMem.dbPath;
+  const diagnosticsStore = new DiagnosticsStore(
+    diagnosticsDbPath ? { dbPath: diagnosticsDbPath } : undefined
+  );
+  const eventStore = new EventStore({ dbPath: runtimeConfig.pingMem.dbPath });
+  const healthMonitor = createHealthMonitor({ services, eventStore, diagnosticsStore });
 
   // Create BM25Scorer for deterministic search ranking
   const { BM25Scorer } = await import("../search/BM25Scorer.js");
@@ -61,6 +68,7 @@ export async function startHTTPServer(): Promise<void> {
       qdrantClient: services.qdrantClient,
       bm25Scorer,
       codeChunkStore,
+      healthMonitor,
     });
     // Ensure Neo4j uniqueness constraints exist before accepting any ingest requests.
     // MCP path calls this after construction; HTTP path must mirror that behaviour.
@@ -76,18 +84,10 @@ export async function startHTTPServer(): Promise<void> {
   const port = Number.isNaN(rawPort) ? 3003 : rawPort;
   const host = process.env.PING_MEM_HOST ?? "0.0.0.0";
   const apiKey = process.env.PING_MEM_API_KEY;
-  const diagnosticsDbPath = process.env.PING_MEM_DIAGNOSTICS_DB_PATH;
-  const adminDbPath = process.env.PING_MEM_ADMIN_DB_PATH ?? runtimeConfig.pingMem.dbPath;
 
   const adminStore = new AdminStore({ dbPath: adminDbPath });
   const apiKeyManager = new ApiKeyManager(adminStore);
   apiKeyManager.ensureSeedKey(apiKey);
-
-  const diagnosticsStore = new DiagnosticsStore(
-    diagnosticsDbPath ? { dbPath: diagnosticsDbPath } : undefined
-  );
-  const eventStore = new EventStore({ dbPath: runtimeConfig.pingMem.dbPath });
-  const healthMonitor = createHealthMonitor({ services, eventStore, diagnosticsStore });
 
   log.info(`Starting with transport: ${transport}`);
   log.info(`Listening on ${host}:${port}`);

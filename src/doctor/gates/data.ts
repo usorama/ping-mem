@@ -2,7 +2,7 @@
  * Data gates (4):
  *   data.commit-coverage, data.file-coverage, data.last-ingest-age, data.sync-lag.
  *
- * Each gate loops over CANONICAL_PROJECTS and reports the weakest project.
+ * Each gate loops over the registered canonical projects and reports the weakest project.
  * Coverage thresholds are per plan §101: ≥95% commit coverage, ≥95% file coverage.
  */
 
@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { DoctorGate } from "../gates.js";
-import { CANONICAL_PROJECTS, fetchWithTimeout, runCmd } from "../util.js";
+import { fetchWithTimeout, getCanonicalProjects, runCmd } from "../util.js";
 
 const COMMIT_COVERAGE_MIN = 0.95;
 const FILE_COVERAGE_MIN = 0.95;
@@ -82,7 +82,7 @@ function matchProject(projects: ProjectStats[], rootPath: string): ProjectStats 
 async function actualCommitCount(rootPath: string): Promise<number> {
   if (!fs.existsSync(path.join(rootPath, ".git"))) return 0;
   // argv form avoids shell interpolation of rootPath (defence-in-depth; path
-  // comes from a static CANONICAL_PROJECTS list today, but don't let that drift).
+  // comes from the registered canonical roots today, but don't let that drift).
   const { stdout, code } = await runCmd("git", ["-C", rootPath, "rev-list", "--count", "HEAD"]);
   if (code !== 0) return 0;
   const n = Number.parseInt(stdout.trim(), 10);
@@ -193,7 +193,7 @@ export const dataGates: DoctorGate[] = [
 
       // Parallel per-project git calls — 5 projects serially exceeded the 5s gate budget.
       const rows = await Promise.all(
-        CANONICAL_PROJECTS.map(async (root) => {
+        getCanonicalProjects().map(async (root) => {
           const p = matchProject(projects, root);
           const actual = await actualCommitCount(root);
           const ingested = p?.commitsCount ?? 0;
@@ -220,7 +220,7 @@ export const dataGates: DoctorGate[] = [
       if (projects.length === 0) return { status: "skip", detail: "no projects listed" };
 
       const rows = await Promise.all(
-        CANONICAL_PROJECTS.map(async (root) => {
+        getCanonicalProjects().map(async (root) => {
           const p = matchProject(projects, root);
           const actual = await actualFileCount(root);
           const ingested = p?.filesCount ?? 0;
@@ -248,7 +248,7 @@ export const dataGates: DoctorGate[] = [
 
       const now = Date.now();
       const rows: Array<{ name: string; ageH: number }> = [];
-      for (const root of CANONICAL_PROJECTS) {
+      for (const root of getCanonicalProjects()) {
         const p = matchProject(projects, root);
         if (!p || !p.lastIngestedAt) {
           rows.push({ name: path.basename(root), ageH: Number.POSITIVE_INFINITY });

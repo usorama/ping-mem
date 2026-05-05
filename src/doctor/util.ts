@@ -8,6 +8,9 @@
  */
 
 import { execFile } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -80,14 +83,42 @@ export async function fetchWithTimeout(
   }
 }
 
-/** Canonical project roots checked by data-coverage gates. */
-export const CANONICAL_PROJECTS = [
+/** Fallback project roots checked by data-coverage gates when no registry exists. */
+export const FALLBACK_CANONICAL_PROJECTS = [
   "/Users/umasankr/Projects/ping-mem",
   "/Users/umasankr/Projects/ping-learn",
   "/Users/umasankr/Projects/auto-os",
   "/Users/umasankr/Projects/ping-guard",
   "/Users/umasankr/Projects/thrivetree",
 ] as const;
+
+function normalizeRegisteredProjectRoot(root: string): string {
+  return root.trim().replace(/^\/projects\//, "/Users/umasankr/Projects/");
+}
+
+/** Canonical project roots checked by data-coverage gates. */
+export function getCanonicalProjects(): readonly string[] {
+  const explicit = process.env["PING_MEM_CANONICAL_PROJECTS"];
+  if (explicit) {
+    const roots = explicit.split(",").map(normalizeRegisteredProjectRoot).filter(Boolean);
+    if (roots.length > 0) return roots;
+  }
+
+  const registryPath = process.env["PING_MEM_REGISTERED_PROJECTS_PATH"]
+    ?? path.join(os.homedir(), ".ping-mem", "registered-projects.txt");
+  try {
+    const roots = fs.readFileSync(registryPath, "utf8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !line.startsWith("#"))
+      .map(normalizeRegisteredProjectRoot);
+    if (roots.length > 0) return roots;
+  } catch {
+    // Fall back below for dev/test environments without a registry file.
+  }
+
+  return FALLBACK_CANONICAL_PROJECTS;
+}
 
 /** Canonical regression queries — each must return ≥1 hit from /api/v1/search */
 export const CANONICAL_QUERIES: readonly string[] = [
